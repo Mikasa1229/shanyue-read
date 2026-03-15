@@ -1,0 +1,361 @@
+/* ════════════════════════════════════════
+   善阅坊 · Design System
+   文学极简风格 — 纸墨温润，舒适悦读
+   ════════════════════════════════════════ */
+
+:root {
+  /* Warm Paper Palette */
+  --paper-0: #fffef9;
+  --paper-1: #faf6ef;
+  --paper-2: #f4ede0;
+  --paper-3: #ede0cc;
+
+  /* Ink Palette */
+  --ink-0: #1a1814;
+  --ink-1: #2e2b26;
+  --ink-2: #4a4640;
+  --ink-3: #716c65;
+  --ink-4: #a09990;
+
+  /* Gold Accent */
+  --gold-0: #c8993a;
+  --gold-1: #d4aa5c;
+  --gold-2: #e8c97e;
+  --gold-3: #f5e4b8;
+
+  /* Sage */
+  --sage-0: #5a7a58;
+  --sage-1: #7a9e78;
+  --sage-2: #a8c4a6;
+
+  /* Vermilion (alert/highlight) */
+  --vermilion: #c0392b;
+  --vermilion-light: #f8d7d3;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Typography */
+  --font-serif: 'Noto Serif SC', 'Source Han Serif', Georgia, serif;
+  --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+  /* Borders & Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 3px rgba(26, 24, 20, 0.06);
+  --shadow-sm: 0 2px 8px rgba(26, 24, 20, 0.08);
+  --shadow-md: 0 4px 16px rgba(26, 24, 20, 0.10);
+  --shadow-lg: 0 8px 32px rgba(26, 24, 20, 0.12);
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+  --transition-slow: 400ms ease;
+}
+
+/* ─── Reset ─── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--paper-1);
+  color: var(--ink-1);
+  line-height: 1.7;
+  min-height: 100vh;
+}
+
+/* ─── Typography ─── */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-0);
+}
+
+h1 { font-size: 2rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.25rem; }
+
+p { color: var(--ink-2); }
+
+a {
+  color: var(--gold-0);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+a:hover { color: var(--gold-1); }
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--paper-3);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+
+/* ─── Layout ─── */
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 var(--space-6);
+}
+
+.page {
+  min-height: calc(100vh - 64px);
+  padding: var(--space-10) 0 var(--space-16);
+}
+
+/* ─── Card ─── */
+.card {
+  background: var(--paper-0);
+  border: 1px solid var(--paper-3);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition-base), transform var(--transition-base);
+}
+.card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* ─── Buttons ─── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--ink-0);
+  color: var(--paper-0);
+}
+.btn-primary:hover {
+  background: var(--ink-1);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-gold {
+  background: linear-gradient(135deg, var(--gold-0), var(--gold-1));
+  color: var(--paper-0);
+  box-shadow: 0 2px 8px rgba(200, 153, 58, 0.3);
+}
+.btn-gold:hover {
+  box-shadow: 0 4px 16px rgba(200, 153, 58, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink-2);
+  border: 1px solid var(--paper-3);
+}
+.btn-ghost:hover {
+  background: var(--paper-2);
+  border-color: var(--paper-3);
+}
+
+.btn-sm {
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.8125rem;
+  border-radius: var(--radius-sm);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ─── Form ─── */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.form-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.form-input {
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--paper-3);
+  border-radius: var(--radius-md);
+  background: var(--paper-0);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  color: var(--ink-1);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  outline: none;
+}
+.form-input:focus {
+  border-color: var(--gold-1);
+  box-shadow: 0 0 0 3px rgba(212, 170, 92, 0.15);
+}
+.form-input::placeholder { color: var(--ink-4); }
+
+textarea.form-input {
+  resize: vertical;
+  min-height: 100px;
+  line-height: 1.6;
+}
+
+/* ─── Divider ─── */
+.divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--paper-3), transparent);
+  margin: var(--space-6) 0;
+}
+
+/* ─── Tag / Badge ─── */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--paper-2);
+  color: var(--ink-3);
+}
+
+.tag-gold {
+  background: var(--gold-3);
+  color: var(--gold-0);
+}
+
+/* ─── Loading / Skeleton ─── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    var(--paper-2) 25%,
+    var(--paper-1) 50%,
+    var(--paper-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ─── Toast ─── */
+.toast-container {
+  position: fixed;
+  bottom: var(--space-8);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  pointer-events: none;
+}
+
+.toast {
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-full);
+  background: var(--ink-0);
+  color: var(--paper-0);
+  font-size: 0.875rem;
+  box-shadow: var(--shadow-md);
+  animation: toast-in 0.3s ease, toast-out 0.3s ease 2.2s forwards;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-8px); }
+}
+
+/* ─── Page Fade In ─── */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity var(--transition-base), transform var(--transition-base);
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* ─── Utilities ─── */
+.text-center { text-align: center; }
+.text-muted { color: var(--ink-4); }
+.text-serif { font-family: var(--font-serif); }
+.text-gold { color: var(--gold-0); }
+
+.flex { display: flex; }
+.flex-center { display: flex; align-items: center; justify-content: center; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); }
+.gap-4 { gap: var(--space-4); }
+
+.mt-4 { margin-top: var(--space-4); }
+.mt-6 { margin-top: var(--space-6); }
+.mt-8 { margin-top: var(--space-8); }
+.mb-4 { margin-bottom: var(--space-4); }
+.mb-6 { margin-bottom: var(--space-6); }
+
+/* ─── Grid ─── */
+.grid-novels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-6);
+}
+
+@media (max-width: 600px) {
+  .container { padding: 0 var(--space-4); }
+  .grid-novels { grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
+}
