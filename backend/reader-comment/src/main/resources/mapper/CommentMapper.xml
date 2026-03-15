@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanyuefang.comment.mapper.CommentMapper">
+
+    <!--
+        批量软删除某根评论下的所有回复
+        场景：删除根评论时级联删除所有楼中楼
+    -->
+    <update id="softDeleteRepliesByRootId">
+        UPDATE t_comment
+        SET deleted = TRUE
+        WHERE root_id = #{rootId}
+          AND deleted = FALSE
+    </update>
+
+</mapper>

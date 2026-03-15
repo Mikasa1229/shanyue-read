@@ -1,0 +1,64 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: reader-gateway
+  profiles:
+    active: dev
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: reader
+      config:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: reader
+        file-extension: yaml
+    gateway:
+      discovery:
+        locator:
+          enabled: true          # 自动从 Nacos 发现服务
+          lower-case-service-id: true
+      routes:
+        - id: reader-user
+          uri: lb://reader-user
+          predicates:
+            - Path=/api/auth/**,/api/users/**
+        - id: reader-novel
+          uri: lb://reader-novel
+          predicates:
+            - Path=/api/novels/**
+        - id: reader-comment
+          uri: lb://reader-comment
+          predicates:
+            - Path=/api/comments/**
+        - id: reader-interaction
+          uri: lb://reader-interaction
+          predicates:
+            - Path=/api/interactions/**
+        - id: reader-checkin
+          uri: lb://reader-checkin
+          predicates:
+            - Path=/api/checkins/**
+
+  # Redis（Sa-Token 共享会话）
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+
+# Sa-Token 配置
+sa-token:
+  token-name: Authorization
+  timeout: 86400          # Token 有效期：1天（秒）
+  active-timeout: 1800    # 活跃续签：30分钟
+  is-concurrent: false    # 同账号不允许多端登录
+  is-share: true
+  token-style: uuid
+
+logging:
+  level:
+    com.shanyuefang: debug

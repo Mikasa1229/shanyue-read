@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanyuefang.user.mapper.UserMapper">
+    <!--
+        MyBatis-Plus 已自动提供：
+          selectById / selectOne / insert / updateById / deleteById 等标准 CRUD
+        在此添加自定义 SQL
+    -->
+</mapper>

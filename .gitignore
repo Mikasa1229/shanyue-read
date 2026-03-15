@@ -1,0 +1,35 @@
+.claude/
+.docs/
+
+# Maven
+target/
+*.jar
+*.war
+*.class
+
+# IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VSCode
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+logs/
+
+# 环境配置（敏感信息不提交）
+application-prod.yml
+application-local.yml
+*.env
+
+# Node
+node_modules/
+dist/
+.pnpm-store/
