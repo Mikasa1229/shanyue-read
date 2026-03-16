@@ -4,36 +4,36 @@ setlocal
 set "ROOT=%~dp0.."
 
 echo.
-echo =============================================
-echo   善阅坊 - 启动前端开发服务器
-echo =============================================
+echo ============================================
+echo   ShanYueFang - Start Frontend (Vite)
+echo ============================================
 echo.
 
-:: 检查 Node.js
 where node > nul 2>&1
 if %errorlevel% neq 0 (
-    echo [错误] 未找到 node 命令，请安装 Node.js 18+
+    echo [ERROR] node not found. Please install Node.js 18+ and add it to PATH.
     pause
     exit /b 1
 )
 
 cd /d "%ROOT%\frontend"
 
-:: 自动安装依赖
 if not exist "node_modules" (
-    echo [安装] 未检测到 node_modules，自动安装依赖...
+    echo [SETUP] node_modules not found. Running npm install...
     call npm install
     if %errorlevel% neq 0 (
-        echo [错误] npm install 失败
+        echo [ERROR] npm install failed.
         pause
         exit /b 1
     )
+    echo [ OK ] Dependencies installed.
+    echo.
 )
 
-echo [启动] 启动 Vite 开发服务器...
+echo [START] Launching Vite dev server...
 start "reader-frontend:3000" cmd /k "cd /d "%ROOT%\frontend" && npm run dev"
 
 echo.
-echo [完成] 前端服务已启动
-echo   访问地址: http://localhost:3000
+echo [DONE] Frontend started.
+echo        URL: http://localhost:3000
 echo.
