@@ -56,23 +56,24 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange);
         }
 
-        // Sa-Token 校验（响应式上下文注入）
-        return SaReactorSyncHolder.run(exchange, () -> {
-            try {
-                StpUtil.checkLogin();
-                long userId = StpUtil.getLoginIdAsLong();
+        // Sa-Token 校验：将当前 exchange 绑定到 ThreadLocal，供 StpUtil 读取 Token
+        SaReactorSyncHolder.setContext(exchange);
+        try {
+            StpUtil.checkLogin();
+            long userId = StpUtil.getLoginIdAsLong();
 
-                // 将 userId 注入下游 Header
-                ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
-                        .header("X-User-Id", String.valueOf(userId))
-                        .build();
+            // 将 userId 注入下游 Header
+            ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
+                    .header("X-User-Id", String.valueOf(userId))
+                    .build();
 
-                return chain.filter(exchange.mutate().request(mutatedRequest).build());
-            } catch (Exception e) {
-                log.warn("鉴权失败: path={}, error={}", path, e.getMessage());
-                return unauthorized(exchange);
-            }
-        });
+            return chain.filter(exchange.mutate().request(mutatedRequest).build());
+        } catch (Exception e) {
+            log.warn("鉴权失败: path={}, error={}", path, e.getMessage());
+            return unauthorized(exchange);
+        } finally {
+            SaReactorSyncHolder.clearContext();
+        }
     }
 
     private boolean isWhitelisted(String path) {
