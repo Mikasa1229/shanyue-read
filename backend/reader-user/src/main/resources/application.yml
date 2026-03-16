@@ -46,7 +46,7 @@ spring:
           max-attempts: 3
 
 mybatis-plus:
-  mapper-locations: classpath*:mapper/*.xml
+  mapper-locations: classpath*:com/shanyuefang/**/mapper/*.xml
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

@@ -42,6 +42,9 @@
         <!-- 工具 -->
         <knife4j.version>4.5.0</knife4j.version>
         <hutool.version>5.8.27</hutool.version>
+
+        <flyway.version>10.10.0</flyway.version>
+        <testcontainers.version>1.19.7</testcontainers.version>
     </properties>
 
     <dependencyManagement>
@@ -124,6 +127,26 @@
                 <artifactId>reader-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
+
+            <!-- Flyway -->
+            <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-core</artifactId>
+                <version>${flyway.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-database-postgresql</artifactId>
+                <version>${flyway.version}</version>
+            </dependency>
+            <!-- TestContainers BOM -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -147,6 +170,30 @@
     </dependencies>
 
     <build>
+        <resources>
+          <resource>
+            <directory>src/main/resources</directory>
+          </resource>
+          <resource>
+            <directory>src/main/java</directory>
+            <includes>
+              <include>**/*.xml</include>
+            </includes>
+          </resource>
+        </resources>
+        <plugins>
+            <!-- 让 mvn test 同时执行 *IT 集成测试 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                </configuration>
+            </plugin>
+        </plugins>
         <pluginManagement>
             <plugins>
                 <plugin>

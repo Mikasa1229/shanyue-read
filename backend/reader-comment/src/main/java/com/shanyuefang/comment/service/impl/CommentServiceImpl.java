@@ -82,9 +82,8 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
             throw new BusinessException(ResultCode.FORBIDDEN, "无权删除他人点评");
         }
 
-        // 软删除本条评论
-        comment.setDeleted(true);
-        updateById(comment);
+        // 软删除本条评论（MBP removeById 触发 @TableLogic UPDATE）
+        removeById(commentId);
 
         // 若是根评论，级联软删除所有回复
         boolean isRoot = comment.getRootId() == null;

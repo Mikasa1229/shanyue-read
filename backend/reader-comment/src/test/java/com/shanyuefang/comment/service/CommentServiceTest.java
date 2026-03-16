@@ -155,12 +155,12 @@ class CommentServiceTest {
     void deleteComment_rootComment_cascadesAndSendsEvent() {
         Comment comment = mockComment(10L, 100L, 1L, null, null); // rootId = null → is root
         when(commentMapper.selectById(10L)).thenReturn(comment);
-        when(commentMapper.updateById(any(Comment.class))).thenReturn(1);
+        when(commentMapper.deleteById(10L)).thenReturn(1);
         when(commentMapper.softDeleteRepliesByRootId(10L)).thenReturn(3);
 
         commentService.deleteComment(1L, 10L);
 
-        verify(commentMapper).updateById(argThat((Comment c) -> Boolean.TRUE.equals(c.getDeleted())));
+        verify(commentMapper).deleteById(10L);
         verify(commentMapper).softDeleteRepliesByRootId(10L);
         verify(eventProducer).sendCommentDeleted(100L, 10L);
     }
@@ -170,11 +170,11 @@ class CommentServiceTest {
     void deleteComment_replyComment_noCascadeNoEvent() {
         Comment comment = mockComment(20L, 100L, 1L, 10L, 10L); // has rootId → is reply
         when(commentMapper.selectById(20L)).thenReturn(comment);
-        when(commentMapper.updateById(any(Comment.class))).thenReturn(1);
+        when(commentMapper.deleteById(20L)).thenReturn(1);
 
         commentService.deleteComment(1L, 20L);
 
-        verify(commentMapper).updateById(argThat((Comment c) -> Boolean.TRUE.equals(c.getDeleted())));
+        verify(commentMapper).deleteById(20L);
         verify(commentMapper, never()).softDeleteRepliesByRootId(any());
         verify(eventProducer, never()).sendCommentDeleted(any(), any());
     }

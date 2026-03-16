@@ -33,3 +33,4 @@ application-local.yml
 node_modules/
 dist/
 .pnpm-store/
+package-lock.json
