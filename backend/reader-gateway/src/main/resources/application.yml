@@ -6,19 +6,20 @@ spring:
     name: reader-gateway
   profiles:
     active: dev
+  config:
+    import: "optional:nacos:reader-gateway.yaml"
   cloud:
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        namespace: reader
       config:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        namespace: reader
         file-extension: yaml
+        group: reader
     gateway:
       discovery:
         locator:
-          enabled: true          # 自动从 Nacos 发现服务
+          enabled: true          # 鑷姩浠?Nacos 鍙戠幇鏈嶅姟
           lower-case-service-id: true
       routes:
         - id: reader-user
@@ -42,20 +43,19 @@ spring:
           predicates:
             - Path=/api/checkins/**
 
-  # Redis（Sa-Token 共享会话）
-  data:
+  # Redis锛圫a-Token 鍏变韩浼氳瘽锛?  data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       database: 0
 
-# Sa-Token 配置
+# Sa-Token 閰嶇疆
 sa-token:
   token-name: Authorization
-  timeout: 86400          # Token 有效期：1天（秒）
-  active-timeout: 1800    # 活跃续签：30分钟
-  is-concurrent: false    # 同账号不允许多端登录
+  timeout: 86400          # Token 鏈夋晥鏈燂細1澶╋紙绉掞級
+  active-timeout: 1800    # 娲昏穬缁锛?0鍒嗛挓
+  is-concurrent: false    # 鍚岃处鍙蜂笉鍏佽澶氱鐧诲綍
   is-share: true
   token-style: uuid
 

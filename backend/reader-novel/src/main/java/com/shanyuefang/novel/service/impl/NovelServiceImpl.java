@@ -102,8 +102,10 @@ public class NovelServiceImpl extends ServiceImpl<NovelMapper, Novel> implements
                               .or().like(Novel::getAuthorName, dto.getKeyword()));
         }
 
-        Page<Novel> page = page(new Page<>(dto.getPage(), dto.getSize()), wrapper);
-        return page.convert(this::toVO);
+        Page<Novel> rawPage = page(new Page<>(dto.getPage(), dto.getSize()), wrapper);
+        Page<NovelVO> result = new Page<>(rawPage.getCurrent(), rawPage.getSize(), rawPage.getTotal());
+        result.setRecords(rawPage.getRecords().stream().map(this::toVO).collect(Collectors.toList()));
+        return result;
     }
 
     @Override
@@ -131,12 +133,14 @@ public class NovelServiceImpl extends ServiceImpl<NovelMapper, Novel> implements
 
     @Override
     public Page<NovelVO> getMyNovels(Long userId, int page, int size) {
-        Page<Novel> p = lambdaQuery()
+        Page<Novel> rawPage = lambdaQuery()
                 .eq(Novel::getUserId, userId)
                 .eq(Novel::getDeleted, false)
                 .orderByDesc(Novel::getCreatedAt)
                 .page(new Page<>(page, size));
-        return p.convert(this::toVO);
+        Page<NovelVO> result = new Page<>(rawPage.getCurrent(), rawPage.getSize(), rawPage.getTotal());
+        result.setRecords(rawPage.getRecords().stream().map(this::toVO).collect(Collectors.toList()));
+        return result;
     }
 
     @Override

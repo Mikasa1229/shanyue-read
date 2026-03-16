@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -34,7 +35,7 @@ public class RabbitMQConfig {
     }
 
     @Bean
-    public Binding deadBinding(Queue deadQueue, DirectExchange deadExchange) {
+    public Binding deadBinding(@Qualifier("deadQueue") Queue deadQueue, DirectExchange deadExchange) {
         return BindingBuilder.bind(deadQueue).to(deadExchange).with(DEAD_QUEUE);
     }
 
@@ -48,7 +49,7 @@ public class RabbitMQConfig {
     }
 
     @Bean
-    public Binding novelInteractionBinding(Queue novelInteractionQueue, TopicExchange topicExchange) {
+    public Binding novelInteractionBinding(@Qualifier("novelInteractionQueue") Queue novelInteractionQueue, TopicExchange topicExchange) {
         return BindingBuilder.bind(novelInteractionQueue).to(topicExchange).with("interaction.#");
     }
 

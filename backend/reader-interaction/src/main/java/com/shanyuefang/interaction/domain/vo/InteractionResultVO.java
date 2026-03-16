@@ -1,9 +1,6 @@
 package com.shanyuefang.interaction.domain.vo;
 
 import lombok.AllArgsConstructor;
-<parameter name="content">package com.shanyuefang.interaction.domain.vo;
-
-import lombok.AllArgsConstructor;
 import lombok.Data;
 
 /**

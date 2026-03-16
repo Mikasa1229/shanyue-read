@@ -49,7 +49,7 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
         if (dto.getParentId() != null) {
             // 回复：需找到父评论确认存在且属于同一小说
             Comment parent = getById(dto.getParentId());
-            if (parent == null || parent.getDeleted()) {
+            if (parent == null || Boolean.TRUE.equals(parent.getDeleted())) {
                 throw new BusinessException(ResultCode.NOT_FOUND, "被回复的评论不存在");
             }
             if (!parent.getNovelId().equals(dto.getNovelId())) {
@@ -75,7 +75,7 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
     @Transactional(rollbackFor = Exception.class)
     public void deleteComment(Long userId, Long commentId) {
         Comment comment = getById(commentId);
-        if (comment == null || comment.getDeleted()) {
+        if (comment == null || Boolean.TRUE.equals(comment.getDeleted())) {
             throw new BusinessException(ResultCode.NOT_FOUND, "点评不存在");
         }
         if (!comment.getUserId().equals(userId)) {
@@ -112,7 +112,7 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
     public IPage<CommentVO> listReplies(Long rootId, CommentPageDTO dto) {
         // 验证根评论存在
         Comment root = getById(rootId);
-        if (root == null || root.getDeleted()) {
+        if (root == null || Boolean.TRUE.equals(root.getDeleted())) {
             throw new BusinessException(ResultCode.NOT_FOUND, "评论不存在");
         }
 

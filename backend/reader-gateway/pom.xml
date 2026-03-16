@@ -49,6 +49,12 @@
             <groupId>com.shanyuefang</groupId>
             <artifactId>reader-common</artifactId>
         </dependency>
+        <!-- reactor-test for StepVerifier in unit tests -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

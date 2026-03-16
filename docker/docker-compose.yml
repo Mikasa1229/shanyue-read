@@ -108,6 +108,18 @@ services:
       timeout: 10s
       retries: 10
 
+  # ───────────────── Nacos 配置初始化（一次性容器）─────────────────
+  init-nacos:
+    image: alpine:3.19
+    container_name: reader-nacos-init
+    depends_on:
+      nacos:
+        condition: service_healthy
+    volumes:
+      - ./nacos-init.sh:/nacos-init.sh:ro
+    command: ["sh", "-c", "apk add -q --no-cache curl && sh /nacos-init.sh"]
+    restart: "no"
+
   # ───────────────── Elasticsearch ─────────────────
   elasticsearch:
     image: elasticsearch:8.13.0

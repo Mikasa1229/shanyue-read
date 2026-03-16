@@ -6,15 +6,16 @@ spring:
     name: reader-comment
   profiles:
     active: dev
+  config:
+    import: "optional:nacos:reader-comment.yaml"
   cloud:
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        namespace: reader
       config:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        namespace: reader
         file-extension: yaml
+        group: reader
   datasource:
     driver-class-name: org.postgresql.Driver
     url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/db_comment
@@ -57,15 +58,14 @@ mybatis-plus:
       logic-not-delete-value: false
       id-type: input
 
-# Feign 超时配置
+# Feign 瓒呮椂閰嶇疆
 feign:
   client:
     config:
       reader-user:
-        connect-timeout: 2000   # 2s 连接超时
-        read-timeout: 3000      # 3s 读超时
-  circuitbreaker:
-    enabled: true               # 开启 Fallback
+        connect-timeout: 2000   # 2s 杩炴帴瓒呮椂
+        read-timeout: 3000      # 3s 璇昏秴鏃?  circuitbreaker:
+    enabled: true               # 寮€鍚?Fallback
 
 knife4j:
   enable: true

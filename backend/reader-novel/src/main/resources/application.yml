@@ -6,15 +6,16 @@ spring:
     name: reader-novel
   profiles:
     active: dev
+  config:
+    import: "optional:nacos:reader-novel.yaml"
   cloud:
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        namespace: reader
       config:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        namespace: reader
         file-extension: yaml
+        group: reader
   datasource:
     driver-class-name: org.postgresql.Driver
     url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/db_novel
@@ -44,7 +45,7 @@ spring:
         retry:
           enabled: true
           max-attempts: 3
-  # Caffeine 二级缓存
+  # Caffeine 浜岀骇缂撳瓨
   cache:
     type: caffeine
     caffeine:

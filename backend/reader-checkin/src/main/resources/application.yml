@@ -6,15 +6,16 @@ spring:
     name: reader-checkin
   profiles:
     active: dev
+  config:
+    import: "optional:nacos:reader-checkin.yaml"
   cloud:
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        namespace: reader
       config:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        namespace: reader
         file-extension: yaml
+        group: reader
   datasource:
     driver-class-name: org.postgresql.Driver
     url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/db_checkin
