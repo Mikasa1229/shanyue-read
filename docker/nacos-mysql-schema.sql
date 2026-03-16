@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS config_info_tag (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS config_tags_relation (
-  id        BIGINT        NOT NULL AUTO_INCREMENT,
+  id        BIGINT        NOT NULL,
   tag_name  VARCHAR(128)  NOT NULL,
   tag_type  VARCHAR(64)   DEFAULT NULL,
   data_id   VARCHAR(255)  NOT NULL,
