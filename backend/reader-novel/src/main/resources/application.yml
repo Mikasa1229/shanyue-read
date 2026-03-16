@@ -51,6 +51,7 @@ spring:
       spec: maximumSize=5000,expireAfterWrite=300s
 
 mybatis-plus:
+  mapper-locations: classpath*:mapper/*.xml
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

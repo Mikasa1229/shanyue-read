@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanyuefang.novel.mapper.NovelMapper">
+    <!-- 分页查询（支持分类 + 关键词） -->
+    <select id="selectPageByCondition" resultType="com.shanyuefang.novel.domain.entity.Novel">
+        SELECT * FROM t_novel
+        WHERE deleted = FALSE
+        <if test="category != null and category != ''">
+            AND category = #{category}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (title ILIKE CONCAT('%', #{keyword}, '%')
+                 OR author_name ILIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        ORDER BY created_at DESC
+    </select>
+</mapper>

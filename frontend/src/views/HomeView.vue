@@ -27,22 +27,33 @@
         </div>
       </section>
 
-      <!-- Category filter -->
+      <!-- Category filter + Search -->
       <section class="section">
         <div class="section-header">
           <h2 class="section-title">发现好书</h2>
-          <div class="category-tabs">
-            <button
-              v-for="cat in categories"
-              :key="cat.value"
-              class="cat-tab"
-              :class="{ active: activeCategory === cat.value }"
-              @click="activeCategory = cat.value"
-            >{{ cat.label }}</button>
+          <div class="toolbar">
+            <div class="search-wrap">
+              <input
+                v-model="keyword"
+                class="search-input"
+                placeholder="搜索书名、作者…"
+                @keydown.enter="doSearch"
+              />
+              <button class="search-btn" @click="doSearch">搜索</button>
+            </div>
+            <div class="category-tabs">
+              <button
+                v-for="cat in categories"
+                :key="cat.value"
+                class="cat-tab"
+                :class="{ active: activeCategory === cat.value }"
+                @click="selectCategory(cat.value)"
+              >{{ cat.label }}</button>
+            </div>
           </div>
         </div>
 
-        <!-- Grid -->
+        <!-- Skeleton -->
         <div v-if="loading" class="grid-novels">
           <div v-for="i in 8" :key="i" class="skeleton-card">
             <div class="skeleton" style="aspect-ratio:3/4;border-radius:var(--radius-md)"></div>
@@ -61,6 +72,17 @@
         <div v-else class="grid-novels">
           <NovelCard v-for="n in novels" :key="n.id" :novel="n" />
         </div>
+
+        <!-- Pagination -->
+        <div v-if="totalPages > 1" class="pagination mt-8">
+          <button
+            v-for="p in totalPages"
+            :key="p"
+            class="page-btn"
+            :class="{ active: p === currentPage }"
+            @click="loadPage(p)"
+          >{{ p }}</button>
+        </div>
       </section>
     </div>
   </main>
@@ -69,9 +91,12 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
+import { apiGetNovels } from '@/api/novel'
+import { useToast } from '@/composables/useToast'
 import NovelCard from '@/components/NovelCard.vue'
 
 const userStore = useUserStore()
+const { show } = useToast()
 
 const categories = [
   { label: '全部', value: '' },
@@ -84,36 +109,46 @@ const categories = [
 ]
 
 const activeCategory = ref('')
+const keyword = ref('')
+const searchKeyword = ref('')
 const novels = ref([])
 const loading = ref(false)
+const currentPage = ref(1)
+const totalPages = ref(1)
 
-// Mock data until novel service is implemented
-function getMockNovels(category) {
-  const all = [
-    { id: 1, title: '星辰之上', authorName: '沧月', category: '玄幻', summary: '一个关于星辰与命运的史诗故事，穿越虚空，寻找古老神明的足迹。', viewCount: 128000 },
-    { id: 2, title: '锦绣未央', authorName: '秦简', category: '言情', summary: '宫廷深处，爱恨纠缠，她以弱女子之身，步步为营，终成一代传奇。', viewCount: 95600 },
-    { id: 3, title: '江湖不再', authorName: '古龙传人', category: '武侠', summary: '江湖已老，英雄迟暮，那些刀光剑影里的故事，随风而散。', viewCount: 76200 },
-    { id: 4, title: '都市仙途', authorName: '烟雨客', category: '都市', summary: '修仙者降临都市，在钢铁丛林中寻找上古传承的蛛丝马迹。', viewCount: 112000 },
-    { id: 5, title: '大明风华', authorName: '雪中悍刀行', category: '历史', summary: '历史的长河中，有人悄然改变了命运的轨迹。', viewCount: 88400 },
-    { id: 6, title: '星际迷途', authorName: '银河写手', category: '科幻', summary: '宇宙深处，文明的碰撞，人类在星际中寻找家园。', viewCount: 63000 },
-    { id: 7, title: '青山不老', authorName: '晨风', category: '言情', summary: '相遇在青山绿水间，一段跨越时光的爱恋悄然开始。', viewCount: 102000 },
-    { id: 8, title: '剑指苍穹', authorName: '天刀', category: '玄幻', summary: '以剑问道，以心证天，少年踏上了通往苍穹的修炼之路。', viewCount: 145000 },
-  ]
-  return category ? all.filter(n => n.category === category) : all
-}
-
-async function loadNovels() {
+async function loadPage(page = 1) {
   loading.value = true
+  currentPage.value = page
   try {
-    await new Promise(r => setTimeout(r, 400)) // simulate network
-    novels.value = getMockNovels(activeCategory.value)
+    const res = await apiGetNovels({
+      page,
+      size: 16,
+      category: activeCategory.value || undefined,
+      keyword: searchKeyword.value || undefined
+    })
+    novels.value = res?.records ?? []
+    totalPages.value = res?.pages ?? 1
+  } catch (e) {
+    show(e.message)
+    novels.value = []
   } finally {
     loading.value = false
   }
 }
 
-watch(activeCategory, loadNovels)
-onMounted(loadNovels)
+function selectCategory(val) {
+  activeCategory.value = val
+  currentPage.value = 1
+  loadPage(1)
+}
+
+function doSearch() {
+  searchKeyword.value = keyword.value.trim()
+  currentPage.value = 1
+  loadPage(1)
+}
+
+onMounted(() => loadPage(1))
 </script>
 
 <style scoped>
@@ -162,7 +197,6 @@ onMounted(loadNovels)
 
 .hero-actions { display: flex; gap: var(--space-4); }
 
-/* Hero decoration */
 .hero-deco {
   position: relative;
   width: 280px;
@@ -213,12 +247,7 @@ onMounted(loadNovels)
 .section { padding-bottom: var(--space-12); }
 
 .section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   margin-bottom: var(--space-6);
-  flex-wrap: wrap;
-  gap: var(--space-4);
 }
 
 .section-title {
@@ -227,6 +256,7 @@ onMounted(loadNovels)
   color: var(--ink-0);
   position: relative;
   padding-left: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 .section-title::before {
@@ -240,6 +270,53 @@ onMounted(loadNovels)
   background: var(--gold-0);
   border-radius: var(--radius-full);
 }
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+/* Search */
+.search-wrap {
+  display: flex;
+  align-items: center;
+  border: 1.5px solid var(--paper-3);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--paper-0);
+  transition: border-color var(--transition-fast);
+}
+
+.search-wrap:focus-within {
+  border-color: var(--gold-1);
+}
+
+.search-input {
+  border: none;
+  outline: none;
+  padding: var(--space-2) var(--space-4);
+  font-size: 0.875rem;
+  color: var(--ink-1);
+  background: transparent;
+  width: 200px;
+}
+
+.search-input::placeholder { color: var(--ink-4); }
+
+.search-btn {
+  padding: var(--space-2) var(--space-4);
+  background: var(--ink-0);
+  color: var(--paper-0);
+  border: none;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.search-btn:hover { background: var(--ink-1); }
 
 /* Category tabs */
 .category-tabs {
@@ -290,6 +367,32 @@ onMounted(loadNovels)
   margin-bottom: var(--space-4);
 }
 
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.page-btn {
+  width: 36px;
+  height: 36px;
+  border: 1.5px solid var(--paper-3);
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: 0.875rem;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.page-btn:hover { background: var(--paper-2); }
+.page-btn.active {
+  background: var(--ink-0);
+  border-color: var(--ink-0);
+  color: var(--paper-0);
+}
+
 @media (max-width: 768px) {
   .hero { flex-direction: column; text-align: center; gap: var(--space-8); }
   .hero-deco { width: 160px; height: 160px; }
@@ -297,5 +400,6 @@ onMounted(loadNovels)
   .c1 { width: 130px; height: 130px; }
   .c2 { width: 80px; height: 80px; }
   .hero-actions { justify-content: center; }
+  .toolbar { flex-direction: column; align-items: flex-start; }
 }
 </style>

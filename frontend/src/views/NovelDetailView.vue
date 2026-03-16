@@ -14,7 +14,6 @@
       <template v-else-if="novel">
         <!-- Novel header -->
         <section class="detail-header">
-          <!-- Cover -->
           <div class="detail-cover">
             <img v-if="novel.coverUrl" :src="novel.coverUrl" :alt="novel.title" />
             <div v-else class="cover-fallback">
@@ -22,11 +21,10 @@
             </div>
           </div>
 
-          <!-- Meta -->
           <div class="detail-meta">
             <div class="meta-top">
               <span class="tag">{{ novel.category }}</span>
-              <span class="tag" v-if="novel.status">{{ novel.status }}</span>
+              <span class="tag tag-gold">{{ novel.statusLabel }}</span>
             </div>
 
             <h1 class="detail-title">{{ novel.title }}</h1>
@@ -49,19 +47,24 @@
 
             <p class="detail-summary">{{ novel.summary }}</p>
 
-            <!-- Actions -->
             <div class="detail-actions">
               <InteractionBar :target-id="novel.id" :target-type="1" />
-              <button class="btn btn-primary" @click="handleCheckin">
+              <button class="btn btn-primary" :disabled="checkedToday" @click="handleCheckin">
                 {{ checkedToday ? '今日已打卡 ✓' : '打卡阅读' }}
               </button>
             </div>
           </div>
         </section>
 
+        <!-- Owner controls -->
+        <div v-if="isOwner" class="owner-bar">
+          <button class="btn btn-ghost btn-sm" @click="showEdit = true">编辑</button>
+          <button class="btn btn-sm delete-btn" @click="confirmDelete">删除</button>
+        </div>
+
         <div class="divider"></div>
 
-        <!-- Tab content -->
+        <!-- Tabs -->
         <div class="detail-tabs">
           <button
             v-for="tab in tabs"
@@ -72,15 +75,13 @@
           >{{ tab.label }}</button>
         </div>
 
-        <!-- Comment tab -->
         <section v-if="activeTab === 'comment'" class="tab-content">
           <CommentSection :novel-id="novel.id" />
         </section>
 
-        <!-- Checkin tab -->
         <section v-if="activeTab === 'checkin'" class="tab-content">
           <div class="checkin-wrap">
-            <CheckinCalendar :novel-id="novel.id" @checked="checkedToday = true" />
+            <CheckinCalendar :novel-id="novel.id" />
           </div>
         </section>
       </template>
@@ -90,12 +91,58 @@
         <router-link to="/" class="btn btn-ghost mt-4">返回首页</router-link>
       </div>
     </div>
+
+    <!-- Edit modal -->
+    <Teleport to="body">
+      <div v-if="showEdit" class="modal-mask" @click.self="showEdit = false">
+        <div class="modal-body">
+          <h3 class="modal-title">编辑小说信息</h3>
+          <form @submit.prevent="saveEdit">
+            <div class="form-group">
+              <label class="form-label">书名</label>
+              <input v-model="editForm.title" class="form-input" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">作者名</label>
+              <input v-model="editForm.authorName" class="form-input" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">分类</label>
+              <input v-model="editForm.category" class="form-input" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">封面URL</label>
+              <input v-model="editForm.coverUrl" class="form-input" placeholder="https://..." />
+            </div>
+            <div class="form-group">
+              <label class="form-label">简介</label>
+              <textarea v-model="editForm.summary" class="form-input" rows="4"></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label">状态</label>
+              <select v-model="editForm.status" class="form-input">
+                <option :value="1">连载中</option>
+                <option :value="2">已完结</option>
+              </select>
+            </div>
+            <div v-if="editError" class="auth-error">{{ editError }}</div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-ghost" @click="showEdit = false">取消</button>
+              <button type="submit" class="btn btn-primary" :disabled="editLoading">
+                {{ editLoading ? '保存中…' : '保存' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </Teleport>
   </main>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { apiGetNovelDetail, apiUpdateNovel, apiDeleteNovel } from '@/api/novel'
 import { apiCheckin } from '@/api/checkin'
 import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
@@ -104,6 +151,7 @@ import CommentSection from '@/components/CommentSection.vue'
 import CheckinCalendar from '@/components/CheckinCalendar.vue'
 
 const route = useRoute()
+const router = useRouter()
 const userStore = useUserStore()
 const { show } = useToast()
 
@@ -111,28 +159,76 @@ const novel = ref(null)
 const loading = ref(true)
 const activeTab = ref('comment')
 const checkedToday = ref(false)
+const showEdit = ref(false)
+const editLoading = ref(false)
+const editError = ref('')
 
 const tabs = [
   { key: 'comment', label: '书评' },
   { key: 'checkin', label: '打卡记录' }
 ]
 
-// Mock single novel detail
-function getMockNovel(id) {
-  const map = {
-    1: { id: 1, title: '星辰之上', authorName: '沧月', category: '玄幻', status: '连载中', summary: '一个关于星辰与命运的史诗故事，穿越虚空，寻找古老神明的足迹。少年自荒芜星域崛起，踏遍万千世界，只为触碰那遥远的星光。\n\n这是一段关于执念与自由的传说，是对命运最倔强的抵抗。', viewCount: 128000, likeCount: 12400, favoriteCount: 8600 },
-    2: { id: 2, title: '锦绣未央', authorName: '秦简', category: '言情', status: '已完结', summary: '宫廷深处，爱恨纠缠，她以弱女子之身，步步为营，终成一代传奇。', viewCount: 95600, likeCount: 9200, favoriteCount: 6800 },
+const isOwner = computed(() =>
+  userStore.isLoggedIn && novel.value?.userId === userStore.userInfo?.id
+)
+
+const editForm = reactive({
+  title: '', authorName: '', category: '', coverUrl: '', summary: '', status: 1
+})
+
+async function loadDetail() {
+  loading.value = true
+  try {
+    novel.value = await apiGetNovelDetail(route.params.id)
+    if (novel.value) {
+      Object.assign(editForm, {
+        title: novel.value.title,
+        authorName: novel.value.authorName,
+        category: novel.value.category,
+        coverUrl: novel.value.coverUrl ?? '',
+        summary: novel.value.summary ?? '',
+        status: novel.value.status ?? 1
+      })
+    }
+  } catch (e) {
+    show(e.message)
+    novel.value = null
+  } finally {
+    loading.value = false
   }
-  return map[id] ?? { id, title: `小说 #${id}`, authorName: '佚名', category: '未知', summary: '暂无简介', viewCount: 0, likeCount: 0, favoriteCount: 0 }
 }
 
 async function handleCheckin() {
   if (!userStore.isLoggedIn) { show('请先登录'); return }
-  if (checkedToday.value) return
   try {
     await apiCheckin({ novelId: Number(route.params.id) })
     checkedToday.value = true
     show('打卡成功！')
+  } catch (e) {
+    show(e.message)
+  }
+}
+
+async function saveEdit() {
+  editError.value = ''
+  editLoading.value = true
+  try {
+    novel.value = await apiUpdateNovel(novel.value.id, editForm)
+    showEdit.value = false
+    show('已保存')
+  } catch (e) {
+    editError.value = e.message
+  } finally {
+    editLoading.value = false
+  }
+}
+
+async function confirmDelete() {
+  if (!confirm(`确认删除《${novel.value.title}》？此操作不可撤销。`)) return
+  try {
+    await apiDeleteNovel(novel.value.id)
+    show('已删除')
+    router.push('/')
   } catch (e) {
     show(e.message)
   }
@@ -144,15 +240,10 @@ function formatCount(n) {
   return String(n)
 }
 
-onMounted(async () => {
-  await new Promise(r => setTimeout(r, 300))
-  novel.value = getMockNovel(Number(route.params.id))
-  loading.value = false
-})
+onMounted(loadDetail)
 </script>
 
 <style scoped>
-/* Loading */
 .detail-loading {
   display: flex;
   gap: var(--space-10);
@@ -168,7 +259,6 @@ onMounted(async () => {
 
 .detail-info-skeleton { flex: 1; }
 
-/* Header */
 .detail-header {
   display: flex;
   gap: var(--space-10);
@@ -186,11 +276,7 @@ onMounted(async () => {
   background: var(--paper-2);
 }
 
-.detail-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
+.detail-cover img { width: 100%; height: 100%; object-fit: cover; }
 
 .cover-fallback {
   width: 100%;
@@ -271,10 +357,24 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+/* Owner bar */
+.owner-bar {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+  padding: var(--space-3) 0;
+}
+
+.delete-btn {
+  background: var(--vermilion-light);
+  color: var(--vermilion);
+  border: 1px solid #e8b4b8;
+}
+.delete-btn:hover { background: #f5c6c4; }
+
 /* Tabs */
 .detail-tabs {
   display: flex;
-  gap: 0;
   border-bottom: 1px solid var(--paper-3);
   margin-bottom: var(--space-8);
 }
@@ -309,12 +409,9 @@ onMounted(async () => {
   font-weight: 500;
 }
 
-.detail-tab.active::after {
-  width: 100%;
-}
+.detail-tab.active::after { width: 100%; }
 
 .tab-content { padding-bottom: var(--space-12); }
-
 .checkin-wrap { max-width: 380px; }
 
 /* Empty */
@@ -322,6 +419,52 @@ onMounted(async () => {
   text-align: center;
   padding: var(--space-16) 0;
   color: var(--ink-4);
+}
+
+/* Modal */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 24, 20, 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: var(--space-4);
+}
+
+.modal-body {
+  background: var(--paper-0);
+  border-radius: var(--radius-xl);
+  padding: var(--space-8);
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-title {
+  font-family: var(--font-serif);
+  font-size: 1.125rem;
+  margin-bottom: var(--space-6);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.auth-error {
+  background: var(--vermilion-light);
+  color: var(--vermilion);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font-size: 0.875rem;
+  margin-bottom: var(--space-4);
 }
 
 @media (max-width: 640px) {

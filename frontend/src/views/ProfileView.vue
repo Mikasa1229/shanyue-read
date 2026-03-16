@@ -84,6 +84,37 @@
             <CheckinCalendar />
           </div>
 
+          <!-- My Novels -->
+          <div v-if="activeTab === 'mynovels'" class="content-card">
+            <div class="content-header">
+              <h3 class="content-title">我的小说</h3>
+              <button class="btn btn-gold btn-sm" @click="showPublish = true; loadMyNovels()">
+                + 发布新书
+              </button>
+            </div>
+            <div v-if="myNovelsLoading" class="empty-state">加载中…</div>
+            <div v-else-if="myNovels.length === 0" class="empty-state">
+              <div class="empty-icon">✍️</div>
+              <p>还没有发布作品</p>
+              <button class="btn btn-gold mt-4" @click="showPublish = true">立即发布</button>
+            </div>
+            <div v-else class="my-novels-list">
+              <div v-for="n in myNovels" :key="n.id" class="my-novel-row">
+                <router-link :to="`/novel/${n.id}`" class="my-novel-info">
+                  <div class="my-novel-cover">
+                    <img v-if="n.coverUrl" :src="n.coverUrl" :alt="n.title" />
+                    <span v-else>{{ n.title?.charAt(0) }}</span>
+                  </div>
+                  <div>
+                    <p class="my-novel-title">{{ n.title }}</p>
+                    <p class="my-novel-meta">{{ n.category }} · {{ n.statusLabel }}</p>
+                  </div>
+                </router-link>
+                <button class="btn btn-ghost btn-sm delete-small" @click="handleDeleteNovel(n.id)">删除</button>
+              </div>
+            </div>
+          </div>
+
           <!-- Favorites (placeholder) -->
           <div v-if="activeTab === 'favorites'" class="content-card">
             <h3 class="content-title">我的收藏</h3>
@@ -97,14 +128,23 @@
       </div>
     </div>
   </main>
+
+  <PublishNovelModal
+    v-if="showPublish"
+    @close="showPublish = false"
+    @published="loadMyNovels(1)"
+  />
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { apiUpdatePassword } from '@/api/user'
+import { apiGetMyNovels, apiDeleteNovel } from '@/api/novel'
 import { useToast } from '@/composables/useToast'
 import CheckinCalendar from '@/components/CheckinCalendar.vue'
+import NovelCard from '@/components/NovelCard.vue'
+import PublishNovelModal from '@/components/PublishNovelModal.vue'
 
 const userStore = useUserStore()
 const { show } = useToast()
@@ -114,6 +154,7 @@ const activeTab = ref('checkin')
 
 const tabs = [
   { key: 'checkin', label: '打卡记录', icon: '📅' },
+  { key: 'mynovels', label: '我的小说', icon: '📖' },
   { key: 'favorites', label: '我的收藏', icon: '🔖' },
   { key: 'edit', label: '编辑资料', icon: '✏️' }
 ]
@@ -157,6 +198,38 @@ async function savePassword() {
     pwdError.value = e.message
   } finally {
     pwdLoading.value = false
+  }
+}
+
+// My novels
+const myNovels = ref([])
+const myNovelsPage = ref(1)
+const myNovelsTotal = ref(0)
+const myNovelsLoading = ref(false)
+const showPublish = ref(false)
+
+async function loadMyNovels(page = 1) {
+  myNovelsLoading.value = true
+  try {
+    const res = await apiGetMyNovels(page)
+    myNovels.value = res?.records ?? []
+    myNovelsTotal.value = res?.total ?? 0
+    myNovelsPage.value = page
+  } catch (e) {
+    show(e.message)
+  } finally {
+    myNovelsLoading.value = false
+  }
+}
+
+async function handleDeleteNovel(id) {
+  if (!confirm('确认删除该小说？')) return
+  try {
+    await apiDeleteNovel(id)
+    show('已删除')
+    loadMyNovels(myNovelsPage.value)
+  } catch (e) {
+    show(e.message)
   }
 }
 
@@ -316,6 +389,85 @@ onMounted(async () => {
   padding: var(--space-3) var(--space-4);
   font-size: 0.875rem;
   margin-bottom: var(--space-4);
+}
+
+/* Content header with action */
+.content-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-6);
+}
+
+.content-header .content-title {
+  margin-bottom: 0;
+}
+
+/* My novels list */
+.my-novels-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.my-novel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--paper-3);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+.my-novel-row:hover { background: var(--paper-1); }
+
+.my-novel-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  text-decoration: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.my-novel-cover {
+  width: 40px;
+  height: 53px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--paper-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: var(--font-serif);
+  font-size: 1.2rem;
+  color: var(--ink-4);
+}
+
+.my-novel-cover img { width: 100%; height: 100%; object-fit: cover; }
+
+.my-novel-title {
+  font-size: 0.9375rem;
+  color: var(--ink-1);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.my-novel-meta {
+  font-size: 0.8125rem;
+  color: var(--ink-4);
+  margin-top: 2px;
+}
+
+.delete-small {
+  color: var(--vermilion);
+  border-color: #e8b4b8;
+  flex-shrink: 0;
+  margin-left: var(--space-3);
 }
 
 /* Empty state */
