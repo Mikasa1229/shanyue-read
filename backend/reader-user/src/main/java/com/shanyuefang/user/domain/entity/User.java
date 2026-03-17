@@ -23,6 +23,8 @@ public class User {
 
     private String avatar;
 
+    private String bio;
+
     /** 状态：1正常 0封禁 */
     private Integer status;
 

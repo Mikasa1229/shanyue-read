@@ -2,7 +2,7 @@
   <div id="app-root">
     <AppNav />
     <router-view v-slot="{ Component, route }">
-      <transition name="page" mode="out-in">
+      <transition name="page">
         <component :is="Component" :key="route.path" />
       </transition>
     </router-view>

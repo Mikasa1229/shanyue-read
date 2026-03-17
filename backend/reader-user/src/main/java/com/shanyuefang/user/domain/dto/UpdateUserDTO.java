@@ -14,4 +14,7 @@ public class UpdateUserDTO {
 
     @Size(max = 256, message = "头像 URL 过长")
     private String avatar;
+
+    @Size(max = 256, message = "简介最多 256 个字符")
+    private String bio;
 }

@@ -29,6 +29,11 @@ const routes = [
     name: 'Profile',
     component: () => import('@/views/ProfileView.vue'),
     meta: { auth: true }
+  },
+  {
+    path: '/book-sources',
+    name: 'BookSource',
+    component: () => import('@/views/BookSourceView.vue')
   }
 ]
 

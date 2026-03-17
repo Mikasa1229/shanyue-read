@@ -183,6 +183,16 @@
           </resource>
         </resources>
         <plugins>
+            <!-- 显式传 -parameters，IDEA 和 Maven 均生效 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
             <!-- 让 mvn test 同时执行 *IT 集成测试 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

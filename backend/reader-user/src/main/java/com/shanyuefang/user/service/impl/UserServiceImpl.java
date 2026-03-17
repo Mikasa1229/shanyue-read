@@ -126,6 +126,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (StringUtils.hasText(dto.getAvatar())) {
             user.setAvatar(dto.getAvatar());
         }
+        if (dto.getBio() != null) {
+            user.setBio(dto.getBio());
+        }
 
         updateById(user);
 

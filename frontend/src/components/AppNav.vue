@@ -10,6 +10,7 @@
       <!-- Center Nav -->
       <nav class="nav-links">
         <router-link to="/" class="nav-link">发现</router-link>
+        <router-link to="/book-sources" class="nav-link">书源</router-link>
         <router-link v-if="userStore.isLoggedIn" to="/profile" class="nav-link">书架</router-link>
       </nav>
 

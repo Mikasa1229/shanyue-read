@@ -13,6 +13,7 @@
 5. [编译错误全量修复](#5-编译错误全量修复)
 6. [单元测试体系建立](#6-单元测试体系建立)
 7. [Nacos 配置自动化初始化](#7-nacos-配置自动化初始化)
+8. [书源集成（legado 规则引擎）](#8-书源集成legado-规则引擎)
 
 ---
 
@@ -245,3 +246,81 @@ init-nacos:
 ```
 
 `nacos-init.sh` 用 `curl --data-urlencode` 写入 YAML，自动处理换行符和特殊字符的 URL 编码。
+
+---
+
+## 8. 书源集成（legado 规则引擎）
+
+**提交**：`c0223b6`（含前序多次修复提交）
+
+### 工作内容
+
+- 集成 [legado](https://github.com/gedoor/legado) 阅读 APP 的书源格式，让用户可以从第三方网站搜索小说、获取章节列表、阅读正文
+- 实现 `LegadoRuleEngine`：支持 CSS 简写、JSONPath、XPath、正则、链式、降级、模板等全套规则语法
+- 实现 `HttpFetcher`：支持 GET/POST、GBK 编码、SSL 忽略、相对 URL 转绝对 URL、单引号 JSON 兼容
+- 实现 `BookSourceModel`：兼容 legado 新旧两种书源格式（新格式嵌套对象 vs 旧格式平铺字段）
+- 实现 `BookSourceServiceImpl`：导入/搜索/章节/正文完整流程
+- 新增 REST 接口 `/api/book-sources/**`，Gateway 路由已配置
+- 导入并验证多个书源，覆盖 CSS、JSONPath、POST 搜索等多种类型
+
+### 书源仓库原理
+
+项目内置 legado 格式书源仓库（`book_source/legado/sources/`），每个文件是一个 JSON 数组，每个元素描述一个网站的抓取规则：
+
+```
+book_source/legado/sources/
+  71e56d4f.json   精选书源（19 个，已全部导入测试）
+  b778fe6b.json   大全集（3911 个书源）
+  2a1f129b.json, 3bb7b751.json ...  其他分类
+```
+
+书源 JSON 关键字段：
+
+| 字段 | 说明 |
+|------|------|
+| `bookSourceUrl` | 网站根 URL，作为 baseUrl 拼接相对路径 |
+| `searchUrl` | 搜索路径，`{{key}}` 替换关键词，末尾可附加 `,'method':'POST',...` |
+| `ruleSearch` | 搜索结果解析规则（bookList/name/author/bookUrl/...） |
+| `ruleToc` | 目录页解析规则（chapterList/chapterName/chapterUrl） |
+| `ruleContent` | 正文页解析规则（content） |
+
+新格式的 `ruleSearch` 是嵌套对象；旧格式使用 `searchList`/`searchName` 等平铺字段，`BookSourceModel.effectiveSearch*()` 自动选择有值的字段。
+
+### LegadoRuleEngine 规则语法
+
+| 类型 | 格式 | 示例 |
+|------|------|------|
+| JSONPath | `$.path` 或 `$..path` | `$.data.list` |
+| XPath | `//tag/@attr` | `//meta[@property='og:title']/@content` |
+| CSS 简写 | `class.name` / `tag.name` / `id.name` | `class.bookname` → `.bookname` |
+| CSS 标准 | 直接写选择器 | `div.content p` |
+| 属性提取 | `rule@attr` | `tag.a.0@href`，`class.box@html` |
+| 属性+正则 | `rule@attr##pattern` | `class.article-content.0@html##广告.*` |
+| 正则提取 | `##pattern` | `##第(\d+)章` |
+| 正则替换 | `##pattern##replace` | `##\s+## ` |
+| 链式 | `rule1@rule2@...` | `class.catalog@li@a` |
+| 降级 | `rule1\|\|rule2` | `$.title\|\|class.title@text` |
+| 模板 | `{{$.path}}` | `/novel/{{$.novelId}}` |
+
+**`splitByAt` 白名单机制**：`@` 既可以是链式分割符（`class.catalog@li`），也可以是属性提取（`tag.a.0@href`）。通过 `KNOWN_ATTRS` 白名单区分：`href/text/html/src/title` 等在白名单内的不分割（走属性提取），`a/li/div/span` 等 HTML 标签名不在白名单内的才分割（走链式 CSS）。
+
+### 踩坑记录
+
+| 问题 | 根因 | 解决方案 |
+|------|------|----------|
+| `selectSingle` 方法缺失 | `extractList` 引用了未定义的方法 | 补充实现，支持 `.N` 索引定位容器元素 |
+| 搜索结果 `name`/`bookUrl` 为 null | `splitByAt` 把 `tag.a.0@title` 错误分成两段，第二段 `title` 从纯文本提取属性失败 | 改用白名单机制，`@title` 整体作为属性提取器 |
+| `Set.of()` 启动报错 | `KNOWN_ATTRS` 中 `src` 重复出现，`Set.of()` 不允许重复元素 | 删除多余的 `src` |
+| JSONPath 书源 `bookUrl` 为空 | 规则是 URL 模板 `/novel/{{$.novelId}}`，不是 CSS/JSONPath 规则 | 新增 `resolveTemplate`，用 JSONPath 提取值后替换 `{{...}}` 占位符 |
+| `@html##regex` 组合不生效 | `cssSingle` 只检查纯字母属性名，`html##\(广告\)` 含 `#` 不匹配 | 先截取 `##` 前的 `attrPart`，再判断是否为已知属性 |
+| 23qb.com 正文为空 | `article-content` div 由 JavaScript 动态填充，服务端无法执行 JS | 属网站反爬限制，无法修复；建议换静态渲染书源 |
+| `GET /api/book-sources/` 返回 500 | URL 末尾多一个 `/` 导致找不到路由 | 去掉末尾斜杠 |
+
+### 已验证可用书源（截至 2026-03-18）
+
+| 书源 | 搜索 | 章节 | 正文 | 备注 |
+|------|------|------|------|------|
+| 铅笔小说（23qb.com） | ✅ | ✅ | ❌ | 正文 JS 动态加载 |
+| 猫眼看书（jmlldsc.com） | ✅ | — | — | JSONPath + 模板 bookUrl |
+| 酷我小说（kuwo.cn） | ✅ | — | — | JSON API 接口 |
+| 阅友小说（suixkan.com） | ✅ | — | — | bookUrl 规则含 JS，返回 null |
