@@ -40,10 +40,11 @@ spring:
     username: ${MQ_USER:guest}
     password: ${MQ_PASSWORD:guest}
     virtual-host: /
-    publisher-confirm-type: correlated   # 鐢熶骇鑰呯‘璁?    publisher-returns: true
+    publisher-confirm-type: correlated   # 生产者确认
+    publisher-returns: true
     listener:
       simple:
-        acknowledge-mode: manual          # 鎵嬪姩 ACK
+        acknowledge-mode: manual          # 手动 ACK
         retry:
           enabled: true
           max-attempts: 3
@@ -58,9 +59,9 @@ mybatis-plus:
       logic-delete-field: deleted
       logic-delete-value: true
       logic-not-delete-value: false
-      id-type: input                      # 搴旂敤灞傞洩鑺辩畻娉曠敓鎴?ID
+      id-type: input                      # 应用层雪花算法生成 ID
 
-# Sa-Token锛堜笌 Gateway 鍏变韩 Redis锛宼oken-style 淇濇寔涓€鑷达級
+# Sa-Token（与 Gateway 共享 Redis，token-style 保持一致）
 sa-token:
   token-name: Authorization
   timeout: 86400

@@ -61,14 +61,15 @@ mybatis-plus:
       logic-not-delete-value: false
       id-type: input
 
-# Feign 瓒呮椂閰嶇疆
+# Feign 超时配置
 feign:
   client:
     config:
       reader-user:
-        connect-timeout: 2000   # 2s 杩炴帴瓒呮椂
-        read-timeout: 3000      # 3s 璇昏秴鏃?  circuitbreaker:
-    enabled: true               # 寮€鍚?Fallback
+        connect-timeout: 2000   # 2s 连接超时
+        read-timeout: 3000      # 3s 读超时
+  circuitbreaker:
+    enabled: true               # 开启 Fallback
 
 knife4j:
   enable: true

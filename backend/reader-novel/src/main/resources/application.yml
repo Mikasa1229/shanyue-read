@@ -48,7 +48,7 @@ spring:
         retry:
           enabled: true
           max-attempts: 3
-  # Caffeine 浜岀骇缂撳瓨
+  # Caffeine 二级缓存
   cache:
     type: caffeine
     caffeine:
