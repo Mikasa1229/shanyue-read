@@ -64,6 +64,7 @@ mybatis-plus:
 # Sa-Token（与 Gateway 共享 Redis，token-style 保持一致）
 sa-token:
   token-name: Authorization
+  token-prefix: Bearer    # 与 Gateway 保持一致，前端发送 "Bearer <token>" 格式
   timeout: 86400
   active-timeout: 1800
   is-concurrent: false
