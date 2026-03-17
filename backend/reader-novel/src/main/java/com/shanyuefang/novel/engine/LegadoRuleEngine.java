@@ -53,6 +53,11 @@ public class LegadoRuleEngine {
         if (!StringUtils.hasText(rule) || !StringUtils.hasText(input)) return null;
         if (isJavaScript(rule)) return null;
 
+        // 模板替换：{{$.path}} 或 {{$.path1}}/{{$.path2}} 格式（常见于 bookUrl/chapterUrl）
+        if (rule.contains("{{")) {
+            return resolveTemplate(rule, input);
+        }
+
         // 降级：|| 分隔
         for (String candidate : rule.split("\\|\\|")) {
             String r = candidate.trim();
@@ -96,19 +101,22 @@ public class LegadoRuleEngine {
                            : trimmed.startsWith("css:")  ? trimmed.substring(4)
                            : trimmed;
 
-            // CSS 列表（链式规则：先取容器再取子元素，如 class.txt-list.0@tag.li）
-            // 对于含 @ 的规则，先取第一段作为容器，再用后续规则取子列表
+            // CSS 列表（链式规则：如 class.catalog@li@a → 依次缩小范围取最终元素列表）
             List<String> parts = splitByAt(cssRule);
             Document doc = Jsoup.parse(input);
             Elements els;
             if (parts.size() > 1) {
-                // 先定位容器元素
-                String containerRule = parts.get(0);
-                Element container = selectSingle(doc, containerRule);
-                if (container == null) return List.of();
-                // 再按最后一段规则取子元素列表
-                String childRule = parts.get(parts.size() - 1);
-                els = container.select(toCssSelector(childRule));
+                // 逐级缩小范围：先用第一段定位容器，再对容器内部逐段再选
+                Elements cur = doc.select(toCssSelector(parts.get(0)));
+                for (int idx = 1; idx < parts.size() - 1; idx++) {
+                    Elements next = new Elements();
+                    for (Element e : cur) next.addAll(e.select(toCssSelector(parts.get(idx))));
+                    cur = next;
+                }
+                // 最后一段：再取子列表
+                String lastPart = parts.get(parts.size() - 1);
+                els = new Elements();
+                for (Element e : cur) els.addAll(e.select(toCssSelector(lastPart)));
             } else {
                 els = doc.select(toCssSelector(cssRule));
             }
@@ -119,6 +127,37 @@ public class LegadoRuleEngine {
         } catch (Exception e) {
             log.debug("规则列表提取失败 rule={}: {}", rule, e.getMessage());
             return List.of();
+        }
+    }
+
+    // ─── 模板替换 ─────────────────────────────────────────────
+
+    /**
+     * 处理 {@code {{$.path}}} 模板（常见于 bookUrl/chapterUrl 规则）。
+     * 例如：{@code /novels/api/book/{{$.book_id}}} → 将 {@code $.book_id} 从 JSON 中提取后替换。
+     */
+    private static String resolveTemplate(String template, String input) {
+        try {
+            Matcher m = Pattern.compile("\\{\\{([^}]+)}}").matcher(template);
+            StringBuffer sb = new StringBuffer();
+            while (m.find()) {
+                String expr = m.group(1).trim();
+                String val;
+                if (isJavaScript(expr)) {
+                    val = "";
+                } else if (expr.startsWith("$.") || expr.startsWith("$[")) {
+                    val = jsonPathSingle(expr, input);
+                } else {
+                    val = evalChain(expr, input);
+                }
+                m.appendReplacement(sb, val != null ? Matcher.quoteReplacement(val) : "");
+            }
+            m.appendTail(sb);
+            String result = sb.toString().trim();
+            return result.isEmpty() || result.contains("{{") ? null : result;
+        } catch (Exception e) {
+            log.debug("模板替换失败 template={}: {}", template, e.getMessage());
+            return null;
         }
     }
 
@@ -389,10 +428,22 @@ public class LegadoRuleEngine {
     // ─── 工具方法 ────────────────────────────────────────────
 
     /**
+     * 已知的 HTML 属性提取器名称（legado 规则末尾的 {@code @attr}）。
+     * 这些词作为 @ 后的段落时，表示提取属性，不是链式分割符。
+     * HTML 标签名（a, li, p, div 等）不在此列，会被当作链式分割符。
+     */
+    private static final java.util.Set<String> KNOWN_ATTRS = java.util.Set.of(
+            "text", "html", "href", "src", "title", "content", "alt",
+            "innerhtml", "outerhtml", "owntext", "textnodes", "value",
+            "name", "type", "action", "method", "rel", "target", "style",
+            "class", "id", "data", "srcset", "poster",
+            "placeholder", "label", "summary", "cite", "datetime");
+
+    /**
      * 按 @ 分割规则链。
      * <ul>
      *   <li>{@code @js:} → JavaScript，追加到当前段并结束</li>
-     *   <li>{@code @attrName}（纯单词，直到下一个 @ 或字符串末尾）→ 属性选择器，不分割</li>
+     *   <li>最后一个 {@code @attrName}（在已知属性白名单中）→ 属性选择器，不分割（支持 {@code @attr##regex}）</li>
      *   <li>其余 @ → 链式分割符</li>
      * </ul>
      */
@@ -408,14 +459,15 @@ public class LegadoRuleEngine {
                     cur.append(rule.substring(i));
                     break;
                 }
-                // 判断 @ 后面到下一个 @ 为止是否是属性名（如 text/href/title/data-src 等）
-                // 支持 @attrName##regex 格式（如 @html##pattern）
+                // 取到下一个 @ 或字符串末尾，判断是否为已知属性（含 ##regex 后缀支持）
                 int nextAt = rest.indexOf('@');
                 String segment = nextAt >= 0 ? rest.substring(0, nextAt) : rest;
-                // 属性部分：## 之前的内容
                 String attrPart = segment.contains("##") ? segment.substring(0, segment.indexOf("##")) : segment;
-                if (attrPart.matches("[a-zA-Z][a-zA-Z0-9_-]*")) {
-                    // 属性选择器（如 @text、@href、@html##regex），不分割，原样保留
+                if (KNOWN_ATTRS.contains(attrPart.toLowerCase())) {
+                    // 已知属性（如 @text、@href、@html##regex），不分割，原样保留
+                    cur.append(c);
+                } else if (attrPart.toLowerCase().startsWith("data-")) {
+                    // data-* 属性，不分割
                     cur.append(c);
                 } else {
                     // 链式分割符
