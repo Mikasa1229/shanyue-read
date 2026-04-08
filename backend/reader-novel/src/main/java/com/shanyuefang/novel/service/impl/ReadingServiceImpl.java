@@ -11,10 +11,17 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
+import java.time.DayOfWeek;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.temporal.IsoFields;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -22,24 +29,51 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReadingServiceImpl implements ReadingService {
 
-    /** Redis ZSET key：成员=userId，分值=累计阅读秒数 */
-    private static final String RANKING_KEY = "ranking:reading_time";
+    /** Redis ZSET key 前缀：成员=userId，分值=本周累计阅读秒数。完整 key 如 ranking:reading_time:2026-W15 */
+    private static final String RANKING_KEY_PREFIX = "ranking:reading_time:";
 
     private final StringRedisTemplate stringRedisTemplate;
     private final UserFeignClient userFeignClient;
 
+    /** 返回当前 ISO 周的 ZSET key，格式：ranking:reading_time:yyyy-Www */
+    private String currentWeekKey() {
+        LocalDate today = LocalDate.now();
+        int year = today.get(IsoFields.WEEK_BASED_YEAR);
+        int week = today.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR);
+        return String.format("%s%d-W%02d", RANKING_KEY_PREFIX, year, week);
+    }
+
+    /** 计算距下周一 00:00:00 的秒数（用于设置 TTL） */
+    private long secondsUntilNextMonday() {
+        LocalDateTime nextMonday = LocalDate.now()
+                .with(TemporalAdjusters.next(DayOfWeek.MONDAY))
+                .atStartOfDay();
+        return Duration.between(LocalDateTime.now(), nextMonday).getSeconds();
+    }
+
     @Override
     public void record(long userId, int seconds) {
+        String key = currentWeekKey();
         String member = String.valueOf(userId);
-        stringRedisTemplate.opsForZSet().incrementScore(RANKING_KEY, member, seconds);
-        log.debug("记录阅读时长: userId={}, seconds={}", userId, seconds);
+        stringRedisTemplate.opsForZSet().incrementScore(key, member, seconds);
+
+        // 若 key 尚未设置过期时间（新建的本周 key），设置 TTL 到下周一 00:00
+        Long ttl = stringRedisTemplate.getExpire(key, TimeUnit.SECONDS);
+        if (ttl != null && ttl < 0) {
+            long expireSeconds = secondsUntilNextMonday();
+            if (expireSeconds > 0) {
+                stringRedisTemplate.expire(key, expireSeconds, TimeUnit.SECONDS);
+            }
+        }
+        log.debug("记录阅读时长: userId={}, seconds={}, key={}", userId, seconds, key);
     }
 
     @Override
     public List<RankingVO> getRanking(int top) {
         int limit = Math.min(top, 100);
+        String key = currentWeekKey();
         Set<ZSetOperations.TypedTuple<String>> tuples =
-                stringRedisTemplate.opsForZSet().reverseRangeWithScores(RANKING_KEY, 0, limit - 1);
+                stringRedisTemplate.opsForZSet().reverseRangeWithScores(key, 0, limit - 1);
 
         if (tuples == null || tuples.isEmpty()) {
             return List.of();
