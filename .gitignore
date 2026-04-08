@@ -29,8 +29,13 @@ application-prod.yml
 application-local.yml
 *.env
 
+
+
 # Node
 node_modules/
 dist/
 .pnpm-store/
 package-lock.json
+
+# 书源测试临时目录（含 legado 子仓库，不提交）
+book_source/
