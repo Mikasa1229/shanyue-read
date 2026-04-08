@@ -8,6 +8,7 @@ import com.shanyuefang.novel.domain.vo.BookSourceVO;
 import com.shanyuefang.novel.domain.vo.SearchBookVO;
 
 import java.util.List;
+import java.util.Map;
 
 public interface BookSourceService extends IService<BookSource> {
 
@@ -29,9 +30,18 @@ public interface BookSourceService extends IService<BookSource> {
     /** 使用指定书源搜索书籍 */
     List<SearchBookVO> search(Long sourceId, String keyword, int page);
 
+    /** 聚合搜索：并发调用所有启用书源，合并结果 */
+    List<SearchBookVO> aggregateSearch(String keyword, int page);
+
     /** 获取书籍目录（章节列表） */
     List<BookChapterVO> getChapters(Long sourceId, String bookUrl);
 
     /** 获取章节正文内容 */
     String getContent(Long sourceId, String chapterUrl);
+
+    /** 测试书源是否可访问，返回 accessible / statusCode / responseMs */
+    Map<String, Object> testSource(Long sourceId);
+
+    /** 调试：返回章节提取中间结果 */
+    Map<String, Object> debugChapters(Long sourceId, String bookUrl);
 }

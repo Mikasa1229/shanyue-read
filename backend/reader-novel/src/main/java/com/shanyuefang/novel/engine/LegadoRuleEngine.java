@@ -167,12 +167,66 @@ public class LegadoRuleEngine {
     private static String evalChain(String rule, String input) {
         List<String> parts = splitByAt(rule);
         String current = input;
-        for (String part : parts) {
+        for (int i = 0; i < parts.size(); i++) {
+            String part = parts.get(i).trim();
             if (!StringUtils.hasText(part)) continue;
-            current = applyOp(part.trim(), current);
+            // 中间步骤返回 outerHtml，以便下一步继续 CSS 选择；最后一步提取最终值
+            boolean intermediate = (i < parts.size() - 1);
+            current = intermediate ? applyOpAsHtml(part, current) : applyOp(part, current);
             if (current == null) return null;
         }
         return current;
+    }
+
+    /**
+     * 中间链式步骤：只做元素选择，返回 outerHtml 供下一步继续选择。
+     * 不提取 text/href 等终态属性，保留 HTML 以便链式 CSS 规则正常工作。
+     */
+    private static String applyOpAsHtml(String op, String input) {
+        if (!StringUtils.hasText(op) || !StringUtils.hasText(input)) return null;
+        if (isJavaScript(op)) return null;
+        // 正则替换、JSONPath、XPath 保持原有行为
+        if (op.startsWith("##")) return applyRegex(op.substring(2), input);
+        if (op.startsWith("css:")) return cssDirect(op.substring(4), input);
+        if (op.startsWith("$.") || op.startsWith("$[") || op.startsWith("$..")) {
+            return jsonPathSingle(op, input);
+        }
+        if (op.startsWith("//")) return xpathSingle(op, input);
+        if (op.matches("[a-zA-Z][a-zA-Z0-9_-]*") && !op.contains(".")) {
+            return extractAttr(input, op);
+        }
+        // CSS 选择：中间步骤返回 outerHtml，不提取终态属性
+        return cssSingleHtml(op, input);
+    }
+
+    /** 选取 CSS 元素，返回其 outerHtml（供链式中间步骤使用） */
+    private static String cssSingleHtml(String rule, String input) {
+        try {
+            // 去掉末尾可能存在的 @attr（中间步骤忽略属性提取）
+            String selector = rule;
+            int lastAt = rule.lastIndexOf('@');
+            if (lastAt > 0 && lastAt < rule.length() - 1) {
+                String afterAt = rule.substring(lastAt + 1);
+                String attrPart = afterAt.contains("##") ? afterAt.substring(0, afterAt.indexOf("##")) : afterAt;
+                if (attrPart.matches("[a-zA-Z][a-zA-Z0-9_-]*")) {
+                    selector = rule.substring(0, lastAt);
+                }
+            }
+            int index = -1;
+            Matcher idxM = Pattern.compile("\\.(\\d+)$").matcher(selector);
+            if (idxM.find()) {
+                index = Integer.parseInt(idxM.group(1));
+                selector = selector.substring(0, idxM.start());
+            }
+            Document doc = Jsoup.parse(input);
+            Elements els = doc.select(toCssSelector(selector));
+            if (els.isEmpty()) return null;
+            Element el = (index >= 0 && index < els.size()) ? els.get(index) : els.first();
+            return el.outerHtml();
+        } catch (Exception e) {
+            log.debug("CSS 中间步骤选取失败 rule={}: {}", rule, e.getMessage());
+            return null;
+        }
     }
 
     /** 对单个操作求值 */
@@ -311,7 +365,17 @@ public class LegadoRuleEngine {
             Element el = (index >= 0 && index < els.size()) ? els.get(index) : els.first();
             String result = extractAttr(el, attr);
             if (result != null && regexSuffix != null) {
-                result = applyRegex(regexSuffix, result);
+                // regexSuffix 来自 @attr##pattern 或 @attr##pattern##replacement
+                // 若只有 pattern（无第二个 ##），语义是"清理"：删除所有匹配，而非提取
+                if (regexSuffix.contains("##")) {
+                    result = applyRegex(regexSuffix, result);
+                } else {
+                    try {
+                        result = result.replaceAll(regexSuffix, "").trim();
+                    } catch (Exception e) {
+                        log.debug("正文清理正则失败 pattern={}: {}", regexSuffix, e.getMessage());
+                    }
+                }
             }
             return result;
 
@@ -354,17 +418,55 @@ public class LegadoRuleEngine {
         }
     }
 
-    /** 将 legado CSS 简写转换为标准 CSS selector */
+    /** 常见 HTML 标签名，用于区分 class.parent.tag 和 class.parent.cls */
+    private static final java.util.Set<String> HTML_TAGS = java.util.Set.of(
+            "a", "p", "ul", "ol", "li", "dl", "dt", "dd",
+            "div", "span", "table", "tr", "td", "th", "thead", "tbody", "tfoot",
+            "img", "input", "button", "form", "select", "option",
+            "h1", "h2", "h3", "h4", "h5", "h6",
+            "header", "footer", "nav", "main", "section", "article", "aside",
+            "figure", "figcaption", "blockquote", "pre", "code",
+            "strong", "em", "b", "i", "small", "label", "iframe"
+    );
+
+    /**
+     * 将 legado CSS 简写转换为标准 CSS selector。
+     * <ul>
+     *   <li>{@code class.foo} → {@code .foo}</li>
+     *   <li>{@code class.foo.ul} → {@code .foo ul}（ul 是 HTML 标签名，用后代选择器）</li>
+     *   <li>{@code class.foo.bar} → {@code .foo.bar}（bar 非 HTML 标签，作为复合 class）</li>
+     *   <li>{@code id.foo} → {@code #foo}</li>
+     *   <li>{@code tag.div} → {@code div}</li>
+     * </ul>
+     */
     private static String toCssSelector(String rule) {
         if (!StringUtils.hasText(rule)) return "*";
         // 去掉末尾数字索引
         String sel = rule.replaceAll("\\.(\\d+)$", "");
-        // class.xxx → .xxx
-        sel = sel.replaceAll("^class\\.", ".");
+        // tag.xxx → xxx
+        if (sel.startsWith("tag.")) return sel.substring(4);
         // id.xxx → #xxx
-        sel = sel.replaceAll("^id\\.", "#");
-        // tag.xxx → xxx（保持不变）
-        sel = sel.replaceAll("^tag\\.", "");
+        if (sel.startsWith("id.")) return "#" + sel.substring(3);
+        // class.xxx → .xxx；之后若出现 .htmltag，替换为后代选择器空格
+        if (sel.startsWith("class.")) {
+            sel = "." + sel.substring(6);
+        }
+        // 将 .htmlTagName 转换为后代选择器（空格分隔），保留 .cssClass
+        // 注意：只处理 class 前缀规则生成的 .xxx.yyy 形式
+        if (sel.startsWith(".")) {
+            StringBuilder sb = new StringBuilder();
+            String[] parts = sel.split("(?=\\.)");  // 按 . 分割但保留 .
+            for (String part : parts) {
+                if (part.isEmpty()) continue;
+                String word = part.startsWith(".") ? part.substring(1) : part;
+                if (!sb.isEmpty() && HTML_TAGS.contains(word.toLowerCase())) {
+                    sb.append(" ").append(word);  // 后代选择器
+                } else {
+                    sb.append(part);              // class 选择器
+                }
+            }
+            return sb.toString().trim();
+        }
         return sel.isEmpty() ? "*" : sel;
     }
 

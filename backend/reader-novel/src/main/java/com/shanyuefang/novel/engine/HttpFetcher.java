@@ -29,8 +29,8 @@ public class HttpFetcher {
             "AppleWebKit/537.36 (KHTML, like Gecko) " +
             "Chrome/120.0.0.0 Safari/537.36";
 
-    private static final int CONNECT_TIMEOUT = 10_000;
-    private static final int READ_TIMEOUT    = 20_000;
+    private static final int CONNECT_TIMEOUT = 3_000;
+    private static final int READ_TIMEOUT    = 6_000;
 
     private static final SSLContext TRUST_ALL_CTX;
 
@@ -53,12 +53,13 @@ public class HttpFetcher {
     /**
      * 抓取 URL，自动处理 legado 格式附加的请求配置 JSON。
      *
-     * @param rawUrl    原始 URL（可能带 ,{...} 附加配置）
-     * @param headerJson 书源级别 header JSON 字符串
-     * @param baseUrl   书源 base URL，用于将相对 URL 转为绝对 URL
+     * @param rawUrl      原始 URL（可能带 ,{...} 附加配置）
+     * @param headerJson  书源级别 header JSON 字符串
+     * @param baseUrl     书源 base URL，用于将相对 URL 转为绝对 URL
+     * @param charsetHint 书源指定的编码（如 "GBK"），null 表示自动检测
      */
     @SuppressWarnings("unchecked")
-    public static String fetch(String rawUrl, String headerJson, String baseUrl) throws IOException {
+    public static String fetch(String rawUrl, String headerJson, String baseUrl, String charsetHint) throws IOException {
         // 将相对 URL 转为绝对 URL
         String resolvedUrl = resolveUrl(rawUrl, baseUrl);
 
@@ -67,8 +68,11 @@ public class HttpFetcher {
         String bodyStr = null;
         Map<String, String> extraHeaders = new LinkedHashMap<>();
 
+        // URL 附加 JSON 中的 charset 优先级最高
+        String charset = charsetHint;
+
         // 解析 URL 末尾附加的 JSON 配置，例如：
-        // /search.html,{'method':'POST','body':'s={{key}}'}
+        // /search.html,{'method':'POST','body':'s={{key}}','charset':'GBK'}
         int jsonStart = findAppendedJsonStart(resolvedUrl);
         if (jsonStart > 0) {
             url = resolvedUrl.substring(0, jsonStart).trim();
@@ -89,6 +93,9 @@ public class HttpFetcher {
                     ((Map<String, Object>) h).forEach((k, v) ->
                             extraHeaders.put(k, String.valueOf(v)));
                 }
+                // URL 附加 JSON 中的 charset 覆盖书源级别设置
+                Object cs = cfg.get("charset");
+                if (cs != null) charset = String.valueOf(cs);
             } catch (Exception e) {
                 log.debug("书源 URL 附加 JSON 解析失败: {}", jsonPart);
             }
@@ -132,10 +139,16 @@ public class HttpFetcher {
                 if (!"User-Agent".equalsIgnoreCase(k)) req.header(k, v);
             });
 
-            log.debug("{} 抓取: {}", method, url);
+            final String finalCharset = charset;
+            log.debug("{} 抓取: {} charset={}", method, url, finalCharset != null ? finalCharset : "auto");
             try (HttpResponse resp = req.execute()) {
                 if (resp.getStatus() >= 400) {
                     throw new IOException("HTTP " + resp.getStatus() + " 请求失败: " + url);
+                }
+                // 若指定了编码，使用字节流解码；否则让 Hutool 自动检测
+                if (StringUtils.hasText(finalCharset)) {
+                    byte[] bytes = resp.bodyBytes();
+                    return new String(bytes, java.nio.charset.Charset.forName(finalCharset));
                 }
                 return resp.body();
             }
@@ -146,9 +159,14 @@ public class HttpFetcher {
         }
     }
 
+    /** 兼容旧调用（不指定编码） */
+    public static String fetch(String rawUrl, String headerJson, String baseUrl) throws IOException {
+        return fetch(rawUrl, headerJson, baseUrl, null);
+    }
+
     /** 兼容旧调用 */
     public static String fetch(String rawUrl, String headerJson) throws IOException {
-        return fetch(rawUrl, headerJson, null);
+        return fetch(rawUrl, headerJson, null, null);
     }
 
     /** 将相对 URL 转为绝对 URL */

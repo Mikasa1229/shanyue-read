@@ -3,10 +3,10 @@
     <div class="container">
 
       <!-- 正文阅读全屏遮罩 -->
-      <div v-if="reader.open" class="reader-overlay" @click.self="reader.open = false">
+      <div v-if="reader.open" class="reader-overlay" @click.self="closeReader">
         <div class="reader-panel">
           <div class="reader-header">
-            <button class="reader-back" @click="reader.open = false">← 返回目录</button>
+            <button class="reader-back" @click="closeReader">← 返回目录</button>
             <span class="reader-title">{{ reader.chapterName }}</span>
           </div>
           <div v-if="reader.loading" class="reader-loading">加载中…</div>
@@ -49,11 +49,18 @@
             <div class="source-info">
               <span class="source-name">{{ s.sourceName }}</span>
               <span class="source-url">{{ s.sourceUrl }}</span>
+              <span v-if="testResults[s.id]" class="test-result" :class="testResults[s.id].accessible ? 'ok' : 'fail'">
+                {{ testResults[s.id].accessible ? '✓' : '✗' }}
+                {{ testResults[s.id].accessible ? `${testResults[s.id].responseMs}ms` : (testResults[s.id].error || `HTTP ${testResults[s.id].statusCode}`) }}
+              </span>
             </div>
             <div class="source-actions">
               <span class="status-dot" :class="s.enabled ? 'on' : 'off'">
                 {{ s.enabled ? '启用' : '禁用' }}
               </span>
+              <button class="icon-btn" :title="testingId === s.id ? '测试中…' : '测试可访问性'" @click="doTestSource(s)" :disabled="testingId === s.id">
+                {{ testingId === s.id ? '⏳' : '🔍' }}
+              </button>
               <button class="icon-btn" :title="s.enabled ? '禁用' : '启用'" @click="toggleSource(s)">
                 {{ s.enabled ? '🔕' : '🔔' }}
               </button>
@@ -77,21 +84,15 @@
       <section v-if="activeTab === 'search'">
         <!-- 搜索栏 -->
         <div class="search-bar">
-          <select v-model="search.sourceId" class="source-select">
-            <option value="">— 选择书源 —</option>
-            <option v-for="s in enabledSources" :key="s.id" :value="s.id">
-              {{ s.sourceName }}
-            </option>
-          </select>
           <div class="search-wrap">
             <input
               v-model="search.keyword"
               class="search-input"
-              placeholder="输入书名或作者…"
+              placeholder="输入书名或作者，聚合搜索所有书源…"
               @keydown.enter="doSearch"
             />
             <button class="search-btn" :disabled="search.loading" @click="doSearch">
-              {{ search.loading ? '搜索中…' : '搜索' }}
+              {{ search.loading ? '搜索中…' : '聚合搜索' }}
             </button>
           </div>
         </div>
@@ -121,13 +122,19 @@
 
         <!-- 搜索结果 -->
         <template v-else>
-          <div v-if="search.loading" class="spinner-wrap"><div class="spinner"></div></div>
+          <!-- 聚合搜索进度条 -->
+          <div v-if="search.loading" class="search-progress-wrap">
+            <div class="search-progress-bar">
+              <div class="search-progress-fill" :style="{ width: searchProgress + '%' }"></div>
+            </div>
+            <p class="search-progress-text">正在并发搜索所有书源… {{ searchProgress }}%</p>
+          </div>
           <div v-else-if="search.results.length === 0 && search.searched" class="empty-state">
             <div class="empty-icon">🔍</div>
             <p>没有找到相关书籍</p>
           </div>
           <div v-else-if="!search.searched" class="search-hint">
-            <p>选择书源后输入关键词开始搜索</p>
+            <p>输入关键词，将并发搜索所有已启用的书源</p>
           </div>
           <div v-else class="book-grid">
             <div v-for="(book, idx) in search.results" :key="idx" class="book-card">
@@ -210,13 +217,17 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useToast } from '@/composables/useToast'
+import { useUserStore } from '@/stores/user'
 import {
   apiListSources, apiToggleSource, apiDeleteSource,
   apiImportByUrl, apiImportByJson,
-  apiSearchBooks, apiGetChapters, apiGetContent
+  apiAggregateSearch, apiGetChapters, apiGetContent,
+  apiTestSource
 } from '@/api/bookSource'
+import { apiRecordReading } from '@/api/reading'
 
 const { show } = useToast()
+const userStore = useUserStore()
 
 // ─── 标签页 ────────────────────────────────────────────────────
 const tabs = [
@@ -258,6 +269,22 @@ async function toggleSource(s) {
   }
 }
 
+// ─── 书源测试 ──────────────────────────────────────────────────
+const testResults = ref({})
+const testingId = ref(null)
+
+async function doTestSource(s) {
+  testingId.value = s.id
+  try {
+    const res = await apiTestSource(s.id)
+    testResults.value = { ...testResults.value, [s.id]: res }
+  } catch (e) {
+    testResults.value = { ...testResults.value, [s.id]: { accessible: false, statusCode: 0, responseMs: 0, error: e.message } }
+  } finally {
+    testingId.value = null
+  }
+}
+
 async function deleteSource(s) {
   if (!confirm(`确认删除书源「${s.sourceName}」？`)) return
   try {
@@ -296,16 +323,34 @@ async function doImport() {
 }
 
 // ─── 搜索 ──────────────────────────────────────────────────────
-const search = ref({ sourceId: '', keyword: '', results: [], loading: false, searched: false })
+const search = ref({ keyword: '', results: [], loading: false, searched: false })
+const searchProgress = ref(0)
+let progressTimer = null
+
+function startProgress() {
+  searchProgress.value = 0
+  clearInterval(progressTimer)
+  // 6 秒内线性推进到 90%（每 200ms +3%），最后 10% 等结果回来
+  progressTimer = setInterval(() => {
+    if (searchProgress.value < 90) searchProgress.value += 3
+    else clearInterval(progressTimer)
+  }, 200)
+}
+
+function finishProgress() {
+  clearInterval(progressTimer)
+  searchProgress.value = 100
+  setTimeout(() => { searchProgress.value = 0 }, 400)
+}
 
 async function doSearch() {
-  if (!search.value.sourceId) { show('请先选择书源'); return }
   if (!search.value.keyword.trim()) { show('请输入搜索关键词'); return }
   search.value.loading = true
   search.value.searched = false
   clearChapters()
+  startProgress()
   try {
-    const res = await apiSearchBooks(search.value.sourceId, search.value.keyword.trim())
+    const res = await apiAggregateSearch(search.value.keyword.trim())
     search.value.results = res ?? []
     search.value.searched = true
   } catch (e) {
@@ -313,18 +358,20 @@ async function doSearch() {
     search.value.results = []
     search.value.searched = true
   } finally {
+    finishProgress()
     search.value.loading = false
   }
 }
 
 // ─── 章节列表 ──────────────────────────────────────────────────
-const chapters = ref({ bookTitle: '', bookUrl: '', list: [], loading: false })
+const chapters = ref({ bookTitle: '', bookUrl: '', sourceId: '', list: [], loading: false })
 
 async function loadChapters(book) {
   if (!book.bookUrl) { show('该书源未返回书籍 URL'); return }
-  chapters.value = { bookTitle: book.name, bookUrl: book.bookUrl, list: [], loading: true }
+  if (!book.sourceId) { show('无法确定书源，无法获取目录'); return }
+  chapters.value = { bookTitle: book.name, bookUrl: book.bookUrl, sourceId: book.sourceId, list: [], loading: true }
   try {
-    const res = await apiGetChapters(search.value.sourceId, book.bookUrl)
+    const res = await apiGetChapters(book.sourceId, book.bookUrl)
     chapters.value.list = res ?? []
   } catch (e) {
     show(e.message)
@@ -340,12 +387,14 @@ function clearChapters() {
 
 // ─── 正文阅读 ──────────────────────────────────────────────────
 const reader = ref({ open: false, chapterName: '', html: '', loading: false, error: '' })
+let readerOpenTime = 0
 
 async function openChapter(ch) {
+  readerOpenTime = Date.now()
   if (!ch.chapterUrl) { show('该章节无 URL'); return }
   reader.value = { open: true, chapterName: ch.chapterName, html: '', loading: true, error: '' }
   try {
-    const res = await apiGetContent(search.value.sourceId, ch.chapterUrl)
+    const res = await apiGetContent(chapters.value.sourceId, ch.chapterUrl)
     const raw = res?.content ?? ''
     if (!raw.trim()) {
       reader.value.error = '正文内容为空（该书源可能采用 JS 动态加载，服务端无法提取）'
@@ -356,6 +405,19 @@ async function openChapter(ch) {
     reader.value.error = e.message
   } finally {
     reader.value.loading = false
+  }
+}
+
+function closeReader() {
+  reader.value.open = false
+  if (readerOpenTime > 0 && userStore.isLoggedIn) {
+    const seconds = Math.floor((Date.now() - readerOpenTime) / 1000)
+    readerOpenTime = 0
+    if (seconds >= 5) {
+      apiRecordReading(seconds).catch(() => {})
+    }
+  } else {
+    readerOpenTime = 0
   }
 }
 
@@ -458,6 +520,14 @@ onMounted(() => loadSources(1))
   gap: var(--space-3);
   flex-shrink: 0;
 }
+.test-result {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+.test-result.ok   { background: #d1fae5; color: #065f46; }
+.test-result.fail { background: #fee2e2; color: #991b1b; }
 .status-dot {
   font-size: 0.75rem;
   padding: 2px 8px;
@@ -724,6 +794,28 @@ onMounted(() => loadSources(1))
 }
 
 /* 通用 */
+.search-progress-wrap {
+  padding: var(--space-8) 0;
+  text-align: center;
+}
+.search-progress-bar {
+  height: 6px;
+  background: var(--paper-3);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-bottom: var(--space-3);
+}
+.search-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold-1), var(--gold-0));
+  border-radius: var(--radius-full);
+  transition: width 0.2s ease;
+}
+.search-progress-text {
+  font-size: 0.875rem;
+  color: var(--ink-4);
+}
+
 .spinner-wrap {
   display: flex;
   justify-content: center;

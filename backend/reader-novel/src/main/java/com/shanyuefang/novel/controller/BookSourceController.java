@@ -74,6 +74,14 @@ public class BookSourceController {
 
     // ─── 搜索 ─────────────────────────────────────────────────
 
+    @Operation(summary = "聚合搜索：并发调用所有启用书源，合并结果")
+    @GetMapping("/search")
+    public R<List<SearchBookVO>> aggregateSearch(
+            @RequestParam(name = "keyword") String keyword,
+            @RequestParam(name = "page", defaultValue = "1") int page) {
+        return R.ok(bookSourceService.aggregateSearch(keyword, page));
+    }
+
     @Operation(summary = "使用指定书源搜索书籍")
     @GetMapping("/{id}/search")
     public R<List<SearchBookVO>> search(
@@ -103,5 +111,19 @@ public class BookSourceController {
             @Parameter(description = "章节 URL") String chapterUrl) {
         String text = bookSourceService.getContent(id, chapterUrl);
         return R.ok(Map.of("content", text));
+    }
+
+    @Operation(summary = "测试书源是否可访问")
+    @GetMapping("/{id}/test")
+    public R<Map<String, Object>> test(@PathVariable("id") Long id) {
+        return R.ok(bookSourceService.testSource(id));
+    }
+
+    @Operation(summary = "调试：查看章节提取中间结果")
+    @GetMapping("/{id}/debug-chapters")
+    public R<Map<String, Object>> debugChapters(
+            @PathVariable("id") Long id,
+            @RequestParam("bookUrl") String bookUrl) {
+        return R.ok(bookSourceService.debugChapters(id, bookUrl));
     }
 }

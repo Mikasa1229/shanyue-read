@@ -28,8 +28,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -160,7 +163,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
         String body;
         try {
-            body = HttpFetcher.fetch(url, model.getHeader(), model.getBookSourceUrl());
+            body = HttpFetcher.fetch(url, model.getHeader(), model.getBookSourceUrl(), model.getBookSourceCharset());
         } catch (Exception e) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "搜索请求失败：" + e.getMessage());
         }
@@ -204,7 +207,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
         String body;
         try {
-            body = HttpFetcher.fetch(bookUrl, model.getHeader(), model.getBookSourceUrl());
+            body = HttpFetcher.fetch(bookUrl, model.getHeader(), model.getBookSourceUrl(), model.getBookSourceCharset());
         } catch (Exception e) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "获取目录失败：" + e.getMessage());
         }
@@ -215,9 +218,9 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
             String item = items.get(i);
             BookChapterVO vo = new BookChapterVO();
             vo.setIndex(i);
-            vo.setName(extractField(tocRule.getChapterName(), item));
-            vo.setUrl(resolveUrl(extractField(tocRule.getChapterUrl(), item), model.getBookSourceUrl()));
-            if (StringUtils.hasText(vo.getUrl())) {
+            vo.setChapterName(extractField(tocRule.getChapterName(), item));
+            vo.setChapterUrl(resolveUrl(extractField(tocRule.getChapterUrl(), item), model.getBookSourceUrl()));
+            if (StringUtils.hasText(vo.getChapterUrl())) {
                 chapters.add(vo);
             }
         }
@@ -238,7 +241,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
         String body;
         try {
-            body = HttpFetcher.fetch(chapterUrl, model.getHeader(), model.getBookSourceUrl());
+            body = HttpFetcher.fetch(chapterUrl, model.getHeader(), model.getBookSourceUrl(), model.getBookSourceCharset());
         } catch (Exception e) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "获取章节内容失败：" + e.getMessage());
         }
@@ -249,6 +252,84 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         }
         // 清理多余空行
         return content.replaceAll("(\r?\n){3,}", "\n\n").trim();
+    }
+
+    // ─── 调试 ─────────────────────────────────────────────────
+
+    @Override
+    public Map<String, Object> debugChapters(Long sourceId, String bookUrl) {
+        BookSource bs = getById(sourceId);
+        if (bs == null) return Map.of("error", "书源不存在");
+        BookSourceModel model;
+        try { model = OM.readValue(bs.getSourceJson(), BookSourceModel.class); }
+        catch (Exception e) { return Map.of("error", "JSON解析失败: " + e.getMessage()); }
+
+        BookSourceModel.TocRule tocRule = model.getRuleToc();
+        if (tocRule == null) return Map.of("error", "无目录规则");
+
+        String body;
+        try { body = HttpFetcher.fetch(bookUrl, model.getHeader(), model.getBookSourceUrl()); }
+        catch (Exception e) { return Map.of("error", "HTTP失败: " + e.getMessage()); }
+
+        List<String> items = LegadoRuleEngine.extractList(tocRule.getChapterList(), body);
+        String firstItem = items.isEmpty() ? null : items.get(0);
+        String firstName = firstItem != null ? LegadoRuleEngine.extractString(tocRule.getChapterName(), firstItem) : null;
+        String firstUrl  = firstItem != null ? LegadoRuleEngine.extractString(tocRule.getChapterUrl(), firstItem) : null;
+
+        return Map.of(
+            "enabled", bs.getEnabled(),
+            "chapterListRule", tocRule.getChapterList(),
+            "chapterNameRule", String.valueOf(tocRule.getChapterName()),
+            "chapterUrlRule",  String.valueOf(tocRule.getChapterUrl()),
+            "htmlLength", body.length(),
+            "htmlSample", body.substring(0, Math.min(500, body.length())),
+            "itemCount", items.size(),
+            "firstItem", firstItem != null ? firstItem.substring(0, Math.min(200, firstItem.length())) : "null",
+            "firstChapterName", String.valueOf(firstName),
+            "firstChapterUrl",  String.valueOf(firstUrl)
+        );
+    }
+
+    // ─── 测试书源 ─────────────────────────────────────────────
+
+    @Override
+    public Map<String, Object> testSource(Long sourceId) {
+        BookSource bs = getById(sourceId);
+        if (bs == null) throw new BusinessException(ResultCode.NOT_FOUND, "书源不存在");
+
+        BookSourceModel model;
+        try {
+            model = OM.readValue(bs.getSourceJson(), BookSourceModel.class);
+        } catch (Exception e) {
+            return Map.of("accessible", false, "statusCode", 0, "responseMs", 0L,
+                    "error", "书源 JSON 解析失败");
+        }
+
+        String targetUrl = StringUtils.hasText(model.getBookSourceUrl())
+                ? model.getBookSourceUrl() : bs.getSourceUrl();
+
+        long start = System.currentTimeMillis();
+        try {
+            HttpClient client = HttpClient.newBuilder()
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .connectTimeout(Duration.ofSeconds(8))
+                    .build();
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(targetUrl))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                    .build();
+            HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
+            long ms = System.currentTimeMillis() - start;
+            int code = resp.statusCode();
+            boolean ok = code >= 200 && code < 400;
+            return Map.of("accessible", ok, "statusCode", code, "responseMs", ms);
+        } catch (Exception e) {
+            long ms = System.currentTimeMillis() - start;
+            return Map.of("accessible", false, "statusCode", 0, "responseMs", ms,
+                    "error", e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
     }
 
     // ─── 私有工具 ─────────────────────────────────────────────
@@ -306,6 +387,44 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         } catch (Exception e) {
             return s;
         }
+    }
+
+    @Override
+    public List<SearchBookVO> aggregateSearch(String keyword, int page) {
+        // 查所有启用的书源
+        List<BookSource> sources = lambdaQuery()
+                .eq(BookSource::getEnabled, true)
+                .list();
+
+        if (sources.isEmpty()) return List.of();
+
+        // 并发调用每个书源搜索，单个书源超时 8 秒
+        List<CompletableFuture<List<SearchBookVO>>> futures = sources.stream()
+                .map(bs -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return search(bs.getId(), keyword, page);
+                    } catch (Exception e) {
+                        log.warn("聚合搜索：书源 [{}] 搜索失败，跳过: {}", bs.getSourceName(), e.getMessage());
+                        return List.<SearchBookVO>of();
+                    }
+                }))
+                .toList();
+
+        // 等待所有并发任务完成（最多 15 秒）
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(15, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("聚合搜索等待超时，已有结果正常返回");
+        }
+
+        // 收集所有结果
+        return futures.stream()
+                .filter(f -> f.isDone() && !f.isCompletedExceptionally())
+                .flatMap(f -> {
+                    try { return f.get().stream(); } catch (Exception ex) { return java.util.stream.Stream.of(); }
+                })
+                .collect(java.util.stream.Collectors.toList());
     }
 
     private BookSourceVO toVO(BookSource bs) {

@@ -1,5 +1,7 @@
 package com.shanyuefang.novel.domain.vo;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 
 /** 通过书源搜索到的书籍信息 */
@@ -24,7 +26,8 @@ public class SearchBookVO {
      * 注意：这是原始书源网站的 URL，非本系统 URL
      */
     private String bookUrl;
-    /** 来源书源 ID */
+    /** 来源书源 ID（序列化为字符串防止 JS 大数精度丢失） */
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long sourceId;
     /** 来源书源名称 */
     private String sourceName;

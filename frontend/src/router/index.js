@@ -34,6 +34,16 @@ const routes = [
     path: '/book-sources',
     name: 'BookSource',
     component: () => import('@/views/BookSourceView.vue')
+  },
+  {
+    path: '/square',
+    name: 'Square',
+    component: () => import('@/views/SquareView.vue')
+  },
+  {
+    path: '/ranking',
+    name: 'Ranking',
+    component: () => import('@/views/RankingView.vue')
   }
 ]
 

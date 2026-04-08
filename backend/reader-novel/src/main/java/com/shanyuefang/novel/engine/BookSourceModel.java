@@ -35,6 +35,10 @@ public class BookSourceModel {
     @JsonProperty("header")
     private String header;
 
+    /** 书源编码（如 GBK、UTF-8，默认 UTF-8） */
+    @JsonProperty("bookSourceCharset")
+    private String bookSourceCharset;
+
     // ─── 搜索规则（扁平字段，legado 3.x）─────────────────────
 
     @JsonProperty("searchUrl")
