@@ -5,6 +5,7 @@ import com.shanyuefang.interaction.domain.dto.InteractionStatusDTO;
 import com.shanyuefang.interaction.domain.entity.Interaction;
 import com.shanyuefang.interaction.domain.vo.InteractionResultVO;
 import com.shanyuefang.interaction.event.InteractionEventProducer;
+import com.shanyuefang.interaction.feign.NovelFeignClient;
 import com.shanyuefang.interaction.mapper.InteractionMapper;
 import com.shanyuefang.interaction.service.impl.InteractionServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +17,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import com.shanyuefang.interaction.domain.vo.InteractionResultVO;
 
 import java.util.List;
 import java.util.Map;
@@ -33,12 +36,13 @@ class InteractionServiceTest {
     @Mock RedisTemplate<String, Object> redisTemplate;
     @Mock ValueOperations<String, Object> valueOps;
     @Mock InteractionEventProducer eventProducer;
+    @Mock NovelFeignClient novelFeignClient;
 
     InteractionServiceImpl interactionService;
 
     @BeforeEach
     void setUp() {
-        interactionService = new InteractionServiceImpl(redisTemplate, eventProducer);
+        interactionService = new InteractionServiceImpl(redisTemplate, eventProducer, novelFeignClient);
         ReflectionTestUtils.setField(interactionService, "baseMapper", interactionMapper);
         ReflectionTestUtils.setField(interactionService, "entityClass", Interaction.class);
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -147,11 +151,11 @@ class InteractionServiceTest {
                 .thenReturn("0")  // targetId=2 → not liked
                 .thenReturn("1"); // targetId=3 → liked
 
-        Map<Long, Boolean> result = interactionService.batchQueryStatus(1L, dto);
+        Map<Long, InteractionResultVO> result = interactionService.batchQueryStatusWithCount(1L, dto);
 
-        assertThat(result).containsEntry(1L, true)
-                          .containsEntry(2L, false)
-                          .containsEntry(3L, true);
+        assertThat(result.get(1L).getActive()).isTrue();
+        assertThat(result.get(2L).getActive()).isFalse();
+        assertThat(result.get(3L).getActive()).isTrue();
         verify(interactionMapper, never()).selectCount(any());
     }
 
@@ -163,7 +167,7 @@ class InteractionServiceTest {
         dto.setTargetType(1);
         dto.setAction(1);
 
-        Map<Long, Boolean> result = interactionService.batchQueryStatus(1L, dto);
+        Map<Long, InteractionResultVO> result = interactionService.batchQueryStatusWithCount(1L, dto);
 
         assertThat(result).isEmpty();
     }

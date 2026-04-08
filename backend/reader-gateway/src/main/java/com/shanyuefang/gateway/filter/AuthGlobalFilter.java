@@ -80,8 +80,17 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         return WHITE_LIST.stream().anyMatch(path::startsWith);
     }
 
+    /** 即便是 GET，这些路径也需要登录（会读取用户身份信息） */
+    private static final List<String> AUTH_REQUIRED_GET = List.of(
+            "/api/novels/my"
+    );
+
     private boolean isPublicReadPath(String path) {
-        return path.startsWith("/api/novels") || path.startsWith("/api/comments");
+        if (AUTH_REQUIRED_GET.stream().anyMatch(path::startsWith)) return false;
+        return path.startsWith("/api/novels")
+                || path.startsWith("/api/comments")
+                || path.startsWith("/api/book-sources")
+                || path.startsWith("/api/reading/ranking");
     }
 
     private Mono<Void> unauthorized(ServerWebExchange exchange) {

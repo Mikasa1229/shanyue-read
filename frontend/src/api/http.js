@@ -1,8 +1,21 @@
 import axios from 'axios'
 
+// 将 JSON 中大整数 ID 字段转为字符串，防止 JS Number 精度丢失
+function safeParseBigIds(text) {
+  return text.replace(/"(id|sourceId)"\s*:\s*(\d{16,})/g, '"$1":"$2"')
+}
+
 const http = axios.create({
   baseURL: '/api',
-  timeout: 10000
+  timeout: 10000,
+  transformResponse: [
+    (data) => {
+      if (typeof data === 'string') {
+        try { return JSON.parse(safeParseBigIds(data)) } catch { return data }
+      }
+      return data
+    }
+  ]
 })
 
 http.interceptors.request.use((config) => {

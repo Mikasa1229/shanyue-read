@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -57,6 +58,16 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining("; "));
         log.warn("参数约束违反: {}", message);
         return R.fail(ResultCode.PARAM_ERROR, message);
+    }
+
+    /**
+     * 缺少必要请求头（通常是未登录直接访问需鉴权接口）
+     */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public R<Void> handleMissingRequestHeaderException(MissingRequestHeaderException e) {
+        log.warn("缺少请求头: {}", e.getHeaderName());
+        return R.fail(ResultCode.UNAUTHORIZED);
     }
 
     /**

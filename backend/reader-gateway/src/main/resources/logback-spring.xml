@@ -11,31 +11,31 @@
     </encoder>
   </appender>
 
-  <!-- ─── 错误文件（仅写入 ERROR 级别） ─── -->
-  <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-    <file>logs/error.log</file>
+  <!-- ─── 警告+错误文件（WARN 及以上） ─── -->
+  <appender name="WARN_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>logs/warn.log</file>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-      <level>ERROR</level>
+      <level>WARN</level>
     </filter>
     <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-      <fileNamePattern>logs/error.%d{yyyy-MM-dd}.log</fileNamePattern>
+      <fileNamePattern>logs/warn.%d{yyyy-MM-dd}.log</fileNamePattern>
       <maxHistory>7</maxHistory>
     </rollingPolicy>
     <encoder>
-      <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [${APP_NAME}] [%thread] ERROR %logger{60} - %msg%n%ex{full}</pattern>
+      <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [${APP_NAME}] [%thread] %-5level %logger{60} - %msg%n%ex{full}</pattern>
     </encoder>
   </appender>
 
   <!-- ─── 根日志 ─── -->
   <root level="INFO">
     <appender-ref ref="CONSOLE"/>
-    <appender-ref ref="ERROR_FILE"/>
+    <appender-ref ref="WARN_FILE"/>
   </root>
 
   <!-- 项目包输出 DEBUG -->
   <logger name="com.shanyuefang" level="DEBUG" additivity="false">
     <appender-ref ref="CONSOLE"/>
-    <appender-ref ref="ERROR_FILE"/>
+    <appender-ref ref="WARN_FILE"/>
   </logger>
 
 </configuration>

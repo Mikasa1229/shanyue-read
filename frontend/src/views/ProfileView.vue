@@ -115,13 +115,39 @@
             </div>
           </div>
 
-          <!-- Favorites (placeholder) -->
+          <!-- Favorites -->
           <div v-if="activeTab === 'favorites'" class="content-card">
             <h3 class="content-title">我的收藏</h3>
-            <div class="empty-state">
+            <div v-if="favLoading" class="empty-state">加载中…</div>
+            <div v-else-if="favorites.length === 0" class="empty-state">
               <div class="empty-icon">🔖</div>
               <p>收藏你喜爱的小说，在这里找到它们</p>
               <router-link to="/" class="btn btn-gold mt-4">去发现好书</router-link>
+            </div>
+            <div v-else>
+              <div class="my-novels-list">
+                <div v-for="n in favorites" :key="n.id" class="my-novel-row">
+                  <router-link :to="`/novel/${n.id}`" class="my-novel-info">
+                    <div class="my-novel-cover">
+                      <img v-if="n.coverUrl" :src="n.coverUrl" :alt="n.title" />
+                      <span v-else>{{ n.title?.charAt(0) }}</span>
+                    </div>
+                    <div>
+                      <p class="my-novel-title">{{ n.title }}</p>
+                      <p class="my-novel-meta">{{ n.authorName }} · {{ n.category }}</p>
+                    </div>
+                  </router-link>
+                </div>
+              </div>
+              <div v-if="favTotalPages > 1" class="pagination mt-4">
+                <button
+                  v-for="p in favTotalPages"
+                  :key="p"
+                  class="page-btn"
+                  :class="{ active: p === favPage }"
+                  @click="loadFavorites(p)"
+                >{{ p }}</button>
+              </div>
             </div>
           </div>
         </section>
@@ -137,10 +163,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { apiUpdatePassword } from '@/api/user'
 import { apiGetMyNovels, apiDeleteNovel } from '@/api/novel'
+import { apiGetMyFavorites } from '@/api/interaction'
 import { useToast } from '@/composables/useToast'
 import CheckinCalendar from '@/components/CheckinCalendar.vue'
 import NovelCard from '@/components/NovelCard.vue'
@@ -232,6 +259,32 @@ async function handleDeleteNovel(id) {
     show(e.message)
   }
 }
+
+// Favorites
+const favorites = ref([])
+const favPage = ref(1)
+const favTotalPages = ref(1)
+const favLoading = ref(false)
+
+async function loadFavorites(page = 1) {
+  favLoading.value = true
+  try {
+    const res = await apiGetMyFavorites(page)
+    favorites.value = res?.records ?? []
+    favTotalPages.value = res?.pages ?? 1
+    favPage.value = page
+  } catch (e) {
+    show(e.message)
+  } finally {
+    favLoading.value = false
+  }
+}
+
+// 切换 tab 时按需加载
+watch(activeTab, (tab) => {
+  if (tab === 'favorites' && favorites.value.length === 0) loadFavorites(1)
+  if (tab === 'mynovels' && myNovels.value.length === 0) loadMyNovels(1)
+})
 
 onMounted(async () => {
   await userStore.fetchProfile()
@@ -468,6 +521,32 @@ onMounted(async () => {
   border-color: #e8b4b8;
   flex-shrink: 0;
   margin-left: var(--space-3);
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.page-btn {
+  width: 36px;
+  height: 36px;
+  border: 1.5px solid var(--paper-3);
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: 0.875rem;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.page-btn:hover { background: var(--paper-2); }
+.page-btn.active {
+  background: var(--ink-0);
+  border-color: var(--ink-0);
+  color: var(--paper-0);
 }
 
 /* Empty state */

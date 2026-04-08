@@ -13,7 +13,7 @@ echo "时间：$(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
 
 for svc_dir in "$ROOT"/reader-*/; do
-  log="$svc_dir/logs/error.log"
+  log="$svc_dir/logs/warn.log"
   svc=$(basename "$svc_dir")
   if [ -f "$log" ] && [ -s "$log" ]; then
     FOUND=1

@@ -18,4 +18,7 @@ public interface CommentService {
 
     /** 分页查询某根评论的回复列表 */
     IPage<CommentVO> listReplies(Long rootId, CommentPageDTO dto);
+
+    /** 全站最新根评论（书友动态广场） */
+    IPage<CommentVO> listRecentComments(int page, int size);
 }

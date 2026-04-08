@@ -15,24 +15,14 @@ context="【后端错误日志自动注入 — $(date '+%H:%M:%S')】
 
 ${output}"
 
-# 用 jq 或 python 输出合法 JSON（Windows Store 的 python3 stub 在非交互 shell 中不可用，优先 python）
+# 用 python 输出合法 JSON，使用 buffer 读取并用 replace 处理无效字节，避免 surrogate 问题
 _json_output() {
-  python -c "
-import json, sys
-ctx = sys.stdin.read()
-print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': ctx}}))
-" <<< "$context"
+  local py_cmd='import json, sys; ctx = sys.stdin.buffer.read().decode("utf-8", "replace"); print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": ctx}}))'
+  if command -v python &>/dev/null; then
+    printf '%s' "$context" | python -c "$py_cmd"
+  elif command -v python3 &>/dev/null; then
+    printf '%s' "$context" | python3 -c "$py_cmd"
+  fi
 }
 
-if command -v jq &>/dev/null; then
-  jq -n --arg ctx "$context" \
-    '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":$ctx}}'
-elif command -v python &>/dev/null; then
-  _json_output
-elif command -v python3 &>/dev/null; then
-  python3 -c "
-import json, sys
-ctx = sys.stdin.read()
-print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': ctx}}))
-" <<< "$context"
-fi
+_json_output

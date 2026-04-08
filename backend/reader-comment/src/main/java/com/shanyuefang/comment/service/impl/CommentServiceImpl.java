@@ -124,6 +124,16 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
         return toVOPage(page);
     }
 
+    @Override
+    public IPage<CommentVO> listRecentComments(int page, int size) {
+        Page<Comment> result = lambdaQuery()
+                .isNull(Comment::getRootId)          // 只查根评论
+                .eq(Comment::getStatus, 1)
+                .orderByDesc(Comment::getCreatedAt)
+                .page(new Page<>(page, size));
+        return toVOPage(result);
+    }
+
     // ─────────── 私有方法 ───────────
 
     /** 将分页 Comment 转换为分页 CommentVO，并批量填充用户信息 */
