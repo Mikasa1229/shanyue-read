@@ -46,13 +46,20 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
         comment.setLikeCount(0);
         comment.setStatus(1);
 
+        // 书源书籍书评：设置书名
+        if (dto.getBookTitle() != null && !dto.getBookTitle().isBlank()) {
+            comment.setBookTitle(dto.getBookTitle());
+        }
+
         if (dto.getParentId() != null) {
-            // 回复：需找到父评论确认存在且属于同一小说
+            // 回复：需找到父评论确认存在
             Comment parent = getById(dto.getParentId());
             if (parent == null || Boolean.TRUE.equals(parent.getDeleted())) {
                 throw new BusinessException(ResultCode.NOT_FOUND, "被回复的评论不存在");
             }
-            if (!parent.getNovelId().equals(dto.getNovelId())) {
+            // 仅在 novelId 均不为 null 时才校验是否属于同一小说
+            if (dto.getNovelId() != null && parent.getNovelId() != null
+                    && !parent.getNovelId().equals(dto.getNovelId())) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "评论不属于该小说");
             }
             comment.setParentId(parent.getId());
@@ -62,12 +69,13 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
 
         save(comment);
 
-        // 异步通知小说服务更新 comment_count（只统计根评论）
-        if (comment.getRootId() == null) {
+        // 异步通知小说服务更新 comment_count（只统计根评论，且 novelId 不为 null 时才通知）
+        if (comment.getRootId() == null && dto.getNovelId() != null) {
             eventProducer.sendCommentCreated(dto.getNovelId(), comment.getId());
         }
 
-        log.info("点评提交成功: commentId={}, novelId={}, userId={}", comment.getId(), dto.getNovelId(), userId);
+        log.info("点评提交成功: commentId={}, novelId={}, bookTitle={}, userId={}",
+                comment.getId(), dto.getNovelId(), dto.getBookTitle(), userId);
         return assembleVO(comment, fetchUserMap(List.of(userId)));
     }
 

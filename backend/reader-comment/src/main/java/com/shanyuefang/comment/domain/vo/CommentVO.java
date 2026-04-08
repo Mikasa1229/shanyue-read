@@ -20,6 +20,9 @@ public class CommentVO {
     /** 作者头像 */
     private String userAvatar;
 
+    /** 书源书名（novelId 为 null 时使用）*/
+    private String bookTitle;
+
     private Long parentId;
     private Long rootId;
     private String content;

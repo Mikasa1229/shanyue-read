@@ -1,15 +1,22 @@
 package com.shanyuefang.user.controller;
 
 import com.shanyuefang.common.result.R;
+import com.shanyuefang.user.config.MinioProperties;
 import com.shanyuefang.user.domain.dto.UpdatePasswordDTO;
 import com.shanyuefang.user.domain.dto.UpdateUserDTO;
 import com.shanyuefang.user.domain.vo.UserVO;
 import com.shanyuefang.user.service.UserService;
+import io.minio.MinioClient;
+import io.minio.PutObjectArgs;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.Map;
+import java.util.UUID;
 
 @Tag(name = "用户接口", description = "获取 / 更新当前用户信息")
 @RestController
@@ -18,6 +25,8 @@ import org.springframework.web.bind.annotation.*;
 public class UserController {
 
     private final UserService userService;
+    private final MinioClient minioClient;
+    private final MinioProperties minioProperties;
 
     /**
      * Gateway 鉴权通过后将 userId 注入 X-User-Id Header，
@@ -34,6 +43,36 @@ public class UserController {
     public R<UserVO> updateUser(@RequestHeader("X-User-Id") Long userId,
                                 @Valid @RequestBody UpdateUserDTO dto) {
         return R.ok(userService.updateUser(userId, dto));
+    }
+
+    @Operation(summary = "上传头像")
+    @PostMapping("/me/avatar")
+    public R<Map<String, String>> uploadAvatar(@RequestHeader("X-User-Id") Long userId,
+                                               @RequestParam("file") MultipartFile file) throws Exception {
+        String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "avatar";
+        String ext = originalName.contains(".") ? originalName.substring(originalName.lastIndexOf('.')) : ".jpg";
+        // 对象路径：avatars/<uuid><ext>
+        String objectName = "avatars/" + UUID.randomUUID().toString().replace("-", "") + ext;
+
+        // 上传到 MinIO
+        minioClient.putObject(
+                PutObjectArgs.builder()
+                        .bucket(minioProperties.getBucket())
+                        .object(objectName)
+                        .stream(file.getInputStream(), file.getSize(), -1)
+                        .contentType(file.getContentType() != null ? file.getContentType() : "image/jpeg")
+                        .build()
+        );
+
+        // 拼接公开访问 URL：<publicUrl>/<bucket>/<objectName>
+        String url = minioProperties.getPublicUrl() + "/" + minioProperties.getBucket() + "/" + objectName;
+
+        // 同步更新用户头像字段
+        UpdateUserDTO dto = new UpdateUserDTO();
+        dto.setAvatar(url);
+        userService.updateUser(userId, dto);
+
+        return R.ok(Map.of("url", url));
     }
 
     @Operation(summary = "修改密码")

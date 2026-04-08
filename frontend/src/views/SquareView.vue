@@ -4,6 +4,7 @@
       <div class="square-header">
         <h1 class="square-title">书友动态</h1>
         <p class="square-subtitle">看看书友们最近在聊什么</p>
+        <button v-if="userStore.isLoggedIn" class="btn btn-gold write-btn" @click="reviewOpen = true">写书评</button>
       </div>
 
       <!-- 加载骨架 -->
@@ -35,19 +36,23 @@
           <div class="feed-body">
             <div class="feed-meta">
               <span class="feed-user">{{ item.userNickname }}</span>
-              <span class="feed-action">评论了小说</span>
+              <span class="feed-action">
+                {{ item.bookTitle || item.novelId ? '推荐了' : '写了书评' }}
+              </span>
               <span class="feed-time">{{ formatTime(item.createdAt) }}</span>
             </div>
-            <p class="feed-content">{{ item.content }}</p>
-            <div class="feed-footer">
-              <router-link :to="`/novel/${item.novelId}`" class="feed-novel-link">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="link-icon">
-                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-                </svg>
-                查看原著
+            <!-- 书名标签（醒目展示，位于正文上方） -->
+            <div v-if="item.bookTitle || item.novelId" class="feed-book-badge">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="badge-icon">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+              <router-link v-if="item.novelId" :to="`/novel/${item.novelId}`" class="badge-title badge-link">
+                {{ item.novelId ? '查看原著' : '' }}
               </router-link>
+              <span v-else class="badge-title">《{{ item.bookTitle }}》</span>
             </div>
+            <p class="feed-content">{{ item.content }}</p>
           </div>
         </div>
       </div>
@@ -67,15 +72,65 @@
         >下一页</button>
       </div>
     </div>
+
+    <!-- 写书评模态框 -->
+    <Teleport to="body">
+      <div v-if="reviewOpen" class="review-overlay" @click.self="reviewOpen = false">
+        <div class="review-modal">
+          <div class="review-header">
+            <span>写书评</span>
+            <button class="review-close" @click="reviewOpen = false">✕</button>
+          </div>
+          <div class="review-book-row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="review-book-icon">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+            <input v-model="reviewBookTitle" class="review-input review-book-input" placeholder="推荐的书名（不填则匿名书评）" />
+          </div>
+          <textarea v-model="reviewContent" class="review-textarea" placeholder="写下你的书评…" rows="5"></textarea>
+          <button class="btn btn-gold review-submit" :disabled="reviewSubmitting" @click="submitReview">
+            {{ reviewSubmitting ? '提交中…' : '发布书评' }}
+          </button>
+        </div>
+      </div>
+    </Teleport>
   </main>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { apiGetRecentComments } from '@/api/comment'
+import { apiGetRecentComments, apiCreateComment } from '@/api/comment'
 import { useToast } from '@/composables/useToast'
+import { useUserStore } from '@/stores/user'
 
 const { show } = useToast()
+const userStore = useUserStore()
+
+// ─── 写书评模态框 ──────────────────────────────────────────────
+const reviewOpen = ref(false)
+const reviewBookTitle = ref('')
+const reviewContent = ref('')
+const reviewSubmitting = ref(false)
+
+async function submitReview() {
+  if (!reviewContent.value.trim()) { show('请填写书评内容'); return }
+  reviewSubmitting.value = true
+  try {
+    await apiCreateComment({
+      bookTitle: reviewBookTitle.value.trim() || undefined,
+      content: reviewContent.value.trim()
+    })
+    reviewOpen.value = false
+    reviewBookTitle.value = ''
+    reviewContent.value = ''
+    await loadPage(1)
+  } catch (e) {
+    show(e.message)
+  } finally {
+    reviewSubmitting.value = false
+  }
+}
 
 const comments = ref([])
 const loading = ref(false)
@@ -307,4 +362,77 @@ onMounted(() => loadPage(1))
   font-size: 0.875rem;
   color: var(--ink-4);
 }
+
+.write-btn {
+  margin-top: var(--space-4);
+  padding: var(--space-2) var(--space-6);
+  font-size: 0.9375rem;
+}
+
+/* 书名标签 */
+.feed-book-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--gold-3);
+  border: 1px solid var(--gold-2);
+  border-radius: var(--radius-full);
+  padding: 3px 10px;
+  margin-bottom: var(--space-3);
+  max-width: 100%;
+  overflow: hidden;
+}
+.badge-icon { width: 13px; height: 13px; flex-shrink: 0; color: var(--gold-0); }
+.badge-title {
+  font-size: 0.8125rem;
+  color: var(--gold-0);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.badge-link { text-decoration: none; }
+.badge-link:hover { text-decoration: underline; }
+
+/* 写书评模态框 */
+.review-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 500;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.review-modal {
+  background: var(--paper-0); border-radius: var(--radius-xl);
+  padding: 24px; width: 100%; max-width: 480px;
+  display: flex; flex-direction: column; gap: 16px;
+  box-shadow: var(--shadow-lg);
+}
+.review-header {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 1rem; font-weight: 600; color: var(--ink-0);
+}
+.review-close {
+  border: none; background: transparent; font-size: 1rem;
+  cursor: pointer; color: var(--ink-3);
+}
+.review-input, .review-textarea {
+  width: 100%; border: 1.5px solid var(--paper-3);
+  border-radius: var(--radius-md); padding: 10px 12px;
+  font-size: 0.9375rem; color: var(--ink-1);
+  background: var(--paper-1); resize: vertical;
+  font-family: inherit; box-sizing: border-box;
+}
+.review-input:focus, .review-textarea:focus {
+  outline: none; border-color: var(--gold-1);
+}
+.review-submit { align-self: flex-end; padding: var(--space-2) var(--space-8); }
+.review-book-row {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--gold-3); border: 1.5px solid var(--gold-2);
+  border-radius: var(--radius-md); padding: 6px 12px;
+}
+.review-book-icon { width: 16px; height: 16px; color: var(--gold-0); flex-shrink: 0; }
+.review-book-input {
+  border: none; background: transparent; padding: 0; border-radius: 0;
+  font-weight: 500;
+}
+.review-book-input:focus { outline: none; border: none; }
 </style>

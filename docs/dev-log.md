@@ -318,6 +318,98 @@ book_source/legado/sources/
 
 ### 已验证可用书源（截至 2026-03-18）
 
+---
+
+## 第 10 节：三小时开发总结（2026-04-09）
+
+### 工作背景
+
+本次迭代共约三小时，持续完善善阅坊阅读器的前后端功能。在上一轮已完成书架、阅读器、书源搜索的基础上，重点解决用户反馈的体验问题。
+
+---
+
+### 一、已完成功能
+
+#### 1. 发现页搜索结果分页
+- **现象**：书源聚合搜索可返回数十条结果，全部平铺展示，页面过长。
+- **改动**：`HomeView.vue` 添加 `pagedResults`（每页 10 条）+ `totalPages`/`pageNums` computed，模板增加分页控件，新搜索时 `currentPage` 归 1。
+- **结果**：顶部显示"共找到 X 本书，第 N/M 页"，页码超过 7 时自动折叠为省略号。
+
+#### 2. 修复发现页"查看目录"不渲染
+- **根因**：`v-else-if="searched"` 块与 `v-else-if="chapterBook.title"` 块平级，当 `searched=true` 时章节面板的条件永远不会被求值。
+- **修复**：将章节面板移入 `searched` 块内部，用 `v-if="chapterBook.title"` / `v-else` 嵌套切换。
+
+#### 3. 广场书评与书名绑定
+- **需求**：书评发布时应与指定书名强关联，广场 feed 中书名要醒目展示。
+- **改动**：
+  - `SquareView.vue`：feed 卡片头部改为"推荐了"，书名以金色徽章（`feed-book-badge`）展示在正文上方；写书评弹窗书名输入行改为金色背景，视觉突出。
+  - `ReaderView.vue`：书评弹窗改为固定显示当前书名（不可编辑），placeholder 变为"写下你对《书名》的感想…"。
+
+#### 4. 收藏功能（独立于书架）
+- **背景**：用户反映"加入书架"和"收藏"不是同一概念；个人中心也缺少收藏展示。
+- **后端**（`reader-novel`）：
+  - `V5__favorite.sql`：新建 `t_favorite_book` 表，字段含 `user_id`、`book_url`（联合唯一）、书名/作者/封面/书源等。
+  - 新增 `FavoriteBook` 实体、`FavoriteBookMapper`、`FavoriteService`/`FavoriteServiceImpl`、`FavoriteController`（`/api/favorites`）。
+  - 接口：POST 添加（幂等）、DELETE 取消、GET 分页查询、GET /check 检查状态。
+  - 网关（`reader-gateway`）：路由追加 `/api/favorites/**`。
+- **前端**：
+  - 新增 `api/favorite.js`。
+  - `HomeView.vue`：搜索结果"♥ 收藏"按钮改用 favorite API；书架按钮保留为加入书架（两者独立）。
+  - `ReaderView.vue`：顶栏 ♡/♥ 改为调用 `apiAddFavorite`/`apiCheckFavorited`。
+  - `ProfileView.vue`：我的收藏 tab 改用 `apiGetMyFavorites`，展示书源书籍卡片（书名/作者/封面），支持"去阅读"（跳转 HomeView 章节列表）和"取消收藏"。
+
+#### 5. 阅读进度与书签
+- **阅读进度**：
+  - `V4__bookshelf_progress.sql`：`t_bookshelf_book` 添加 `last_chapter_index`（INT）、`total_chapters`（INT）。
+  - `UpdateProgressDTO` 新增可选字段，`BookshelfServiceImpl.updateProgress` 按需 SET。
+  - `ReaderView.vue`：主动加载章节后上报 `chapterIndex` 和 `totalChapters`（登录即上报，不再依赖是否在书架）。
+  - `BookshelfView.vue`：有总章节数时展示进度条 + "第 N / M 章"。
+- **书签**：
+  - 纯前端 `localStorage`（key `reader_bookmarks_${bookUrl}`），最多 30 条。
+  - 顶栏增加 🔖 按钮：已标记时变金色；再次点击删除；新增时自动打开书签面板。
+  - 书签面板（侧抽屉）：显示章节名 + 时间，点击跳转，右侧 × 删除。
+
+#### 6. 预加载级联修复
+- **现象**：设置预载 N 章时，每一个预载完成的章节又触发下一级预载，导致整本书被连续加载。
+- **修复**：`loadChapterContent(idx, isPreload=false)` 新增第二参数，`isPreload=true` 时跳过级联触发，只有主动加载才向后预载 N 章。
+
+#### 7. MinIO 头像上传
+- **背景**：头像之前写到本地文件系统，用户发现 MinIO bucket 未创建。
+- **改动**（`reader-user`）：
+  - `pom.xml` 添加 `io.minio:minio:8.5.7`。
+  - `application.yml` 添加 `app.minio.*` 配置（endpoint/access-key/secret-key/bucket/public-url）。
+  - `MinioProperties.java`：`@ConfigurationProperties(prefix="app.minio")` 属性绑定。
+  - `MinioConfig.java`：Bean 初始化时自动创建 bucket（如不存在）并设置公开读取策略（S3 JSON policy）；MinIO 不可达时 WARN 降级，不阻断启动。
+  - `UserController.java`：`uploadAvatar` 改用 `minioClient.putObject`，移除本地 `java.nio.file` 写入，返回 MinIO 公开 URL（`http://localhost:9000/reader-avatars/avatars/xxx.jpg`）。
+
+#### 8. 阅读设置优化
+- **设置面板背景修复**：teleport 到 body 后背景变为白色，通过 `bgStyle` computed 显式绑定 `:style="bgStyle"` 解决。
+- **页面宽度选项**：窄(500px)/中(680px)/宽(900px)/全屏，存 localStorage，绑定 `.reader-content` 的 `max-width`。
+- **上拉加载上一章**：`topTrigger` IntersectionObserver 监听顶部哨兵元素，触发 `loadPrevChapter` 插入 `loadedChunks` 头部。
+
+---
+
+### 二、遇到的困难与解决方式
+
+| 困难 | 解决方式 |
+|------|---------|
+| 发现页章节面板永远不渲染 | `v-else-if` 链平级时后续分支被屏蔽；将章节面板嵌入 `searched` 块内部，用嵌套 `v-if/v-else` 切换 |
+| 预加载导致全书连续加载 | 为 `loadChapterContent` 添加 `isPreload` 布尔参数，预加载调用不再递归触发下一轮预加载 |
+| Jsoup `el.text()` 合并换行导致正文无段落 | 改用 `elementToText()`：先将 `<br>`/`</p>`/`</div>` 替换为 `\n`，再剥离 HTML 标签，最后按行过滤空行，拼 `<p>` |
+| MinIO bucket 未创建且无公开读权限 | `MinioConfig.java` 在 Bean 初始化时检查 bucket 存在性并自动创建；用 S3 policy JSON 设置 `s3:GetObject` 公开读取 |
+| MinIO URL 从错误 host 加载头像 | 头像上传返回绝对 URL（`http://localhost:9000/...`），浏览器直接访问 MinIO，无需 vite 代理转发 |
+| 阅读器设置面板 teleport 后背景消失 | 设置面板背景通过 CSS `background: inherit` 无法穿透 teleport，改为 computed `bgStyle` 显式绑定颜色值 |
+| 收藏与书架的业务边界 | 新建独立 `t_favorite_book` 表（V5 迁移），`/api/favorites` 与 `/api/bookshelf` 完全分离；书架=阅读进度，收藏=喜爱标记展示在个人主页 |
+
+---
+
+### 三、待优化事项
+
+- MinIO 头像 URL 为 `localhost:9000`，生产环境需配置 nginx 反向代理或 CDN。
+- 阅读进度目前写入 `t_bookshelf_book`，但 `updateProgress` 在书不在书架时会抛 `NOT_FOUND`；前端 `catch` 已忽略，但理想方案是自动入架或单独建阅读历史表。
+- 书签仅存 `localStorage`，换设备后丢失；如需同步可扩展后端书签表。
+- 广场书评目前以书名（字符串）关联，无法检索同名书的所有书评；书源书籍若有稳定唯一标识（bookUrl）可作为关联键。
+
 | 书源 | 搜索 | 章节 | 正文 | 备注 |
 |------|------|------|------|------|
 | 铅笔小说（23qb.com） | ✅ | ✅ | ❌ | 正文 JS 动态加载 |

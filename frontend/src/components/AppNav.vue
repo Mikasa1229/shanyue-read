@@ -13,7 +13,7 @@
         <router-link to="/square" class="nav-link">广场</router-link>
         <router-link to="/book-sources" class="nav-link">书源</router-link>
         <router-link to="/ranking" class="nav-link">排行</router-link>
-        <router-link v-if="userStore.isLoggedIn" to="/profile" class="nav-link">书架</router-link>
+        <router-link v-if="userStore.isLoggedIn" to="/bookshelf" class="nav-link">书架</router-link>
       </nav>
 
       <!-- Right Actions -->

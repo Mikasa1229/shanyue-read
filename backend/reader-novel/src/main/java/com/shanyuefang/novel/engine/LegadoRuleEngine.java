@@ -385,13 +385,38 @@ public class LegadoRuleEngine {
         }
     }
 
+    /**
+     * 提取元素文本，保留块级标签（p / div / br）对应的换行。
+     * Jsoup 的 el.text() 会把所有空白折叠成单个空格；此方法在块标签处插入 \n，
+     * 以便正文段落能被前端按 \n 分割渲染为独立段落。
+     */
+    private static String elementToText(Element el) {
+        if (el == null) return "";
+        String html = el.html();
+        // 块级标签关闭 / <br> 替换为换行
+        html = html.replaceAll("(?i)<br\\s*/?>", "\n")
+                   .replaceAll("(?i)</p>", "\n")
+                   .replaceAll("(?i)</div>", "\n")
+                   .replaceAll("(?i)<p[^>]*>", "")
+                   .replaceAll("(?i)<div[^>]*>", "");
+        // 去除剩余 HTML 标签
+        html = html.replaceAll("<[^>]+>", "");
+        // 解码 HTML 实体（&nbsp; &amp; 等）
+        html = org.jsoup.parser.Parser.unescapeEntities(html, false);
+        // 按行处理：去掉每行首尾空白和全角空格，过滤空行
+        return java.util.Arrays.stream(html.split("\\r?\\n"))
+                .map(l -> l.replaceAll("[\\t　\\s]+", " ").trim())
+                .filter(l -> !l.isEmpty())
+                .collect(java.util.stream.Collectors.joining("\n"));
+    }
+
     /** 直接用标准 CSS selector 查询（不解析 legado 简写），提取第一个匹配元素的文本 */
     private static String cssDirect(String cssSelector, String input) {
         try {
             Document doc = Jsoup.parse(input);
             Elements els = doc.select(cssSelector);
             if (els.isEmpty()) return null;
-            return els.first().text();
+            return elementToText(els.first());
         } catch (Exception e) {
             log.debug("CSS 直接查询失败 selector={}: {}", cssSelector, e.getMessage());
             return null;
@@ -474,7 +499,7 @@ public class LegadoRuleEngine {
     private static String extractAttr(Element el, String attr) {
         if (el == null) return null;
         return switch (attr.toLowerCase()) {
-            case "text" -> el.text();
+            case "text" -> elementToText(el);
             case "owntext" -> el.ownText();
             case "html", "innerhtml" -> el.html();
             case "outerhtml" -> el.outerHtml();

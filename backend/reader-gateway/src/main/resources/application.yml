@@ -29,7 +29,7 @@ spring:
         - id: reader-novel
           uri: lb://reader-novel
           predicates:
-            - Path=/api/novels/**,/api/book-sources/**,/api/reading/**
+            - Path=/api/novels/**,/api/book-sources/**,/api/reading/**,/api/bookshelf/**,/api/favorites/**
         - id: reader-comment
           uri: lb://reader-comment
           predicates:

@@ -44,6 +44,17 @@ const routes = [
     path: '/ranking',
     name: 'Ranking',
     component: () => import('@/views/RankingView.vue')
+  },
+  {
+    path: '/bookshelf',
+    name: 'Bookshelf',
+    component: () => import('@/views/BookshelfView.vue'),
+    meta: { auth: true }
+  },
+  {
+    path: '/reader',
+    name: 'Reader',
+    component: () => import('@/views/ReaderView.vue')
   }
 ]
 

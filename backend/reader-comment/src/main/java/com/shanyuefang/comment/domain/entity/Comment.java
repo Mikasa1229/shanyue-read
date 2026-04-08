@@ -17,6 +17,10 @@ public class Comment {
 
     private Long novelId;
 
+    /** 书源书名（novelId 为 null 时使用）*/
+    @TableField("book_title")
+    private String bookTitle;
+
     private Long userId;
 
     /** 直接父评论 ID，NULL 表示根评论 */

@@ -10,7 +10,10 @@
                 <img v-if="userInfo?.avatar" :src="userInfo.avatar" :alt="userInfo.nickname" />
                 <span v-else class="avatar-text">{{ userInfo?.nickname?.charAt(0) ?? '读' }}</span>
               </div>
-              <button class="avatar-edit-btn" title="更换头像">＋</button>
+              <button class="avatar-edit-btn" title="更换头像" :disabled="avatarUploading" @click="$refs.avatarInput.click()">
+                {{ avatarUploading ? '…' : '＋' }}
+              </button>
+              <input ref="avatarInput" type="file" accept="image/*" style="display:none" @change="handleAvatarChange" />
             </div>
             <h2 class="user-name">{{ userInfo?.nickname }}</h2>
             <p class="user-username">@{{ userInfo?.username }}</p>
@@ -121,22 +124,25 @@
             <div v-if="favLoading" class="empty-state">加载中…</div>
             <div v-else-if="favorites.length === 0" class="empty-state">
               <div class="empty-icon">🔖</div>
-              <p>收藏你喜爱的小说，在这里找到它们</p>
+              <p>收藏你喜爱的好书，在这里找到它们</p>
               <router-link to="/" class="btn btn-gold mt-4">去发现好书</router-link>
             </div>
             <div v-else>
-              <div class="my-novels-list">
-                <div v-for="n in favorites" :key="n.id" class="my-novel-row">
-                  <router-link :to="`/novel/${n.id}`" class="my-novel-info">
-                    <div class="my-novel-cover">
-                      <img v-if="n.coverUrl" :src="n.coverUrl" :alt="n.title" />
-                      <span v-else>{{ n.title?.charAt(0) }}</span>
+              <div class="fav-grid">
+                <div v-for="book in favorites" :key="book.id" class="fav-card">
+                  <div class="fav-cover" @click="goReadFav(book)">
+                    <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.bookName"
+                         @error="e => e.target.style.display='none'" />
+                    <span v-else class="fav-cover-text">{{ book.bookName?.charAt(0) ?? '书' }}</span>
+                  </div>
+                  <div class="fav-meta">
+                    <p class="fav-name" :title="book.bookName">{{ book.bookName }}</p>
+                    <p class="fav-author">{{ book.author || '未知作者' }}</p>
+                    <div class="fav-actions">
+                      <button class="btn btn-sm btn-gold" @click="goReadFav(book)">去阅读</button>
+                      <button class="btn btn-sm btn-ghost" @click="removeFav(book)">取消收藏</button>
                     </div>
-                    <div>
-                      <p class="my-novel-title">{{ n.title }}</p>
-                      <p class="my-novel-meta">{{ n.authorName }} · {{ n.category }}</p>
-                    </div>
-                  </router-link>
+                  </div>
                 </div>
               </div>
               <div v-if="favTotalPages > 1" class="pagination mt-4">
@@ -164,19 +170,41 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { apiUpdatePassword } from '@/api/user'
+import { apiUpdatePassword, apiUploadAvatar } from '@/api/user'
 import { apiGetMyNovels, apiDeleteNovel } from '@/api/novel'
-import { apiGetMyFavorites } from '@/api/interaction'
+import { apiGetMyFavorites, apiRemoveFavorite } from '@/api/favorite'
 import { useToast } from '@/composables/useToast'
 import CheckinCalendar from '@/components/CheckinCalendar.vue'
 import NovelCard from '@/components/NovelCard.vue'
 import PublishNovelModal from '@/components/PublishNovelModal.vue'
 
 const userStore = useUserStore()
+const router = useRouter()
 const { show } = useToast()
 
 const userInfo = computed(() => userStore.userInfo)
+const avatarUploading = ref(false)
+
+async function handleAvatarChange(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  if (file.size > 5 * 1024 * 1024) { show('图片不能超过 5MB'); return }
+  avatarUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    await apiUploadAvatar(fd)
+    await userStore.fetchProfile()
+    show('头像已更新')
+  } catch (err) {
+    show(err.message)
+  } finally {
+    avatarUploading.value = false
+    e.target.value = ''
+  }
+}
 const activeTab = ref('checkin')
 
 const tabs = [
@@ -269,7 +297,7 @@ const favLoading = ref(false)
 async function loadFavorites(page = 1) {
   favLoading.value = true
   try {
-    const res = await apiGetMyFavorites(page)
+    const res = await apiGetMyFavorites(page, 20)
     favorites.value = res?.records ?? []
     favTotalPages.value = res?.pages ?? 1
     favPage.value = page
@@ -277,6 +305,24 @@ async function loadFavorites(page = 1) {
     show(e.message)
   } finally {
     favLoading.value = false
+  }
+}
+
+function goReadFav(book) {
+  router.push({
+    path: '/',
+    query: { openBook: JSON.stringify({ sourceId: book.sourceId, bookUrl: book.bookUrl, name: book.bookName }) }
+  })
+}
+
+async function removeFav(book) {
+  if (!confirm(`确认取消收藏「${book.bookName}」？`)) return
+  try {
+    await apiRemoveFavorite(book.bookUrl)
+    favorites.value = favorites.value.filter(b => b.id !== book.id)
+    show('已取消收藏')
+  } catch (e) {
+    show(e.message)
   }
 }
 
@@ -569,4 +615,25 @@ onMounted(async () => {
     position: static;
   }
 }
+
+/* 收藏书籍网格 */
+.fav-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-4);
+}
+.fav-card { display: flex; flex-direction: column; gap: var(--space-2); }
+.fav-cover {
+  aspect-ratio: 3/4; border-radius: var(--radius-md);
+  overflow: hidden; background: var(--paper-2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.2s;
+}
+.fav-cover:hover { transform: translateY(-2px); }
+.fav-cover img { width: 100%; height: 100%; object-fit: cover; }
+.fav-cover-text { font-family: var(--font-serif); font-size: 2rem; color: var(--gold-1); opacity: 0.5; }
+.fav-meta { display: flex; flex-direction: column; gap: 2px; }
+.fav-name { font-weight: 600; font-size: 0.875rem; color: var(--ink-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fav-author { font-size: 0.75rem; color: var(--ink-3); }
+.fav-actions { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-top: var(--space-1); }
 </style>
