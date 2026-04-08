@@ -4,12 +4,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.shanyuefang.common.result.R;
 import com.shanyuefang.novel.domain.dto.AddToShelfDTO;
 import com.shanyuefang.novel.domain.dto.UpdateProgressDTO;
+import com.shanyuefang.novel.domain.vo.HotBookVO;
 import com.shanyuefang.novel.domain.vo.ShelfBookVO;
 import com.shanyuefang.novel.service.BookshelfService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -57,5 +59,11 @@ public class BookshelfController {
                             @Valid @RequestBody UpdateProgressDTO dto) {
         bookshelfService.updateProgress(userId, dto);
         return R.ok();
+    }
+
+    /** 热门书籍排行榜（按加入书架用户数排序，无需登录） */
+    @GetMapping("/hot")
+    public R<List<HotBookVO>> hot(@RequestParam(defaultValue = "20") int top) {
+        return R.ok(bookshelfService.getHotBooks(top));
     }
 }

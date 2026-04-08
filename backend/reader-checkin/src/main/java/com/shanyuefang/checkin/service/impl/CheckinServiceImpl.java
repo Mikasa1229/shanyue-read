@@ -5,6 +5,8 @@ import com.shanyuefang.checkin.domain.dto.CheckinDTO;
 import com.shanyuefang.checkin.domain.entity.Checkin;
 import com.shanyuefang.checkin.domain.vo.CheckinCalendarVO;
 import com.shanyuefang.checkin.domain.vo.StreakVO;
+import com.shanyuefang.checkin.event.CheckinEvent;
+import com.shanyuefang.checkin.event.CheckinEventProducer;
 import com.shanyuefang.checkin.mapper.CheckinMapper;
 import com.shanyuefang.checkin.service.CheckinService;
 import com.shanyuefang.common.exception.BusinessException;
@@ -31,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 public class CheckinServiceImpl extends ServiceImpl<CheckinMapper, Checkin> implements CheckinService {
 
     private final RedisTemplate<String, Object> redisTemplate;
+    private final CheckinEventProducer checkinEventProducer;
 
     /** Redis Bitmap key: checkin:bitmap:{userId}:{yyyyMM} */
     private static final String BITMAP_KEY = "checkin:bitmap:%d:%s";
@@ -74,6 +77,11 @@ public class CheckinServiceImpl extends ServiceImpl<CheckinMapper, Checkin> impl
         redisTemplate.delete(String.format(STREAK_KEY, userId));
 
         log.info("打卡成功: userId={}, date={}, novelId={}", userId, today, dto.getNovelId());
+
+        // 5. 异步发布打卡事件（失败不影响主流程）
+        checkinEventProducer.publishCheckinCreated(
+                new CheckinEvent(userId, dto.getNovelId(), today, dto.getNote())
+        );
     }
 
     @Override

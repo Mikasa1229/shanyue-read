@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanyuefang.novel.mapper.BookshelfBookMapper">
+
+    <!-- 根据 bookUrl 列表获取各书的代表性元数据（每个 bookUrl 取最新一条记录） -->
+    <select id="selectMetaByUrls" resultType="com.shanyuefang.novel.domain.entity.BookshelfBook">
+        SELECT DISTINCT ON (book_url)
+            id, book_url, book_name, author, cover_url, source_id, source_name, created_at
+        FROM t_bookshelf_book
+        WHERE book_url IN
+        <foreach item="url" collection="urls" open="(" separator="," close=")">
+            #{url}
+        </foreach>
+        ORDER BY book_url, created_at DESC
+    </select>
+
+    <!-- 热门书籍：按加入书架的用户数排序（DB 兜底查询，ZSET 为空时使用） -->
+    <select id="selectHotBooks" resultType="com.shanyuefang.novel.domain.vo.HotBookVO">
+        SELECT
+            book_url      AS bookUrl,
+            MAX(book_name) AS bookName,
+            MAX(author)    AS author,
+            MAX(cover_url) AS coverUrl,
+            MAX(source_id) AS sourceId,
+            MAX(source_name) AS sourceName,
+            COUNT(DISTINCT user_id) AS shelfCount
+        FROM t_bookshelf_book
+        GROUP BY book_url
+        ORDER BY shelfCount DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

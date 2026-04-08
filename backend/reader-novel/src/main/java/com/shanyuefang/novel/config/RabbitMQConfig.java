@@ -19,6 +19,9 @@ public class RabbitMQConfig {
     /** 小说服务消费互动事件的队列 */
     public static final String NOVEL_INTERACTION_QUEUE = "q.novel.interaction";
 
+    /** 小说服务消费打卡事件的队列 */
+    public static final String NOVEL_CHECKIN_QUEUE = "q.novel.checkin";
+
     @Bean
     public TopicExchange topicExchange() {
         return ExchangeBuilder.topicExchange(TOPIC_EXCHANGE).durable(true).build();
@@ -51,6 +54,20 @@ public class RabbitMQConfig {
     @Bean
     public Binding novelInteractionBinding(@Qualifier("novelInteractionQueue") Queue novelInteractionQueue, TopicExchange topicExchange) {
         return BindingBuilder.bind(novelInteractionQueue).to(topicExchange).with("interaction.#");
+    }
+
+    /** 绑定 checkin.# 到小说打卡队列，接收打卡事件 */
+    @Bean
+    public Queue novelCheckinQueue() {
+        return QueueBuilder.durable(NOVEL_CHECKIN_QUEUE)
+                .withArgument("x-dead-letter-exchange", DEAD_EXCHANGE)
+                .withArgument("x-dead-letter-routing-key", DEAD_QUEUE)
+                .build();
+    }
+
+    @Bean
+    public Binding novelCheckinBinding(@Qualifier("novelCheckinQueue") Queue novelCheckinQueue, TopicExchange topicExchange) {
+        return BindingBuilder.bind(novelCheckinQueue).to(topicExchange).with("checkin.#");
     }
 
     @Bean
