@@ -13,8 +13,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.DayOfWeek;
 import java.time.Duration;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.temporal.IsoFields;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
@@ -35,20 +35,23 @@ public class ReadingServiceImpl implements ReadingService {
     private final StringRedisTemplate stringRedisTemplate;
     private final UserFeignClient userFeignClient;
 
-    /** 返回当前 ISO 周的 ZSET key，格式：ranking:reading_time:yyyy-Www */
+    private static final ZoneId BEIJING = ZoneId.of("Asia/Shanghai");
+
+    /** 返回当前 ISO 周的 ZSET key（北京时间），格式：ranking:reading_time:yyyy-Www */
     private String currentWeekKey() {
-        LocalDate today = LocalDate.now();
-        int year = today.get(IsoFields.WEEK_BASED_YEAR);
-        int week = today.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR);
+        ZonedDateTime now = ZonedDateTime.now(BEIJING);
+        int year = now.get(IsoFields.WEEK_BASED_YEAR);
+        int week = now.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR);
         return String.format("%s%d-W%02d", RANKING_KEY_PREFIX, year, week);
     }
 
-    /** 计算距下周一 00:00:00 的秒数（用于设置 TTL） */
+    /** 计算距下周一北京时间 00:00:00 的秒数（用于设置 TTL） */
     private long secondsUntilNextMonday() {
-        LocalDateTime nextMonday = LocalDate.now()
+        ZonedDateTime now = ZonedDateTime.now(BEIJING);
+        ZonedDateTime nextMonday = now.toLocalDate()
                 .with(TemporalAdjusters.next(DayOfWeek.MONDAY))
-                .atStartOfDay();
-        return Duration.between(LocalDateTime.now(), nextMonday).getSeconds();
+                .atStartOfDay(BEIJING);
+        return Duration.between(now, nextMonday).getSeconds();
     }
 
     @Override
