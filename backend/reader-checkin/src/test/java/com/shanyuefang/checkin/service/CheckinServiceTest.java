@@ -34,7 +34,7 @@ class CheckinServiceTest {
 
     @BeforeEach
     void setUp() {
-        checkinService = new CheckinServiceImpl(redisTemplate);
+        checkinService = new CheckinServiceImpl(redisTemplate, null);
         ReflectionTestUtils.setField(checkinService, "baseMapper", checkinMapper);
         ReflectionTestUtils.setField(checkinService, "entityClass", Checkin.class);
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
