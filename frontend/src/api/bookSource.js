@@ -14,6 +14,9 @@ export const apiDeleteSource   = (id) => http.delete(`/book-sources/${id}`)
 export const apiAggregateSearch = (keyword, page = 1) => http.get('/book-sources/search', { params: { keyword, page } })
 // 指定书源搜索
 export const apiSearchBooks    = (id, keyword, page = 1) => http.get(`/book-sources/${id}/search`,   { params: { keyword, page } })
+export const apiGetBookDetail  = (id, bookUrl)            => http.get(`/book-sources/${id}/detail`,   { params: { bookUrl } })
 export const apiGetChapters    = (id, bookUrl)            => http.get(`/book-sources/${id}/chapters`, { params: { bookUrl } })
+export const apiGetChaptersPage = (id, bookUrl, offset = 0, limit = 50) =>
+	http.get(`/book-sources/${id}/chapters/page`, { params: { bookUrl, offset, limit } })
 export const apiGetContent     = (id, chapterUrl)         => http.get(`/book-sources/${id}/content`,  { params: { chapterUrl } })
 export const apiTestSource     = (id)                     => http.get(`/book-sources/${id}/test`)

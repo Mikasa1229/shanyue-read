@@ -33,6 +33,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
@@ -41,6 +44,10 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         implements BookSourceService {
 
     private static final ObjectMapper OM = new ObjectMapper();
+    private static final long CHAPTER_CACHE_TTL_MS = 5 * 60 * 1000L;
+    private static final ConcurrentHashMap<String, CachedChapters> CHAPTER_CACHE = new ConcurrentHashMap<>();
+
+    private record CachedChapters(long cacheAt, List<BookChapterVO> chapters) {}
 
     // ─── 导入 ────────────────────────────────────────────────
 
@@ -193,10 +200,77 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         return results;
     }
 
+    @Override
+    public SearchBookVO getBookDetail(Long sourceId, String bookUrl) {
+        BookSource bs = getEnabledSource(sourceId);
+        BookSourceModel model = parseModel(bs);
+
+        String body;
+        try {
+            body = HttpFetcher.fetch(bookUrl, model.getHeader(), model.getBookSourceUrl(), model.getBookSourceCharset());
+        } catch (Exception e) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "获取书籍详情失败：" + e.getMessage());
+        }
+
+        SearchBookVO vo = new SearchBookVO();
+        vo.setSourceId(sourceId);
+        vo.setSourceName(bs.getSourceName());
+        vo.setBookUrl(bookUrl);
+
+        BookSourceModel.BookInfoRule info = model.getRuleBookInfo();
+        if (info != null) {
+            vo.setName(extractField(info.getName(), body));
+            vo.setAuthor(extractField(info.getAuthor(), body));
+            vo.setCoverUrl(resolveUrl(extractField(info.getCoverUrl(), body), model.getBookSourceUrl()));
+            vo.setIntro(extractField(info.getIntro(), body));
+            vo.setKind(extractField(info.getKind(), body));
+            vo.setLastChapter(extractField(info.getLastChapter(), body));
+            vo.setWordCount(extractField(info.getWordCount(), body));
+        }
+
+        // 兼容没有 ruleBookInfo 的书源，尽量用搜索规则做兜底
+        vo.setName(firstNonBlank(vo.getName(), extractField(model.effectiveSearchName(), body), extractTitle(body)));
+        vo.setAuthor(firstNonBlank(vo.getAuthor(), extractField(model.effectiveSearchAuthor(), body)));
+        vo.setCoverUrl(firstNonBlank(vo.getCoverUrl(), resolveUrl(extractField(model.effectiveSearchCover(), body), model.getBookSourceUrl())));
+        vo.setIntro(firstNonBlank(vo.getIntro(), extractField(model.effectiveSearchIntro(), body), extractMetaDescription(body)));
+        vo.setKind(firstNonBlank(vo.getKind(), extractField(model.effectiveSearchKind(), body)));
+        vo.setLastChapter(firstNonBlank(vo.getLastChapter(), extractField(model.effectiveSearchLastChapter(), body)));
+
+        // 兜底：若简介/封面仍为空，尝试按书名再走一遍搜索并匹配 bookUrl
+        if ((!StringUtils.hasText(vo.getIntro()) || !StringUtils.hasText(vo.getCoverUrl())) && StringUtils.hasText(vo.getName())) {
+            try {
+                List<SearchBookVO> candidates = search(sourceId, vo.getName(), 1);
+                SearchBookVO matched = candidates.stream()
+                        .filter(c -> StringUtils.hasText(c.getBookUrl()) && c.getBookUrl().equals(bookUrl))
+                        .findFirst()
+                        .orElse(candidates.stream().findFirst().orElse(null));
+                if (matched != null) {
+                    vo.setIntro(firstNonBlank(vo.getIntro(), matched.getIntro()));
+                    vo.setCoverUrl(firstNonBlank(vo.getCoverUrl(), matched.getCoverUrl()));
+                    vo.setAuthor(firstNonBlank(vo.getAuthor(), matched.getAuthor()));
+                    vo.setKind(firstNonBlank(vo.getKind(), matched.getKind()));
+                    vo.setLastChapter(firstNonBlank(vo.getLastChapter(), matched.getLastChapter()));
+                }
+            } catch (Exception e) {
+                log.warn("书籍详情兜底搜索失败: sourceId={}, bookUrl={}, err={}", sourceId, bookUrl, e.getMessage());
+            }
+        }
+
+        vo.setIntro(firstNonBlank(vo.getIntro(), extractMetaDescription(body)));
+
+        return vo;
+    }
+
     // ─── 目录 ─────────────────────────────────────────────────
 
     @Override
     public List<BookChapterVO> getChapters(Long sourceId, String bookUrl) {
+        String cacheKey = sourceId + "|" + bookUrl;
+        CachedChapters cached = CHAPTER_CACHE.get(cacheKey);
+        if (cached != null && System.currentTimeMillis() - cached.cacheAt() <= CHAPTER_CACHE_TTL_MS) {
+            return cached.chapters();
+        }
+
         BookSource bs = getEnabledSource(sourceId);
         BookSourceModel model = parseModel(bs);
 
@@ -224,7 +298,83 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                 chapters.add(vo);
             }
         }
+        CHAPTER_CACHE.put(cacheKey, new CachedChapters(System.currentTimeMillis(), chapters));
         return chapters;
+    }
+
+    @Override
+    public Map<String, Object> getChaptersPage(Long sourceId, String bookUrl, int offset, int limit) {
+        int safeOffset = Math.max(0, offset);
+        int safeLimit = Math.max(1, Math.min(100, limit));
+
+        BookSource bs = getEnabledSource(sourceId);
+        BookSourceModel model = parseModel(bs);
+
+        BookSourceModel.TocRule tocRule = model.getRuleToc();
+        if (tocRule == null || !StringUtils.hasText(tocRule.getChapterList())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "该书源没有目录规则");
+        }
+
+        List<BookChapterVO> records = new ArrayList<>();
+        int globalIndex = 0;
+        boolean hasMore = false;
+        String currentUrl = bookUrl;
+
+        while (StringUtils.hasText(currentUrl)) {
+            String body;
+            try {
+                body = HttpFetcher.fetch(currentUrl, model.getHeader(), model.getBookSourceUrl(), model.getBookSourceCharset());
+            } catch (Exception e) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "获取目录失败：" + e.getMessage());
+            }
+
+            List<String> items = LegadoRuleEngine.extractList(tocRule.getChapterList(), body);
+            if (items == null) items = List.of();
+
+            int i = 0;
+            for (; i < items.size(); i++) {
+                String item = items.get(i);
+                if (globalIndex >= safeOffset && records.size() < safeLimit) {
+                    BookChapterVO vo = new BookChapterVO();
+                    vo.setIndex(globalIndex);
+                    vo.setChapterName(extractField(tocRule.getChapterName(), item));
+                    vo.setChapterUrl(resolveUrl(extractField(tocRule.getChapterUrl(), item), model.getBookSourceUrl()));
+                    if (StringUtils.hasText(vo.getChapterUrl())) {
+                        records.add(vo);
+                    }
+                }
+                globalIndex++;
+
+                if (records.size() >= safeLimit) {
+                    hasMore = (i + 1) < items.size();
+                    break;
+                }
+            }
+
+            if (records.size() >= safeLimit) {
+                if (hasMore) {
+                    break;
+                }
+                String nextTocUrl = resolveUrl(extractField(tocRule.getNextTocUrl(), body), model.getBookSourceUrl());
+                hasMore = StringUtils.hasText(nextTocUrl);
+                break;
+            }
+
+            String nextTocUrl = resolveUrl(extractField(tocRule.getNextTocUrl(), body), model.getBookSourceUrl());
+            if (!StringUtils.hasText(nextTocUrl) || nextTocUrl.equals(currentUrl)) {
+                hasMore = false;
+                break;
+            }
+            currentUrl = nextTocUrl;
+        }
+
+        return Map.of(
+                "records", records,
+                "offset", safeOffset,
+                "limit", safeLimit,
+                "hasMore", hasMore,
+                "currentPage", safeOffset / safeLimit + 1
+        );
     }
 
     // ─── 内容 ─────────────────────────────────────────────────
@@ -387,6 +537,36 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         } catch (Exception e) {
             return s;
         }
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) return null;
+        for (String v : values) {
+            if (StringUtils.hasText(v)) return v;
+        }
+        return null;
+    }
+
+    private String extractTitle(String html) {
+        if (!StringUtils.hasText(html)) return null;
+        Matcher matcher = Pattern.compile("<title>(.*?)</title>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(html);
+        if (!matcher.find()) return null;
+        String title = matcher.group(1);
+        if (title == null) return null;
+        return title.replaceAll("\\s+", " ").trim();
+    }
+
+    private String extractMetaDescription(String html) {
+        if (!StringUtils.hasText(html)) return null;
+        Pattern pattern = Pattern.compile(
+                "<meta[^>]+(?:name|property)\\s*=\\s*['\"](?:description|og:description|twitter:description)['\"][^>]+content\\s*=\\s*['\"](.*?)['\"][^>]*>",
+                Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+        );
+        Matcher matcher = pattern.matcher(html);
+        if (!matcher.find()) return null;
+        String desc = matcher.group(1);
+        if (!StringUtils.hasText(desc)) return null;
+        return desc.replaceAll("<[^>]+>", "").replaceAll("\\s+", " ").trim();
     }
 
     @Override

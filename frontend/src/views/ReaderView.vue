@@ -1,5 +1,5 @@
 <template>
-  <div class="reader-page" :class="bgClass" :style="{ fontSize: fontSize + 'px', fontFamily: fontFamily }">
+  <div class="reader-page" :class="bgClass" :style="{ fontSize: fontSize + 'px', fontFamily: fontFamily, '--reader-font-size': fontSize + 'px' }">
 
     <!-- 顶部栏 -->
     <div class="reader-topbar" :class="{ visible: uiVisible || atTop }">
@@ -8,13 +8,15 @@
         <div class="topbar-bookname">{{ bookName }}</div>
         <div class="topbar-chapter">{{ currentChapterName }}</div>
       </div>
-      <button v-if="userStore.isLoggedIn" class="topbar-btn topbar-collect" :class="{ 'collected': isFavorited }" @click="addToShelf">
-        {{ isFavorited ? '♥' : '♡' }}
-      </button>
-      <button class="topbar-btn" title="写书评" @click="shareOpen = true">书评</button>
-      <button class="topbar-btn" :class="{ 'topbar-bookmarked': isCurrentBookmarked }" title="书签" @click="toggleBookmark">🔖</button>
-      <button class="topbar-btn" title="目录" @click="tocOpen = true">☰</button>
-      <button class="topbar-btn" title="设置" @click="settingsOpen = true">⚙</button>
+      <div class="topbar-actions">
+        <button v-if="userStore.isLoggedIn" class="topbar-btn topbar-collect" :class="{ 'collected': isFavorited }" @click="addToShelf">
+          {{ isFavorited ? '♥' : '♡' }}
+        </button>
+        <button class="topbar-btn" title="写书评" @click="shareOpen = true">书评</button>
+        <button class="topbar-btn" :class="{ 'topbar-bookmarked': isCurrentBookmarked }" title="书签" @click="toggleBookmark">🔖</button>
+        <button class="topbar-btn" title="目录" @click="tocOpen = true">☰</button>
+        <button class="topbar-btn" title="设置" @click="settingsOpen = true">⚙</button>
+      </div>
     </div>
 
     <!-- 正文区域 -->
@@ -26,7 +28,7 @@
       <template v-else>
         <div ref="topTrigger" class="top-trigger"></div>
         <div v-if="loadingPrev" class="chunk-loading">正在加载上一章…</div>
-        <div v-for="chunk in loadedChunks" :key="chunk.chapterUrl" class="chapter-chunk">
+          <div v-for="chunk in loadedChunks" :key="chunk.chapterUrl" class="chapter-chunk" :ref="el => setChapterChunkRef(el, chunk.chapterUrl)">
           <div class="chapter-divider">{{ chunk.chapterName }}</div>
           <div v-if="chunk.loading" class="chunk-loading">加载中…</div>
           <div v-else-if="chunk.error" class="chunk-error">{{ chunk.error }}</div>
@@ -42,7 +44,13 @@
     <!-- 底部导航栏 -->
     <div class="reader-bottombar" :class="{ visible: uiVisible || atTop }">
       <button class="nav-btn" :disabled="currentIndex <= 0" @click="jumpToChapter(currentIndex - 1)">上一章</button>
-      <span class="progress-text">{{ currentIndex + 1 }} / {{ chapters.length }}</span>
+      <div class="bottom-center">
+        <span class="progress-text">{{ currentIndex + 1 }} / {{ chapters.length }}</span>
+        <button class="bookmark-btn" :class="{ active: isCurrentBookmarked }" @click="toggleBookmark">
+          {{ isCurrentBookmarked ? '已书签' : '加书签' }}
+        </button>
+        <button class="bookmark-btn" @click="bookmarkOpen = true">书签列表</button>
+      </div>
       <button class="nav-btn" :disabled="currentIndex >= chapters.length - 1" @click="jumpToChapter(currentIndex + 1)">下一章</button>
     </div>
 
@@ -132,6 +140,19 @@
             <span class="share-book-icon">📖</span>
             <span class="share-book-name">《{{ bookName }}》</span>
           </div>
+          <div class="share-score-row">
+            <span class="share-score-label">我的评分</span>
+            <div class="share-stars">
+              <button
+                v-for="star in 5"
+                :key="star"
+                class="share-star"
+                :class="{ active: star <= shareScore }"
+                @click="shareScore = star"
+              >★</button>
+            </div>
+            <span class="share-score-val">{{ shareScore }} 分</span>
+          </div>
           <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 12px;">
             <textarea v-model="shareContent" class="share-textarea" :placeholder="`写下你对《${bookName}》的感想，推荐给书友…`" rows="5"></textarea>
             <button class="settings-btn" style="align-self: flex-end; padding: 8px 24px;"
@@ -177,15 +198,22 @@ import { apiUpdateReadingProgress } from '@/api/bookshelf'
 import { apiRecordReading } from '@/api/reading'
 import { apiAddFavorite, apiCheckFavorited } from '@/api/favorite'
 import { apiCreateComment } from '@/api/comment'
+import { apiRecordLevelAction } from '@/api/user'
+import { useToast } from '@/composables/useToast'
 
 const route  = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const { show } = useToast()
 
 // ─── query 参数 ──────────────────────────────────────────────
 const sourceId    = computed(() => route.query.sourceId)
+const sourceName  = computed(() => route.query.sourceName || '')
 const bookUrl     = computed(() => route.query.bookUrl)
 const bookName    = computed(() => route.query.bookName || '未知书名')
+const bookAuthor  = computed(() => route.query.author || '')
+const bookCoverUrl = computed(() => route.query.coverUrl || '')
+const bookIntro   = computed(() => route.query.intro || '')
 const initChapterUrl   = computed(() => route.query.chapterUrl)
 const initChapterIndex = computed(() => parseInt(route.query.chapterIndex) || 0)
 
@@ -199,10 +227,7 @@ const noMoreChapters = ref(false)
 const isFavorited = ref(false)
 let readerOpenTime = 0
 
-const currentChapterName = computed(() => {
-  const last = loadedChunks.value[loadedChunks.value.length - 1]
-  return last?.chapterName ?? ''
-})
+const currentChapterName = computed(() => chapters.value[currentIndex.value]?.chapterName ?? '')
 
 // ─── 设置 ─────────────────────────────────────────────────────
 const fontSizes   = [{ val: 14, label: '小' }, { val: 18, label: '中' }, { val: 22, label: '大' }, { val: 26, label: '特大' }]
@@ -239,9 +264,21 @@ const pageWidth = ref(localStorage.getItem('reader_pageWidth') ?? '680px')
 function setPageWidth(v) { pageWidth.value = v; localStorage.setItem('reader_pageWidth', v) }
 
 // ─── 预加载设置 ───────────────────────────────────────────────
-const preloadOptions = [{ val: 0, label: '关' }, { val: 1, label: '1章' }, { val: 2, label: '2章' }, { val: 3, label: '3章' }]
-const preloadCount = ref(parseInt(localStorage.getItem('reader_preloadCount') ?? '1'))
-function setPreloadCount(v) { preloadCount.value = v; localStorage.setItem('reader_preloadCount', v) }
+const preloadOptions = [
+  { val: 0, label: '关' },
+  { val: 1, label: '1章' },
+  { val: 2, label: '2章' },
+  { val: 3, label: '3章' },
+  { val: 5, label: '5章' },
+  { val: 8, label: '8章' },
+  { val: 10, label: '10章' }
+]
+const preloadCount = ref(Math.min(10, Math.max(0, parseInt(localStorage.getItem('reader_preloadCount') ?? '1') || 1)))
+function setPreloadCount(v) {
+  const safe = Math.min(10, Math.max(0, v))
+  preloadCount.value = safe
+  localStorage.setItem('reader_preloadCount', safe)
+}
 
 function setFontSize(v)   { fontSize.value = v;   localStorage.setItem('reader_fontSize', v) }
 function setFontFamily(v) { fontFamily.value = v; localStorage.setItem('reader_fontFamily', v) }
@@ -283,11 +320,13 @@ function toggleBookmark() {
   if (existing >= 0) {
     bookmarks.value.splice(existing, 1)
     saveBookmarks()
+    show('已移除书签')
   } else {
     bookmarks.value.unshift({ chapterIndex: idx, chapterName: ch.chapterName, savedAt: Date.now() })
     if (bookmarks.value.length > 30) bookmarks.value.pop()
     saveBookmarks()
     bookmarkOpen.value = true  // 添加后打开书签面板
+    show('已添加书签')
   }
 }
 
@@ -307,15 +346,29 @@ const topTrigger    = ref(null)
 const tocListEl     = ref(null)
 let observer    = null
 let topObserver = null
+const chapterChunkRefs = new Map()
+let chapterSyncRaf = 0
+
+function setChapterChunkRef(el, chapterUrl) {
+  if (!chapterUrl) return
+  if (el) {
+    chapterChunkRefs.set(chapterUrl, el)
+  } else {
+    chapterChunkRefs.delete(chapterUrl)
+  }
+}
 
 // ─── 收藏 ────────────────────────────────────────────────────
 async function addToShelf() {
   if (isFavorited.value) return
   try {
     await apiAddFavorite({
+      sourceId: sourceId.value,
+      sourceName: sourceName.value,
       bookName: bookName.value,
+      author: bookAuthor.value,
+      coverUrl: bookCoverUrl.value,
       bookUrl: bookUrl.value,
-      sourceId: sourceId.value
     })
     isFavorited.value = true
   } catch (e) {
@@ -326,6 +379,7 @@ async function addToShelf() {
 // ─── 广场分享 ─────────────────────────────────────────────────
 const shareOpen      = ref(false)
 const shareContent   = ref('')
+const shareScore     = ref(4)
 const shareSubmitting = ref(false)
 
 async function submitShare() {
@@ -334,15 +388,34 @@ async function submitShare() {
   try {
     await apiCreateComment({
       bookTitle: bookName.value,
+      sourceId: sourceId.value ? Number(sourceId.value) : undefined,
+      bookUrl: bookUrl.value,
+      bookAuthor: bookAuthor.value,
+      bookCoverUrl: bookCoverUrl.value,
+      bookIntro: bookIntro.value,
+      score: shareScore.value,
       content: shareContent.value.trim()
     })
+    apiRecordLevelAction('COMMENT').catch(() => {})
+    apiRecordLevelAction('RATE').catch(() => {})
     shareOpen.value = false
     shareContent.value = ''
+    shareScore.value = 4
   } catch (e) {
     // 忽略
   } finally {
     shareSubmitting.value = false
   }
+}
+
+function reportReadDuration() {
+  if (readerOpenTime <= 0 || !userStore.isLoggedIn) return
+  const seconds = Math.floor((Date.now() - readerOpenTime) / 1000)
+  if (seconds >= 5) {
+    apiRecordReading(seconds).catch(() => {})
+    apiRecordLevelAction('READ_SECONDS', seconds).catch(() => {})
+  }
+  readerOpenTime = 0
 }
 
 // ─── 段落格式化 ───────────────────────────────────────────────
@@ -363,7 +436,7 @@ async function loadChapterContent(idx, isPreload = false) {
   const existing = loadedChunks.value.find(c => c.chapterUrl === ch.chapterUrl)
   if (existing) return
 
-  const chunk = { chapterName: ch.chapterName, chapterUrl: ch.chapterUrl, html: '', loading: true, error: '' }
+  const chunk = { chapterIndex: idx, chapterName: ch.chapterName, chapterUrl: ch.chapterUrl, html: '', loading: true, error: '' }
   loadedChunks.value.push(chunk)
 
   try {
@@ -384,18 +457,20 @@ async function loadChapterContent(idx, isPreload = false) {
         }).catch(() => {})
       }
     }
-    // 预加载后续章节（仅从主动加载触发，不从预加载触发，防止级联）
-    if (!isPreload && preloadCount.value > 0) {
-      for (let i = 1; i <= preloadCount.value; i++) {
-        const preloadIdx = idx + i
-        if (preloadIdx < chapters.value.length) {
-          loadChapterContent(preloadIdx, true)
-        }
-      }
+    if (!isPreload) {
+      ensurePreloadWindow(idx)
     }
   } catch (e) {
     chunk.loading = false
     chunk.error = e.message
+  }
+}
+
+function ensurePreloadWindow(centerIdx) {
+  if (preloadCount.value <= 0) return
+  const limit = Math.min(chapters.value.length - 1, centerIdx + preloadCount.value)
+  for (let idx = centerIdx + 1; idx <= limit; idx++) {
+    loadChapterContent(idx, true)
   }
 }
 
@@ -411,7 +486,7 @@ async function loadPrevChapter() {
 
   loadingPrev.value = true
   const prevCh = chapters.value[prevIdx]
-  const chunk = { chapterName: prevCh.chapterName, chapterUrl: prevCh.chapterUrl, html: '', loading: true, error: '' }
+  const chunk = { chapterIndex: prevIdx, chapterName: prevCh.chapterName, chapterUrl: prevCh.chapterUrl, html: '', loading: true, error: '' }
   loadedChunks.value.unshift(chunk)
 
   try {
@@ -420,6 +495,7 @@ async function loadPrevChapter() {
     chunk.html = formatContent(raw) || '<p>（正文内容为空）</p>'
     chunk.loading = false
     currentIndex.value = prevIdx
+    ensurePreloadWindow(prevIdx)
   } catch (e) {
     chunk.error = e.message
     chunk.loading = false
@@ -448,7 +524,9 @@ function setupBottomObserver() {
   observer = new IntersectionObserver(async (entries) => {
     if (!entries[0].isIntersecting) return
     if (loadingNext.value || noMoreChapters.value) return
-    const nextIdx = currentIndex.value + 1
+    const lastChunk = loadedChunks.value[loadedChunks.value.length - 1]
+    const lastIdx = lastChunk?.chapterIndex ?? currentIndex.value
+    const nextIdx = lastIdx + 1
     if (nextIdx >= chapters.value.length) { noMoreChapters.value = true; return }
     loadingNext.value = true
     await loadChapterContent(nextIdx)
@@ -465,21 +543,47 @@ async function jumpToChapter(idx) {
   currentIndex.value = idx
   await loadChapterContent(idx)
   await nextTick()
+  syncCurrentChapterFromView(true)
   window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function syncCurrentChapterFromView(force = false) {
+  if (initialLoading.value || !loadedChunks.value.length) return
+  const anchor = 96
+  let activeIdx = currentIndex.value
+  for (const chunk of loadedChunks.value) {
+    const el = chapterChunkRefs.get(chunk.chapterUrl)
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    if (rect.top <= anchor) {
+      activeIdx = chunk.chapterIndex
+    } else {
+      break
+    }
+  }
+  if (force || activeIdx !== currentIndex.value) {
+    currentIndex.value = activeIdx
+    ensurePreloadWindow(activeIdx)
+  }
+}
+
+function scheduleChapterSync() {
+  if (chapterSyncRaf) return
+  chapterSyncRaf = window.requestAnimationFrame(() => {
+    chapterSyncRaf = 0
+    syncCurrentChapterFromView()
+  })
 }
 
 // ─── 滚动监听 ─────────────────────────────────────────────────
 function onScroll() {
   atTop.value = window.scrollY < 60
+  scheduleChapterSync()
 }
 
 // ─── 返回 ─────────────────────────────────────────────────────
 function goBack() {
-  // 记录阅读时长
-  if (readerOpenTime > 0 && userStore.isLoggedIn) {
-    const seconds = Math.floor((Date.now() - readerOpenTime) / 1000)
-    if (seconds >= 5) apiRecordReading(seconds).catch(() => {})
-  }
+  reportReadDuration()
   router.back()
 }
 
@@ -517,6 +621,7 @@ onMounted(async () => {
 
   await loadChapterContent(startIdx)
   await nextTick()
+  syncCurrentChapterFromView(true)
   setupBottomObserver()
   setupTopObserver()
 
@@ -532,13 +637,9 @@ onMounted(async () => {
 onUnmounted(() => {
   observer?.disconnect()
   topObserver?.disconnect()
+  if (chapterSyncRaf) window.cancelAnimationFrame(chapterSyncRaf)
   window.removeEventListener('scroll', onScroll)
-  // 记录阅读时长
-  if (readerOpenTime > 0 && userStore.isLoggedIn) {
-    const seconds = Math.floor((Date.now() - readerOpenTime) / 1000)
-    if (seconds >= 5) apiRecordReading(seconds).catch(() => {})
-    readerOpenTime = 0
-  }
+  reportReadDuration()
 })
 </script>
 
@@ -546,20 +647,20 @@ onUnmounted(() => {
 /* ── 基础布局 ── */
 .reader-page {
   min-height: 100vh;
-  padding: 60px 0 70px;
+  padding: 56px 0 56px;
   transition: background 0.3s, color 0.3s;
 }
-.bg-white { background: #ffffff; color: #1a1a1a; }
-.bg-rice  { background: #f5f0e8; color: #3a3228; }
-.bg-green { background: #e8f0e8; color: #2a3a2a; }
-.bg-dark  { background: #1a1a1a; color: #c8c8c8; }
+.bg-white { --reader-bg: #ffffff; --reader-ink: #1a1a1a; background: var(--reader-bg); color: var(--reader-ink); }
+.bg-rice  { --reader-bg: #f5f0e8; --reader-ink: #3a3228; background: var(--reader-bg); color: var(--reader-ink); }
+.bg-green { --reader-bg: #e8f0e8; --reader-ink: #2a3a2a; background: var(--reader-bg); color: var(--reader-ink); }
+.bg-dark  { --reader-bg: #1a1a1a; --reader-ink: #f5f5f5; background: var(--reader-bg); color: var(--reader-ink); }
 
 /* ── 顶部栏 ── */
 .reader-topbar {
   position: fixed; top: 0; left: 0; right: 0; height: 56px;
   display: flex; align-items: center; gap: 8px;
   padding: 0 12px;
-  background: inherit;
+  background: var(--reader-bg);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid rgba(128,128,128,0.15);
   z-index: 100;
@@ -567,9 +668,25 @@ onUnmounted(() => {
   transition: opacity 0.25s;
 }
 .reader-topbar.visible { opacity: 1; pointer-events: auto; }
-.topbar-center { flex: 1; min-width: 0; text-align: center; }
+.topbar-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(62vw, 460px);
+  min-width: 0;
+  text-align: center;
+  pointer-events: none;
+}
 .topbar-bookname { font-size: 0.875rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar-chapter  { font-size: 0.75rem; opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+  z-index: 1;
+}
 .topbar-btn {
   border: none; background: transparent; font-size: 1.25rem;
   cursor: pointer; color: inherit; padding: 6px 8px;
@@ -590,7 +707,7 @@ onUnmounted(() => {
 }
 .top-trigger { height: 1px; }
 .chapter-divider {
-  text-align: center; font-size: 1rem; font-weight: 600;
+  text-align: center; font-size: calc(var(--reader-font-size) * 0.95); font-weight: 600;
   margin: 36px 0 20px;
   padding: 12px 0;
   border-top: 1px solid rgba(128,128,128,0.2);
@@ -602,6 +719,7 @@ onUnmounted(() => {
   border-top: none;
 }
 .chapter-text :deep(p) {
+  font-size: var(--reader-font-size);
   line-height: 1.9;
   margin: 0 0 0.75em;
   text-indent: 2em;
@@ -629,7 +747,7 @@ onUnmounted(() => {
   position: fixed; bottom: 0; left: 0; right: 0; height: 56px;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 20px;
-  background: inherit;
+  background: var(--reader-bg);
   backdrop-filter: blur(8px);
   border-top: 1px solid rgba(128,128,128,0.15);
   z-index: 100;
@@ -646,6 +764,27 @@ onUnmounted(() => {
 .nav-btn:hover:not(:disabled) { background: rgba(128,128,128,0.12); }
 .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .progress-text { font-size: 0.8125rem; opacity: 0.6; }
+
+.bottom-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bookmark-btn {
+  border: 1px solid rgba(128,128,128,0.28);
+  background: transparent;
+  color: inherit;
+  padding: 5px 10px;
+  border-radius: 16px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.bookmark-btn.active {
+  border-color: #c8a96e;
+  color: #c8a96e;
+}
 
 /* ── 设置面板 ── */
 .settings-overlay {
@@ -727,6 +866,25 @@ onUnmounted(() => {
 }
 .share-book-icon { font-size: 1rem; }
 .share-book-name { font-weight: 600; font-size: 0.9375rem; color: #c8a96e; }
+
+.share-score-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.share-score-label { font-size: 0.875rem; opacity: 0.75; }
+.share-stars { display: inline-flex; gap: 2px; }
+.share-star {
+  border: none;
+  background: transparent;
+  color: rgba(128,128,128,0.45);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.share-star.active { color: #c8a96e; }
+.share-score-val { font-size: 0.8125rem; color: #c8a96e; }
 
 /* ── 书签面板 ── */
 .bookmark-empty {

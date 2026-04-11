@@ -30,11 +30,17 @@ public interface BookSourceService extends IService<BookSource> {
     /** 使用指定书源搜索书籍 */
     List<SearchBookVO> search(Long sourceId, String keyword, int page);
 
+    /** 获取书源书籍详情（封面、作者、简介、分类等） */
+    SearchBookVO getBookDetail(Long sourceId, String bookUrl);
+
     /** 聚合搜索：并发调用所有启用书源，合并结果 */
     List<SearchBookVO> aggregateSearch(String keyword, int page);
 
     /** 获取书籍目录（章节列表） */
     List<BookChapterVO> getChapters(Long sourceId, String bookUrl);
+
+    /** 获取分页章节目录（默认每次 50 章） */
+    Map<String, Object> getChaptersPage(Long sourceId, String bookUrl, int offset, int limit);
 
     /** 获取章节正文内容 */
     String getContent(Long sourceId, String chapterUrl);

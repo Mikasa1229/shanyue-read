@@ -102,6 +102,25 @@ public class BookSourceController {
         return R.ok(bookSourceService.getChapters(id, bookUrl));
     }
 
+    @Operation(summary = "分页获取书籍目录（默认每次 50 章）")
+    @GetMapping("/{id}/chapters/page")
+    public R<Map<String, Object>> chaptersPage(
+            @PathVariable("id") Long id,
+            @RequestParam(name = "bookUrl") String bookUrl,
+            @RequestParam(name = "offset", defaultValue = "0") int offset,
+            @RequestParam(name = "limit", defaultValue = "50") int limit) {
+        return R.ok(bookSourceService.getChaptersPage(id, bookUrl, offset, limit));
+    }
+
+    @Operation(summary = "获取书源书籍详情",
+               description = "用于详情页补齐封面、简介、作者等信息")
+    @GetMapping("/{id}/detail")
+    public R<SearchBookVO> detail(
+            @PathVariable("id") Long id,
+            @RequestParam(name = "bookUrl") String bookUrl) {
+        return R.ok(bookSourceService.getBookDetail(id, bookUrl));
+    }
+
     @Operation(summary = "获取章节正文内容",
                description = "chapterUrl 为目录接口返回的章节 URL")
     @GetMapping("/{id}/content")

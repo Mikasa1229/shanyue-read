@@ -169,13 +169,17 @@ function switchTab(tab) {
 }
 
 function goRead(book) {
-  router.push({ path: '/', query: { openBook: JSON.stringify({
-    sourceId: book.sourceId,
-    bookUrl: book.bookUrl,
-    bookName: book.bookName,
-    author: book.author,
-    coverUrl: book.coverUrl,
-  }) } })
+  router.push({
+    path: '/source-book-detail',
+    query: {
+      sourceId: book.sourceId,
+      sourceName: book.sourceName,
+      name: book.bookName,
+      author: book.author,
+      coverUrl: book.coverUrl,
+      bookUrl: book.bookUrl
+    }
+  })
 }
 
 onMounted(() => loadReadingRanking())

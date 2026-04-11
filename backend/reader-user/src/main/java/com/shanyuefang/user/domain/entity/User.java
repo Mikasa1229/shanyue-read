@@ -25,6 +25,9 @@ public class User {
 
     private String bio;
 
+    @TableField("exp_total")
+    private Long expTotal;
+
     /** 状态：1正常 0封禁 */
     private Integer status;
 

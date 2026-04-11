@@ -55,6 +55,11 @@ const routes = [
     path: '/reader',
     name: 'Reader',
     component: () => import('@/views/ReaderView.vue')
+  },
+  {
+    path: '/source-book-detail',
+    name: 'SourceBookDetail',
+    component: () => import('@/views/SourceBookDetailView.vue')
   }
 ]
 

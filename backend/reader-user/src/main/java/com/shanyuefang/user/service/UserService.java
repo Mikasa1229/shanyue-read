@@ -3,10 +3,13 @@ package com.shanyuefang.user.service;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.shanyuefang.user.domain.dto.LoginDTO;
 import com.shanyuefang.user.domain.dto.RegisterDTO;
+import com.shanyuefang.user.domain.dto.LevelActionDTO;
 import com.shanyuefang.user.domain.dto.UpdatePasswordDTO;
 import com.shanyuefang.user.domain.dto.UpdateUserDTO;
 import com.shanyuefang.user.domain.entity.User;
+import com.shanyuefang.user.domain.vo.LevelActionResultVO;
 import com.shanyuefang.user.domain.vo.LoginVO;
+import com.shanyuefang.user.domain.vo.UserLevelVO;
 import com.shanyuefang.user.domain.vo.UserVO;
 
 public interface UserService extends IService<User> {
@@ -28,4 +31,10 @@ public interface UserService extends IService<User> {
 
     /** 修改密码 */
     void updatePassword(Long userId, UpdatePasswordDTO dto);
+
+    /** 获取当前用户等级信息（等级 + 今日任务） */
+    UserLevelVO getUserLevel(Long userId);
+
+    /** 记录用户行为并尝试发放任务经验 */
+    LevelActionResultVO recordLevelAction(Long userId, LevelActionDTO dto);
 }

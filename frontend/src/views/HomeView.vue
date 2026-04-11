@@ -88,7 +88,7 @@
             <!-- 书籍网格 -->
             <div class="book-grid">
               <div v-for="(book, idx) in pagedResults" :key="idx" class="book-card">
-                <div class="book-cover-wrap" @click="goToChapters(book)">
+                <div class="book-cover-wrap" @click="goToDetail(book)">
                   <img
                     v-if="book.coverUrl"
                     :src="book.coverUrl"
@@ -105,14 +105,7 @@
                   <div class="book-author">{{ book.author || '未知作者' }}</div>
                   <div v-if="book.intro" class="book-intro">{{ book.intro }}</div>
                   <div class="book-actions mt-4">
-                    <button class="btn btn-sm btn-ghost" @click="goToChapters(book)">查看目录</button>
-                    <button
-                      v-if="userStore.isLoggedIn"
-                      class="btn btn-sm"
-                      :class="favoriteStatus[book.bookUrl] ? 'btn-shelf-on' : 'btn-gold'"
-                      :disabled="favoriteStatus[book.bookUrl]"
-                      @click="addFavorite(book)"
-                    >{{ favoriteStatus[book.bookUrl] ? '♥ 已收藏' : '♥ 收藏' }}</button>
+                    <button class="btn btn-sm btn-ghost" @click="goToDetail(book)">查看详情</button>
                   </div>
                 </div>
               </div>
@@ -150,7 +143,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { apiAggregateSearch, apiGetChapters } from '@/api/bookSource'
-import { apiAddFavorite, apiCheckFavorited } from '@/api/favorite'
 import { useToast } from '@/composables/useToast'
 
 const userStore = useUserStore()
@@ -164,7 +156,6 @@ const results = ref([])
 const loading = ref(false)
 const searched = ref(false)
 const searchProgress = ref(0)
-const favoriteStatus = ref({})
 
 // ─── 分页 ─────────────────────────────────────────────────────────
 const currentPage = ref(1)
@@ -220,7 +211,6 @@ async function doSearch() {
     const res = await apiAggregateSearch(q)
     results.value = res ?? []
     searched.value = true
-    checkFavoriteStatus(results.value)
   } catch (e) {
     show(e.message)
     results.value = []
@@ -231,46 +221,44 @@ async function doSearch() {
   }
 }
 
-async function checkFavoriteStatus(books) {
-  if (!userStore.isLoggedIn || !books?.length) return
-  await Promise.allSettled(
-    books.map(async book => {
-      if (!book.bookUrl) return
-      try {
-        const res = await apiCheckFavorited(book.bookUrl)
-        favoriteStatus.value = { ...favoriteStatus.value, [book.bookUrl]: res?.favorited ?? false }
-      } catch {
-        // 忽略单个失败
-      }
-    })
-  )
-}
-
-async function addFavorite(book) {
-  if (!userStore.isLoggedIn) { show('请先登录'); return }
-  try {
-    await apiAddFavorite({
-      sourceId:   book.sourceId,
-      sourceName: book.sourceName,
-      bookName:   book.name,
-      author:     book.author,
-      coverUrl:   book.coverUrl,
-      bookUrl:    book.bookUrl
-    })
-    favoriteStatus.value = { ...favoriteStatus.value, [book.bookUrl]: true }
-    show('已收藏')
-  } catch (e) {
-    show(e.message)
-  }
-}
-
 // ─── 章节列表 ──────────────────────────────────────────────────
-const chapterBook = ref({ title: '', bookUrl: '', sourceId: '', list: [], loading: false })
+const chapterBook = ref({ title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', list: [], loading: false })
+
+function goToDetail(book) {
+  if (!book?.bookUrl || !book?.sourceId) {
+    show('缺少书籍详情参数')
+    return
+  }
+  router.push({
+    path: '/source-book-detail',
+    query: {
+      sourceId: book.sourceId,
+      sourceName: book.sourceName,
+      name: book.name,
+      author: book.author,
+      coverUrl: book.coverUrl,
+      intro: book.intro,
+      kind: book.kind,
+      lastChapter: book.lastChapter,
+      bookUrl: book.bookUrl
+    }
+  })
+}
 
 async function goToChapters(book) {
   if (!book.bookUrl) { show('该书源未返回书籍 URL'); return }
   if (!book.sourceId) { show('无法确定书源'); return }
-  chapterBook.value = { title: book.name, bookUrl: book.bookUrl, sourceId: book.sourceId, list: [], loading: true }
+  chapterBook.value = {
+    title: book.name,
+    bookUrl: book.bookUrl,
+    sourceId: book.sourceId,
+    sourceName: book.sourceName,
+    author: book.author,
+    coverUrl: book.coverUrl,
+    intro: book.intro,
+    list: [],
+    loading: true
+  }
   try {
     const res = await apiGetChapters(book.sourceId, book.bookUrl)
     chapterBook.value.list = res ?? []
@@ -283,7 +271,7 @@ async function goToChapters(book) {
 }
 
 function clearChapters() {
-  chapterBook.value = { title: '', bookUrl: '', sourceId: '', list: [], loading: false }
+  chapterBook.value = { title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', list: [], loading: false }
 }
 
 function openChapter(ch) {
@@ -292,8 +280,12 @@ function openChapter(ch) {
     path: '/reader',
     query: {
       sourceId:     chapterBook.value.sourceId,
+      sourceName:   chapterBook.value.sourceName,
       bookUrl:      chapterBook.value.bookUrl,
       bookName:     chapterBook.value.title,
+      author:       chapterBook.value.author,
+      coverUrl:     chapterBook.value.coverUrl,
+      intro:        chapterBook.value.intro,
       chapterUrl:   ch.chapterUrl,
       chapterIndex: ch.index ?? 0
     }
@@ -305,7 +297,17 @@ onMounted(() => {
   if (route.query.openBook) {
     try {
       const book = JSON.parse(route.query.openBook)
-      goToChapters({ name: book.name, bookUrl: book.bookUrl, sourceId: book.sourceId })
+      goToDetail({
+        sourceId: book.sourceId,
+        sourceName: book.sourceName,
+        name: book.name,
+        author: book.author,
+        coverUrl: book.coverUrl,
+        intro: book.intro,
+        kind: book.kind,
+        lastChapter: book.lastChapter,
+        bookUrl: book.bookUrl
+      })
     } catch { /* 忽略 */ }
   }
 })
@@ -565,6 +567,7 @@ onMounted(() => {
   color: var(--ink-4);
   line-height: 1.5;
   display: -webkit-box;
+  line-clamp: 3;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;

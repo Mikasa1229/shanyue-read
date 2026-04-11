@@ -144,6 +144,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiGetNovelDetail, apiUpdateNovel, apiDeleteNovel } from '@/api/novel'
 import { apiCheckin } from '@/api/checkin'
+import { apiRecordLevelAction } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
 import InteractionBar from '@/components/InteractionBar.vue'
@@ -202,6 +203,7 @@ async function handleCheckin() {
   if (!userStore.isLoggedIn) { show('请先登录'); return }
   try {
     await apiCheckin({ novelId: Number(route.params.id) })
+    apiRecordLevelAction('CHECKIN').catch(() => {})
     checkedToday.value = true
     show('打卡成功！')
   } catch (e) {

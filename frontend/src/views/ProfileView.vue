@@ -20,6 +20,25 @@
             <p v-if="userInfo?.bio" class="user-bio">{{ userInfo.bio }}</p>
             <p v-else class="user-bio text-muted">暂无简介</p>
 
+            <div v-if="levelInfo" class="level-box">
+              <div class="level-top">
+                <span class="level-tag">{{ levelInfo.levelName }}</span>
+                <span class="level-exp">{{ levelInfo.expTotal }} EXP</span>
+              </div>
+              <div class="level-bar">
+                <div class="level-bar-fill" :style="{ width: (levelInfo.progressPercent || 0) + '%' }"></div>
+              </div>
+              <div class="level-next">距下一等级还需 {{ levelInfo.needExpToNext }} EXP</div>
+              <div class="task-list">
+                <div v-for="task in levelInfo.dailyTasks || []" :key="task.taskId" class="task-row">
+                  <span class="task-name">{{ task.title }}</span>
+                  <span class="task-progress" :class="{ done: task.completed }">
+                    {{ task.completed ? '已完成' : `${task.progress}/${task.target}` }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <div class="user-divider"></div>
 
             <!-- Navigation -->
@@ -131,7 +150,7 @@
               <div class="fav-grid">
                 <div v-for="book in favorites" :key="book.id" class="fav-card">
                   <div class="fav-cover" @click="goReadFav(book)">
-                    <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.bookName"
+                    <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.bookName" loading="lazy" decoding="async"
                          @error="e => e.target.style.display='none'" />
                     <span v-else class="fav-cover-text">{{ book.bookName?.charAt(0) ?? '书' }}</span>
                   </div>
@@ -172,7 +191,7 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { apiUpdatePassword, apiUploadAvatar } from '@/api/user'
+import { apiUpdatePassword, apiUploadAvatar, apiGetMyLevel } from '@/api/user'
 import { apiGetMyNovels, apiDeleteNovel } from '@/api/novel'
 import { apiGetMyFavorites, apiRemoveFavorite } from '@/api/favorite'
 import { useToast } from '@/composables/useToast'
@@ -185,6 +204,7 @@ const router = useRouter()
 const { show } = useToast()
 
 const userInfo = computed(() => userStore.userInfo)
+const levelInfo = ref(null)
 const avatarUploading = ref(false)
 
 async function handleAvatarChange(e) {
@@ -310,13 +330,20 @@ async function loadFavorites(page = 1) {
 
 function goReadFav(book) {
   router.push({
-    path: '/',
-    query: { openBook: JSON.stringify({ sourceId: book.sourceId, bookUrl: book.bookUrl, name: book.bookName }) }
+    path: '/source-book-detail',
+    query: {
+      sourceId: book.sourceId,
+      sourceName: book.sourceName,
+      name: book.bookName,
+      author: book.author,
+      coverUrl: book.coverUrl,
+      intro: book.intro,
+      bookUrl: book.bookUrl
+    }
   })
 }
 
 async function removeFav(book) {
-  if (!confirm(`确认取消收藏「${book.bookName}」？`)) return
   try {
     await apiRemoveFavorite(book.bookUrl)
     favorites.value = favorites.value.filter(b => b.id !== book.id)
@@ -334,6 +361,11 @@ watch(activeTab, (tab) => {
 
 onMounted(async () => {
   await userStore.fetchProfile()
+  try {
+    levelInfo.value = await apiGetMyLevel()
+  } catch (_) {
+    levelInfo.value = null
+  }
   editForm.nickname = userInfo.value?.nickname ?? ''
   editForm.bio = userInfo.value?.bio ?? ''
 })
@@ -424,6 +456,73 @@ onMounted(async () => {
   color: var(--ink-3);
   line-height: 1.6;
 }
+
+.level-box {
+  margin-top: var(--space-4);
+  text-align: left;
+  background: var(--paper-1);
+  border: 1px solid var(--paper-3);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.level-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.level-tag {
+  font-size: 0.75rem;
+  color: var(--gold-0);
+  background: var(--gold-3);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+}
+
+.level-exp {
+  font-size: 0.75rem;
+  color: var(--ink-4);
+}
+
+.level-bar {
+  height: 6px;
+  background: var(--paper-3);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.level-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold-0), var(--gold-1));
+}
+
+.level-next {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--ink-4);
+}
+
+.task-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+}
+
+.task-name { color: var(--ink-3); }
+
+.task-progress { color: var(--ink-4); }
+
+.task-progress.done { color: var(--sage-0); }
 
 .user-divider {
   height: 1px;

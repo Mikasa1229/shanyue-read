@@ -20,12 +20,22 @@ public class CommentVO {
     /** 作者头像 */
     private String userAvatar;
 
+    /** 发布者平台等级（如 Lv3 黄金） */
+    private String userLevel;
+
     /** 书源书名（novelId 为 null 时使用）*/
     private String bookTitle;
+
+    private Long sourceId;
+    private String bookUrl;
+    private String bookAuthor;
+    private String bookCoverUrl;
+    private String bookIntro;
 
     private Long parentId;
     private Long rootId;
     private String content;
+    private Integer score;
     private Integer likeCount;
     private LocalDateTime createdAt;
 

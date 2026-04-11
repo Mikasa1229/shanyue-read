@@ -21,6 +21,17 @@ public class Comment {
     @TableField("book_title")
     private String bookTitle;
 
+    private Long sourceId;
+
+    private String bookUrl;
+
+    private String bookAuthor;
+
+    @TableField("book_cover_url")
+    private String bookCoverUrl;
+
+    private String bookIntro;
+
     private Long userId;
 
     /** 直接父评论 ID，NULL 表示根评论 */
@@ -30,6 +41,9 @@ public class Comment {
     private Long rootId;
 
     private String content;
+
+    /** 评分（1-5，仅根点评） */
+    private Integer score;
 
     private Integer likeCount;
 

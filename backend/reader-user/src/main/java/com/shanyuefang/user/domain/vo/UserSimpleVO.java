@@ -10,4 +10,5 @@ public class UserSimpleVO {
     private Long id;
     private String nickname;
     private String avatar;
+    private Long expTotal;
 }

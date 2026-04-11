@@ -21,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.util.Collections;
 import java.util.List;
@@ -31,6 +32,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> implements CommentService {
+
+    private static final long[] LEVEL_EXP = {0L, 100L, 300L, 700L, 1500L, 3000L, 5500L};
+    private static final String[] LEVEL_NAMES = {"Lv0 新人", "Lv1 青铜", "Lv2 白银", "Lv3 黄金", "Lv4 白金", "Lv5 钻石", "Lv6 大会员"};
 
     private final CommentEventProducer eventProducer;
     private final UserFeignClient userFeignClient;
@@ -43,6 +47,7 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
         comment.setNovelId(dto.getNovelId());
         comment.setUserId(userId);
         comment.setContent(dto.getContent());
+        comment.setScore(dto.getScore());
         comment.setLikeCount(0);
         comment.setStatus(1);
 
@@ -50,6 +55,11 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
         if (dto.getBookTitle() != null && !dto.getBookTitle().isBlank()) {
             comment.setBookTitle(dto.getBookTitle());
         }
+        comment.setSourceId(dto.getSourceId());
+        comment.setBookUrl(dto.getBookUrl());
+        comment.setBookAuthor(dto.getBookAuthor());
+        comment.setBookCoverUrl(dto.getBookCoverUrl());
+        comment.setBookIntro(dto.getBookIntro());
 
         if (dto.getParentId() != null) {
             // 回复：需找到父评论确认存在
@@ -65,6 +75,20 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
             comment.setParentId(parent.getId());
             // rootId：若父评论本身是根评论，则 rootId = parentId；否则继承父的 rootId
             comment.setRootId(parent.getRootId() == null ? parent.getId() : parent.getRootId());
+            // 回复不记录评分，且沿用根点评的书籍信息
+            comment.setScore(null);
+            comment.setSourceId(parent.getSourceId());
+            comment.setBookUrl(parent.getBookUrl());
+            comment.setBookTitle(parent.getBookTitle());
+            comment.setBookAuthor(parent.getBookAuthor());
+            comment.setBookCoverUrl(parent.getBookCoverUrl());
+            comment.setBookIntro(parent.getBookIntro());
+        } else {
+            // 根点评：有书籍信息时要求评分
+            boolean hasBookContext = dto.getNovelId() != null || StringUtils.hasText(dto.getBookTitle()) || StringUtils.hasText(dto.getBookUrl());
+            if (hasBookContext && dto.getScore() == null) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "请为该书打分（1-5）");
+            }
         }
 
         save(comment);
@@ -191,7 +215,18 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
         if (user != null) {
             vo.setUserNickname(user.getNickname());
             vo.setUserAvatar(user.getAvatar());
+            long expTotal = user.getExpTotal() != null ? user.getExpTotal() : 0L;
+            vo.setUserLevel(calcLevelName(expTotal));
         }
         return vo;
+    }
+
+    private String calcLevelName(long expTotal) {
+        for (int i = LEVEL_EXP.length - 1; i >= 0; i--) {
+            if (expTotal >= LEVEL_EXP[i]) {
+                return LEVEL_NAMES[i];
+            }
+        }
+        return LEVEL_NAMES[0];
     }
 }

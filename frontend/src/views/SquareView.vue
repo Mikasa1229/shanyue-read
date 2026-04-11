@@ -36,10 +36,15 @@
           <div class="feed-body">
             <div class="feed-meta">
               <span class="feed-user">{{ item.userNickname }}</span>
+              <span v-if="item.userLevel" class="feed-level">{{ item.userLevel }}</span>
               <span class="feed-action">
-                {{ item.bookTitle || item.novelId ? '推荐了' : '写了书评' }}
+                {{ item.score ? `打了 ${item.score.toFixed(1)} 分` : '写了点评' }}
               </span>
               <span class="feed-time">{{ formatTime(item.createdAt) }}</span>
+            </div>
+            <div v-if="item.score" class="feed-score-stars">
+              <span v-for="star in 5" :key="`${item.id}-${star}`" class="score-star" :class="{ active: star <= Math.round(item.score) }">★</span>
+              <span class="score-value">{{ item.score.toFixed(1) }}</span>
             </div>
             <!-- 书名标签（醒目展示，位于正文上方） -->
             <div v-if="item.bookTitle || item.novelId" class="feed-book-badge">
@@ -50,6 +55,9 @@
               <router-link v-if="item.novelId" :to="`/novel/${item.novelId}`" class="badge-title badge-link">
                 {{ item.novelId ? '查看原著' : '' }}
               </router-link>
+              <a v-else-if="item.sourceId && item.bookUrl" href="#" class="badge-title badge-link" @click.prevent="goSourceDetail(item)">
+                《{{ item.bookTitle }}》
+              </a>
               <span v-else class="badge-title">《{{ item.bookTitle }}》</span>
             </div>
             <p class="feed-content">{{ item.content }}</p>
@@ -88,6 +96,19 @@
             </svg>
             <input v-model="reviewBookTitle" class="review-input review-book-input" placeholder="推荐的书名（不填则匿名书评）" />
           </div>
+          <div class="review-score-row">
+            <span class="review-score-label">评分</span>
+            <div class="review-stars">
+              <button
+                v-for="star in 5"
+                :key="star"
+                class="review-star"
+                :class="{ active: star <= reviewScore }"
+                @click="reviewScore = star"
+              >★</button>
+            </div>
+            <span class="review-score-value">{{ reviewScore }} 分</span>
+          </div>
           <textarea v-model="reviewContent" class="review-textarea" placeholder="写下你的书评…" rows="5"></textarea>
           <button class="btn btn-gold review-submit" :disabled="reviewSubmitting" @click="submitReview">
             {{ reviewSubmitting ? '提交中…' : '发布书评' }}
@@ -100,17 +121,21 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { apiGetRecentComments, apiCreateComment } from '@/api/comment'
+import { apiRecordLevelAction } from '@/api/user'
 import { useToast } from '@/composables/useToast'
 import { useUserStore } from '@/stores/user'
 
 const { show } = useToast()
 const userStore = useUserStore()
+const router = useRouter()
 
 // ─── 写书评模态框 ──────────────────────────────────────────────
 const reviewOpen = ref(false)
 const reviewBookTitle = ref('')
 const reviewContent = ref('')
+const reviewScore = ref(4)
 const reviewSubmitting = ref(false)
 
 async function submitReview() {
@@ -119,17 +144,35 @@ async function submitReview() {
   try {
     await apiCreateComment({
       bookTitle: reviewBookTitle.value.trim() || undefined,
+      score: reviewScore.value,
       content: reviewContent.value.trim()
     })
+    apiRecordLevelAction('COMMENT').catch(() => {})
+    apiRecordLevelAction('RATE').catch(() => {})
     reviewOpen.value = false
     reviewBookTitle.value = ''
     reviewContent.value = ''
+    reviewScore.value = 4
     await loadPage(1)
   } catch (e) {
     show(e.message)
   } finally {
     reviewSubmitting.value = false
   }
+}
+
+function goSourceDetail(item) {
+  router.push({
+    path: '/source-book-detail',
+    query: {
+      sourceId: item.sourceId,
+      name: item.bookTitle,
+      author: item.bookAuthor,
+      coverUrl: item.bookCoverUrl,
+      intro: item.bookIntro,
+      bookUrl: item.bookUrl
+    }
+  })
 }
 
 const comments = ref([])
@@ -255,6 +298,15 @@ onMounted(() => loadPage(1))
   color: var(--ink-4);
 }
 
+.feed-level {
+  font-size: 0.75rem;
+  color: var(--gold-0);
+  background: var(--gold-3);
+  border: 1px solid var(--gold-2);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+}
+
 .feed-time {
   font-size: 0.8125rem;
   color: var(--ink-4);
@@ -271,6 +323,28 @@ onMounted(() => loadPage(1))
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.feed-score-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: var(--space-2);
+}
+
+.score-star {
+  color: var(--paper-3);
+  font-size: 0.875rem;
+}
+
+.score-star.active {
+  color: var(--gold-0);
+}
+
+.score-value {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  color: var(--gold-0);
 }
 
 .feed-footer {
@@ -435,4 +509,38 @@ onMounted(() => loadPage(1))
   font-weight: 500;
 }
 .review-book-input:focus { outline: none; border: none; }
+
+.review-score-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-score-label {
+  font-size: 0.875rem;
+  color: var(--ink-3);
+}
+
+.review-stars {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.review-star {
+  border: none;
+  background: transparent;
+  color: var(--paper-3);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.review-star.active {
+  color: var(--gold-0);
+}
+
+.review-score-value {
+  font-size: 0.8125rem;
+  color: var(--gold-0);
+}
 </style>

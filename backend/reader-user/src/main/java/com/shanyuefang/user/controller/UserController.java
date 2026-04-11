@@ -2,8 +2,11 @@ package com.shanyuefang.user.controller;
 
 import com.shanyuefang.common.result.R;
 import com.shanyuefang.user.config.MinioProperties;
+import com.shanyuefang.user.domain.dto.LevelActionDTO;
 import com.shanyuefang.user.domain.dto.UpdatePasswordDTO;
 import com.shanyuefang.user.domain.dto.UpdateUserDTO;
+import com.shanyuefang.user.domain.vo.LevelActionResultVO;
+import com.shanyuefang.user.domain.vo.UserLevelVO;
 import com.shanyuefang.user.domain.vo.UserVO;
 import com.shanyuefang.user.service.UserService;
 import io.minio.MinioClient;
@@ -81,5 +84,18 @@ public class UserController {
                                   @Valid @RequestBody UpdatePasswordDTO dto) {
         userService.updatePassword(userId, dto);
         return R.ok();
+    }
+
+    @Operation(summary = "获取当前用户等级与每日任务")
+    @GetMapping("/me/level")
+    public R<UserLevelVO> getMyLevel(@RequestHeader("X-User-Id") Long userId) {
+        return R.ok(userService.getUserLevel(userId));
+    }
+
+    @Operation(summary = "记录等级行为（阅读/打卡/点评/评分）")
+    @PostMapping("/me/level/action")
+    public R<LevelActionResultVO> recordLevelAction(@RequestHeader("X-User-Id") Long userId,
+                                                     @Valid @RequestBody LevelActionDTO dto) {
+        return R.ok(userService.recordLevelAction(userId, dto));
     }
 }

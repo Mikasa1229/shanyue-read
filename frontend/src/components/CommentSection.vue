@@ -19,6 +19,19 @@
           rows="3"
           @keydown.ctrl.enter="submitComment"
         ></textarea>
+        <div v-if="!replyTo" class="composer-score-row">
+          <span class="composer-score-label">评分</span>
+          <div class="composer-stars">
+            <button
+              v-for="star in 5"
+              :key="star"
+              class="composer-star"
+              :class="{ active: star <= newScore }"
+              @click="newScore = star"
+            >★</button>
+          </div>
+          <span class="composer-score-val">{{ newScore }} 分</span>
+        </div>
         <div class="composer-footer">
           <span v-if="replyTo" class="reply-hint">
             回复 <strong>@{{ replyTo.nickname }}</strong>
@@ -66,6 +79,7 @@
         <div class="comment-body">
           <div class="comment-meta">
             <span class="comment-name">{{ comment.userNickname }}</span>
+            <span v-if="comment.score" class="comment-score">{{ comment.score.toFixed(1) }} 分</span>
             <span class="comment-time">{{ formatTime(comment.createdAt) }}</span>
           </div>
           <p class="comment-content">{{ comment.content }}</p>
@@ -118,6 +132,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { apiCreateComment, apiDeleteComment, apiGetComments } from '@/api/comment'
+import { apiRecordLevelAction } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
 
@@ -132,6 +147,7 @@ const comments = ref([])
 const loading = ref(false)
 const submitting = ref(false)
 const newContent = ref('')
+const newScore = ref(4)
 const replyTo = ref(null)
 const pagination = ref({ current: 1, pages: 1, total: 0 })
 
@@ -159,10 +175,14 @@ async function submitComment() {
     await apiCreateComment({
       novelId: Number(props.novelId),
       content: newContent.value.trim(),
+      score: replyTo.value ? undefined : newScore.value,
       parentId: replyTo.value?.id ?? null
     })
+    apiRecordLevelAction('COMMENT').catch(() => {})
+    if (!replyTo.value) apiRecordLevelAction('RATE').catch(() => {})
     show('发送成功')
     newContent.value = ''
+    newScore.value = 4
     replyTo.value = null
     await loadPage(1)
   } catch (e) {
@@ -250,6 +270,41 @@ onMounted(() => loadPage(1))
   width: 100%;
   font-size: 0.9375rem;
   resize: none;
+}
+
+.composer-score-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--space-2);
+}
+
+.composer-score-label {
+  font-size: 0.8125rem;
+  color: var(--ink-3);
+}
+
+.composer-stars {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.composer-star {
+  border: none;
+  background: transparent;
+  color: var(--paper-3);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.composer-star.active {
+  color: var(--gold-0);
+}
+
+.composer-score-val {
+  font-size: 0.75rem;
+  color: var(--gold-0);
 }
 
 .composer-footer {
@@ -353,6 +408,14 @@ onMounted(() => loadPage(1))
 .comment-time {
   font-size: 0.75rem;
   color: var(--ink-4);
+}
+
+.comment-score {
+  font-size: 0.75rem;
+  color: var(--gold-0);
+  background: var(--gold-3);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
 }
 
 .comment-content {

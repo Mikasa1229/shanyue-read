@@ -6,11 +6,15 @@ import com.shanyuefang.common.exception.BusinessException;
 import com.shanyuefang.common.result.ResultCode;
 import com.shanyuefang.common.util.SnowflakeIdUtil;
 import com.shanyuefang.user.domain.dto.LoginDTO;
+import com.shanyuefang.user.domain.dto.LevelActionDTO;
 import com.shanyuefang.user.domain.dto.RegisterDTO;
 import com.shanyuefang.user.domain.dto.UpdatePasswordDTO;
 import com.shanyuefang.user.domain.dto.UpdateUserDTO;
 import com.shanyuefang.user.domain.entity.User;
+import com.shanyuefang.user.domain.vo.LevelActionResultVO;
 import com.shanyuefang.user.domain.vo.LoginVO;
+import com.shanyuefang.user.domain.vo.UserLevelTaskVO;
+import com.shanyuefang.user.domain.vo.UserLevelVO;
 import com.shanyuefang.user.domain.vo.UserVO;
 import com.shanyuefang.user.mapper.UserMapper;
 import com.shanyuefang.user.service.UserService;
@@ -24,6 +28,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.concurrent.TimeUnit;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -34,7 +42,35 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private static final String USER_CACHE_KEY = "user:info:";
     private static final long USER_CACHE_TTL = 30L; // 分钟
 
+    // B 站风格等级：Lv0-Lv6
+    private static final long[] LEVEL_EXP = {0L, 100L, 300L, 700L, 1500L, 3000L, 5500L};
+    private static final String[] LEVEL_NAMES = {"Lv0 初识", "Lv1 渐读", "Lv2 入文", "Lv3 沉浸", "Lv4 通透", "Lv5 了然", "Lv6 臻阅"};
+
+    private static final String ACTION_CHECKIN = "CHECKIN";
+    private static final String ACTION_READ_SECONDS = "READ_SECONDS";
+    private static final String ACTION_COMMENT = "COMMENT";
+    private static final String ACTION_RATE = "RATE";
+
+    private static final String KEY_TASK_PROGRESS = "user:level:task:progress:%d:%s";
+    private static final String KEY_TASK_COMPLETED = "user:level:task:completed:%d:%s";
+
     private final RedisTemplate<String, Object> redisTemplate;
+
+    private record DailyTaskRule(String taskId, String actionType, int target, int rewardExp,
+                                 String title, String description) {}
+
+    private List<DailyTaskRule> buildDailyTaskRules() {
+        return List.of(
+                new DailyTaskRule("CHECKIN_ONCE", ACTION_CHECKIN, 1, 12,
+                        "每日打卡", "完成 1 次打卡"),
+                new DailyTaskRule("READ_30_MIN", ACTION_READ_SECONDS, 1800, 20,
+                        "每日阅读", "累计阅读 30 分钟"),
+                new DailyTaskRule("WRITE_REVIEW", ACTION_COMMENT, 1, 18,
+                        "写点评", "发布 1 条点评"),
+                new DailyTaskRule("RATE_BOOK", ACTION_RATE, 1, 10,
+                        "书籍评分", "提交 1 次评分")
+        );
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -53,6 +89,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         user.setUsername(dto.getUsername());
         user.setPassword(PASSWORD_ENCODER.encode(dto.getPassword()));
         user.setNickname(StringUtils.hasText(dto.getNickname()) ? dto.getNickname() : dto.getUsername());
+        user.setExpTotal(0L);
         user.setStatus(1);
 
         // 3. 入库
@@ -163,6 +200,122 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         // 强制下线，要求重新登录
         StpUtil.logout(userId);
         log.info("用户修改密码并强制下线: userId={}", userId);
+    }
+
+    @Override
+    public UserLevelVO getUserLevel(Long userId) {
+        User user = getById(userId);
+        if (user == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "用户不存在");
+        }
+        long expTotal = user.getExpTotal() != null ? user.getExpTotal() : 0L;
+        int level = calcLevel(expTotal);
+
+        long currentLevelExp = LEVEL_EXP[level];
+        long nextLevelExp = level >= LEVEL_EXP.length - 1 ? LEVEL_EXP[level] : LEVEL_EXP[level + 1];
+        long needToNext = Math.max(0L, nextLevelExp - expTotal);
+        int progressPercent = nextLevelExp == currentLevelExp
+                ? 100
+                : (int) Math.min(100, Math.max(0,
+                Math.round((expTotal - currentLevelExp) * 100.0 / (nextLevelExp - currentLevelExp))));
+
+        UserLevelVO vo = new UserLevelVO();
+        vo.setLevel(level);
+        vo.setLevelName(LEVEL_NAMES[level]);
+        vo.setExpTotal(expTotal);
+        vo.setCurrentLevelExp(currentLevelExp);
+        vo.setNextLevelExp(nextLevelExp);
+        vo.setNeedExpToNext(needToNext);
+        vo.setProgressPercent(progressPercent);
+        vo.setDailyTasks(buildDailyTasks(userId));
+        return vo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public LevelActionResultVO recordLevelAction(Long userId, LevelActionDTO dto) {
+        User user = getById(userId);
+        if (user == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "用户不存在");
+        }
+
+        String actionType = dto.getActionType().trim().toUpperCase();
+        int value = dto.getValue();
+        if (!Set.of(ACTION_CHECKIN, ACTION_READ_SECONDS, ACTION_COMMENT, ACTION_RATE).contains(actionType)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的行为类型");
+        }
+
+        LocalDate today = LocalDate.now();
+        String progressKey = String.format(KEY_TASK_PROGRESS, userId, today);
+        String completedKey = String.format(KEY_TASK_COMPLETED, userId, today);
+
+        // 记录当日行为进度
+        redisTemplate.opsForHash().increment(progressKey, actionType, value);
+        redisTemplate.expire(progressKey, 2, TimeUnit.DAYS);
+        redisTemplate.expire(completedKey, 2, TimeUnit.DAYS);
+
+        int gainedExp = 0;
+        for (DailyTaskRule rule : buildDailyTaskRules()) {
+            Boolean done = redisTemplate.opsForSet().isMember(completedKey, rule.taskId());
+            if (Boolean.TRUE.equals(done)) {
+                continue;
+            }
+            if (!rule.actionType().equals(actionType)) {
+                continue;
+            }
+            Object raw = redisTemplate.opsForHash().get(progressKey, rule.actionType());
+            int progress = raw == null ? 0 : Integer.parseInt(String.valueOf(raw));
+            if (progress >= rule.target()) {
+                redisTemplate.opsForSet().add(completedKey, rule.taskId());
+                gainedExp += rule.rewardExp();
+            }
+        }
+
+        long newExp = user.getExpTotal() != null ? user.getExpTotal() : 0L;
+        if (gainedExp > 0) {
+            lambdaUpdate()
+                    .eq(User::getId, userId)
+                    .setSql("exp_total = COALESCE(exp_total, 0) + " + gainedExp)
+                    .update();
+            User refreshed = getById(userId);
+            newExp = refreshed != null && refreshed.getExpTotal() != null ? refreshed.getExpTotal() : newExp + gainedExp;
+            redisTemplate.delete(USER_CACHE_KEY + userId);
+        }
+
+        return new LevelActionResultVO(gainedExp, newExp, calcLevel(newExp));
+    }
+
+    private int calcLevel(long expTotal) {
+        for (int i = LEVEL_EXP.length - 1; i >= 0; i--) {
+            if (expTotal >= LEVEL_EXP[i]) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private List<UserLevelTaskVO> buildDailyTasks(Long userId) {
+        LocalDate today = LocalDate.now();
+        String progressKey = String.format(KEY_TASK_PROGRESS, userId, today);
+        String completedKey = String.format(KEY_TASK_COMPLETED, userId, today);
+        Set<Object> completed = redisTemplate.opsForSet().members(completedKey);
+
+        List<UserLevelTaskVO> list = new ArrayList<>();
+        for (DailyTaskRule rule : buildDailyTaskRules()) {
+            Object raw = redisTemplate.opsForHash().get(progressKey, rule.actionType());
+            int progress = raw == null ? 0 : Integer.parseInt(String.valueOf(raw));
+
+            UserLevelTaskVO vo = new UserLevelTaskVO();
+            vo.setTaskId(rule.taskId());
+            vo.setTitle(rule.title());
+            vo.setDescription(rule.description());
+            vo.setTarget(rule.target());
+            vo.setProgress(Math.min(progress, rule.target()));
+            vo.setRewardExp(rule.rewardExp());
+            vo.setCompleted(completed != null && completed.contains(rule.taskId()));
+            list.add(vo);
+        }
+        return list;
     }
 
     /** Entity → VO（不暴露 password 等敏感字段）*/

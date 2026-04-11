@@ -10,3 +10,7 @@ export const apiUpdatePassword = (dto) => http.put('/users/me/password', dto)
 export const apiUploadAvatar = (formData) => http.post('/users/me/avatar', formData, {
   headers: { 'Content-Type': 'multipart/form-data' }
 })
+
+export const apiGetMyLevel = () => http.get('/users/me/level')
+export const apiRecordLevelAction = (actionType, value = 1) =>
+  http.post('/users/me/level/action', { actionType, value })
