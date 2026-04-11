@@ -38,7 +38,7 @@ LIMIT 20;
 
 在 `t_bookshelf_book` 数据量超过 8 万行后，接口响应时间从 **40ms 飙升至 2.3s**，前端排行榜页首次加载白屏明显。
 
-### 排查过程
+### 排查过程  
 
 在 psql 中执行 `EXPLAIN ANALYZE`：
 

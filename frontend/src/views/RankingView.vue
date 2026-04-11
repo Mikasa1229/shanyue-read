@@ -20,7 +20,7 @@
 
       <!-- ═══════════════ 阅读时长排行 ═══════════════ -->
       <template v-if="activeTab === 'reading'">
-        <p class="tab-desc">累计阅读时长最多的书友</p>
+        <p class="tab-desc">每周累计阅读时长最多的书友</p>
 
         <div v-if="readingLoading" class="spinner-wrap"><div class="spinner"></div></div>
 
