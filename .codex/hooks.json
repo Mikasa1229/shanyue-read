@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash 'C:/Users/Mikasa1229/Desktop/Reader/scripts/hook-check-errors.sh'",
+            "timeout": 10,
+            "statusMessage": "检查后端错误日志…"
+          }
+        ]
+      }
+    ]
+  }
+}
