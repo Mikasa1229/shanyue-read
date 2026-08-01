@@ -195,7 +195,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { apiGetChapters, apiGetContent } from '@/api/bookSource'
 import { apiUpdateReadingProgress } from '@/api/bookshelf'
-import { apiRecordReading } from '@/api/reading'
+import { apiReadingHeartbeat, apiStartReadingSession } from '@/api/reading'
 import { apiAddFavorite, apiCheckFavorited } from '@/api/favorite'
 import { apiCreateComment } from '@/api/comment'
 import { apiRecordLevelAction } from '@/api/user'
@@ -226,6 +226,9 @@ const loadingNext  = ref(false)
 const noMoreChapters = ref(false)
 const isFavorited = ref(false)
 let readerOpenTime = 0
+let readingSessionToken = ''
+let readingHeartbeatTimer = 0
+let lastReportedChapter = -1
 
 const currentChapterName = computed(() => chapters.value[currentIndex.value]?.chapterName ?? '')
 
@@ -412,10 +415,24 @@ function reportReadDuration() {
   if (readerOpenTime <= 0 || !userStore.isLoggedIn) return
   const seconds = Math.floor((Date.now() - readerOpenTime) / 1000)
   if (seconds >= 5) {
-    apiRecordReading(seconds).catch(() => {})
+    // Reading rewards and ranking only accept server-verified heartbeats.
     apiRecordLevelAction('READ_SECONDS', seconds).catch(() => {})
   }
   readerOpenTime = 0
+}
+
+async function beginVerifiedReadingSession() {
+  if (!userStore.isLoggedIn || !bookUrl.value) return
+  try {
+    const session = await apiStartReadingSession(bookUrl.value)
+    readingSessionToken = session.sessionToken
+    readingHeartbeatTimer = window.setInterval(() => {
+      if (!readingSessionToken) return
+      apiReadingHeartbeat(readingSessionToken, document.visibilityState === 'visible').catch(() => {})
+    }, 45_000)
+  } catch (_) {
+    // Legacy duration tracking remains available if the session service is temporarily unavailable.
+  }
 }
 
 // ─── 段落格式化 ───────────────────────────────────────────────
@@ -440,22 +457,14 @@ async function loadChapterContent(idx, isPreload = false) {
   loadedChunks.value.push(chunk)
 
   try {
-    const res = await apiGetContent(sourceId.value, ch.chapterUrl)
+    const res = await apiGetContent(sourceId.value, ch.chapterUrl, bookUrl.value, idx)
     const raw = res?.content ?? ''
     chunk.html = formatContent(raw) || '<p>（正文内容为空）</p>'
     chunk.loading = false
     if (!isPreload) {
       currentIndex.value = idx
       // 上报阅读进度（仅主动加载才上报）
-      if (userStore.isLoggedIn) {
-        apiUpdateReadingProgress({
-          bookUrl: bookUrl.value,
-          chapterName: ch.chapterName,
-          chapterUrl: ch.chapterUrl,
-          chapterIndex: idx,
-          totalChapters: chapters.value.length
-        }).catch(() => {})
-      }
+      reportChapterProgress(idx)
     }
     if (!isPreload) {
       ensurePreloadWindow(idx)
@@ -463,6 +472,23 @@ async function loadChapterContent(idx, isPreload = false) {
   } catch (e) {
     chunk.loading = false
     chunk.error = e.message
+  }
+}
+
+function reportChapterProgress(idx) {
+  const chapter = chapters.value[idx]
+  if (!userStore.isLoggedIn || !chapter || idx === lastReportedChapter) return
+  lastReportedChapter = idx
+  apiUpdateReadingProgress({
+    bookUrl: bookUrl.value,
+    chapterName: chapter.chapterName,
+    chapterUrl: chapter.chapterUrl,
+    chapterIndex: idx,
+    totalChapters: chapters.value.length
+  }).catch(() => { lastReportedChapter = -1 })
+  // Keep every Agent entry point bound to the chapter actually on screen.
+  if (String(route.query.chapterIndex ?? '') !== String(idx)) {
+    router.replace({ query: { ...route.query, chapterIndex: String(idx) } })
   }
 }
 
@@ -490,11 +516,12 @@ async function loadPrevChapter() {
   loadedChunks.value.unshift(chunk)
 
   try {
-    const res = await apiGetContent(sourceId.value, prevCh.chapterUrl)
+    const res = await apiGetContent(sourceId.value, prevCh.chapterUrl, bookUrl.value, prevIdx)
     const raw = res?.content ?? ''
     chunk.html = formatContent(raw) || '<p>（正文内容为空）</p>'
     chunk.loading = false
     currentIndex.value = prevIdx
+    reportChapterProgress(prevIdx)
     ensurePreloadWindow(prevIdx)
   } catch (e) {
     chunk.error = e.message
@@ -563,6 +590,7 @@ function syncCurrentChapterFromView(force = false) {
   }
   if (force || activeIdx !== currentIndex.value) {
     currentIndex.value = activeIdx
+    reportChapterProgress(activeIdx)
     ensurePreloadWindow(activeIdx)
   }
 }
@@ -591,6 +619,7 @@ function goBack() {
 onMounted(async () => {
   readerOpenTime = Date.now()
   window.addEventListener('scroll', onScroll)
+  beginVerifiedReadingSession()
   loadBookmarks()
 
   // 检查是否已收藏
@@ -638,6 +667,8 @@ onUnmounted(() => {
   observer?.disconnect()
   topObserver?.disconnect()
   if (chapterSyncRaf) window.cancelAnimationFrame(chapterSyncRaf)
+  if (readingHeartbeatTimer) window.clearInterval(readingHeartbeatTimer)
+  if (readingSessionToken) apiReadingHeartbeat(readingSessionToken, document.visibilityState === 'visible').catch(() => {})
   window.removeEventListener('scroll', onScroll)
   reportReadDuration()
 })

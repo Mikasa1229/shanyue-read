@@ -98,7 +98,8 @@ function goRead(book) {
       bookUrl:     book.bookUrl,
       bookName:    book.bookName,
       chapterUrl:  book.lastChapterUrl || undefined,
-      chapterIndex: 0
+      canonicalBookId: book.canonicalBookId || undefined,
+      chapterIndex: Number.isInteger(book.lastChapterIndex) ? book.lastChapterIndex : 0
     }
   })
 }

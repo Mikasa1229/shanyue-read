@@ -82,7 +82,8 @@ const book = reactive({
   intro: route.query.intro || '',
   kind: route.query.kind || '',
   lastChapter: route.query.lastChapter || '',
-  bookUrl: route.query.bookUrl || ''
+  bookUrl: route.query.bookUrl || '',
+  canonicalBookId: route.query.canonicalBookId || ''
 })
 
 const loadingChapters = ref(false)
@@ -111,6 +112,7 @@ async function hydrateDetail() {
     book.intro = res.intro || book.intro || ''
     book.kind = res.kind || book.kind || ''
     book.lastChapter = res.lastChapter || book.lastChapter || ''
+    book.canonicalBookId = res.canonicalBookId || book.canonicalBookId || ''
   } catch (_) {
     // 兜底失败不阻断页面
   } finally {
@@ -179,6 +181,7 @@ function openChapter(chapter, idx) {
       author: book.author,
       coverUrl: book.coverUrl,
       intro: book.intro,
+      canonicalBookId: book.canonicalBookId,
       chapterUrl: chapter.chapterUrl,
       chapterIndex: idx ?? 0
     }
@@ -199,7 +202,8 @@ async function addToShelf() {
       bookName: book.name,
       author: book.author,
       coverUrl: book.coverUrl,
-      bookUrl: book.bookUrl
+      bookUrl: book.bookUrl,
+      canonicalBookId: book.canonicalBookId || undefined
     })
     onShelf.value = true
     show('已加入书架')

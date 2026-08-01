@@ -18,5 +18,5 @@ export const apiGetBookDetail  = (id, bookUrl)            => http.get(`/book-sou
 export const apiGetChapters    = (id, bookUrl)            => http.get(`/book-sources/${id}/chapters`, { params: { bookUrl } })
 export const apiGetChaptersPage = (id, bookUrl, offset = 0, limit = 50) =>
 	http.get(`/book-sources/${id}/chapters/page`, { params: { bookUrl, offset, limit } })
-export const apiGetContent     = (id, chapterUrl)         => http.get(`/book-sources/${id}/content`,  { params: { chapterUrl } })
+export const apiGetContent     = (id, chapterUrl, bookUrl, chapterIndex) => http.get(`/book-sources/${id}/content`, { params: { chapterUrl, bookUrl, chapterIndex } })
 export const apiTestSource     = (id)                     => http.get(`/book-sources/${id}/test`)

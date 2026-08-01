@@ -222,7 +222,7 @@ async function doSearch() {
 }
 
 // ─── 章节列表 ──────────────────────────────────────────────────
-const chapterBook = ref({ title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', list: [], loading: false })
+const chapterBook = ref({ title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', canonicalBookId: '', list: [], loading: false })
 
 function goToDetail(book) {
   if (!book?.bookUrl || !book?.sourceId) {
@@ -240,7 +240,8 @@ function goToDetail(book) {
       intro: book.intro,
       kind: book.kind,
       lastChapter: book.lastChapter,
-      bookUrl: book.bookUrl
+      bookUrl: book.bookUrl,
+      canonicalBookId: book.canonicalBookId
     }
   })
 }
@@ -256,6 +257,7 @@ async function goToChapters(book) {
     author: book.author,
     coverUrl: book.coverUrl,
     intro: book.intro,
+    canonicalBookId: book.canonicalBookId,
     list: [],
     loading: true
   }
@@ -271,7 +273,7 @@ async function goToChapters(book) {
 }
 
 function clearChapters() {
-  chapterBook.value = { title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', list: [], loading: false }
+  chapterBook.value = { title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', canonicalBookId: '', list: [], loading: false }
 }
 
 function openChapter(ch) {
@@ -286,6 +288,7 @@ function openChapter(ch) {
       author:       chapterBook.value.author,
       coverUrl:     chapterBook.value.coverUrl,
       intro:        chapterBook.value.intro,
+      canonicalBookId: chapterBook.value.canonicalBookId,
       chapterUrl:   ch.chapterUrl,
       chapterIndex: ch.index ?? 0
     }

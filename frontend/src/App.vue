@@ -7,12 +7,14 @@
       </transition>
     </router-view>
     <ToastManager />
+    <AgentFloating />
   </div>
 </template>
 
 <script setup>
 import AppNav from '@/components/AppNav.vue'
 import ToastManager from '@/components/ToastManager.vue'
+import AgentFloating from '@/components/AgentFloating.vue'
 </script>
 
 <style scoped>
