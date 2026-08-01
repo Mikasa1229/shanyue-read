@@ -16,9 +16,14 @@ if ($LASTEXITCODE -ne 0) {
 Set-Location "$Root\docker"
 
 Write-Host "[1/2] 启动中间件容器..." -ForegroundColor Yellow
-docker-compose up -d
+$composeArgs = @("-f", "docker-compose.yml", "up", "-d")
+if (Test-Path -LiteralPath "$Root\.env") {
+    $composeArgs = @("--env-file", "$Root\.env") + $composeArgs
+    Write-Host "       已加载项目根目录 .env（敏感值不会显示）。" -ForegroundColor DarkGray
+}
+docker compose @composeArgs
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[错误] docker-compose 启动失败，请检查 docker/docker-compose.yml。" -ForegroundColor Red
+    Write-Host "[错误] Docker Compose 启动失败，请检查 docker/docker-compose.yml。" -ForegroundColor Red
     exit 1
 }
 

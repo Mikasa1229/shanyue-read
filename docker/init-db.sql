@@ -7,3 +7,4 @@ CREATE DATABASE db_novel;
 CREATE DATABASE db_comment;
 CREATE DATABASE db_interaction;
 CREATE DATABASE db_checkin;
+CREATE DATABASE db_agent;

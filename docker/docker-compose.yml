@@ -1,5 +1,3 @@
-version: '3.8'
-
 # 善阅坊本地开发中间件一键启动
 # 使用方式：docker compose up -d
 
@@ -152,6 +150,90 @@ services:
     volumes:
       - minio_data:/data
 
+  # Milvus is the production vector-store target for Agent embeddings.
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: reader-milvus-etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls=http://0.0.0.0:2379
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+    volumes:
+      - milvus_etcd_data:/etcd
+
+  milvus:
+    image: milvusdb/milvus:v2.4.9
+    container_name: reader-milvus
+    command: ["milvus", "run", "standalone"]
+    depends_on:
+      - milvus-etcd
+      - minio
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9091/healthz | grep -q OK"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  # Graph persistence is provisioned separately from application tables.
+  neo4j:
+    image: neo4j:5-community
+    container_name: reader-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/reader-agent-dev
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -a bolt://localhost:7687 -u neo4j -p reader-agent-dev 'RETURN 1' >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: reader-prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  # Optional local Trace backend for Agent model, retrieval, and tool-call spans.
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: reader-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    container_name: reader-otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    depends_on:
+      - jaeger
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./otel-collector.yml:/etc/otelcol-contrib/config.yaml:ro
+
 volumes:
   postgres_data:
   redis_data:
@@ -160,3 +242,7 @@ volumes:
   nacos_data:
   es_data:
   minio_data:
+  milvus_etcd_data:
+  milvus_data:
+  neo4j_data:
+  prometheus_data:

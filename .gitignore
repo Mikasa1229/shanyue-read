@@ -28,6 +28,7 @@ logs/
 application-prod.yml
 application-local.yml
 *.env
+apikey
 
 
 
