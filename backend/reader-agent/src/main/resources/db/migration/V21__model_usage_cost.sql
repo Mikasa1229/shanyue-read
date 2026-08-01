@@ -1,0 +1,1 @@
+ALTER TABLE t_model_usage ADD COLUMN IF NOT EXISTS platform_cost_micros BIGINT NOT NULL DEFAULT 0;
