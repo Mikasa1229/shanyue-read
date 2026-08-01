@@ -81,8 +81,11 @@ app:
     embedding-operation-timeout-millis: ${AGENT_EMBEDDING_OPERATION_TIMEOUT_MILLIS:3000}
     embedding-failure-cooldown-seconds: ${AGENT_EMBEDDING_FAILURE_COOLDOWN_SECONDS:30}
     conversation-retention-days: ${AGENT_CONVERSATION_RETENTION_DAYS:90}
-    milvus-enabled: ${AGENT_MILVUS_ENABLED:false}
-    elasticsearch-enabled: ${AGENT_ELASTICSEARCH_ENABLED:false}
+    # The local Docker Compose stack provisions all three stores, so the
+    # default profile uses the full LightRAG evidence path. Set an explicit
+    # environment value to false only for a deliberately degraded run.
+    milvus-enabled: ${AGENT_MILVUS_ENABLED:true}
+    elasticsearch-enabled: ${AGENT_ELASTICSEARCH_ENABLED:true}
     elasticsearch-index: ${AGENT_ELASTICSEARCH_INDEX:reader_agent_chunks}
     milvus-host: ${MILVUS_HOST:localhost}
     milvus-port: ${MILVUS_PORT:19530}
@@ -94,7 +97,7 @@ app:
     event-profile-collection: ${MILVUS_EVENT_COLLECTION:event_vectors}
     community-profile-collection: ${MILVUS_COMMUNITY_PROFILE_COLLECTION:lightrag_community_vectors}
     user-preference-profile-collection: ${MILVUS_USER_PREFERENCE_COLLECTION:user_preference_vectors}
-    neo4j-enabled: ${AGENT_NEO4J_ENABLED:false}
+    neo4j-enabled: ${AGENT_NEO4J_ENABLED:true}
     neo4j-uri: ${NEO4J_URI:bolt://localhost:7687}
     neo4j-username: ${NEO4J_USERNAME:neo4j}
     neo4j-password: ${NEO4J_PASSWORD:}
@@ -122,9 +125,9 @@ app:
 management:
   health:
     elasticsearch:
-      enabled: ${AGENT_ELASTICSEARCH_ENABLED:false}
+      enabled: ${AGENT_ELASTICSEARCH_ENABLED:true}
     neo4j:
-      enabled: ${AGENT_NEO4J_ENABLED:false}
+      enabled: ${AGENT_NEO4J_ENABLED:true}
   tracing:
     # Keep tracing opt-in for local runs without an OTLP collector.
     sampling:
