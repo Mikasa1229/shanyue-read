@@ -6,6 +6,7 @@ import lombok.Data;
 @Data
 public class AddFavoriteDTO {
     private Long sourceId;
+    private Long canonicalBookId;
     private String sourceName;
     @NotBlank
     private String bookName;

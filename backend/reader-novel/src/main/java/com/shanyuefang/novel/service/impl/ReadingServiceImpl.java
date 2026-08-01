@@ -2,6 +2,9 @@ package com.shanyuefang.novel.service.impl;
 
 import com.shanyuefang.common.result.R;
 import com.shanyuefang.novel.domain.vo.RankingVO;
+import com.shanyuefang.novel.domain.dto.ReadingHeartbeatDTO;
+import com.shanyuefang.novel.domain.dto.StartReadingSessionDTO;
+import com.shanyuefang.novel.domain.vo.ReadingSessionVO;
 import com.shanyuefang.novel.feign.UserFeignClient;
 import com.shanyuefang.novel.feign.vo.UserSimpleVO;
 import com.shanyuefang.novel.service.ReadingService;
@@ -9,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import java.time.DayOfWeek;
@@ -22,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -31,6 +36,21 @@ public class ReadingServiceImpl implements ReadingService {
 
     /** Redis ZSET key 前缀：成员=userId，分值=本周累计阅读秒数。完整 key 如 ranking:reading_time:2026-W15 */
     private static final String RANKING_KEY_PREFIX = "ranking:reading_time:";
+    private static final String SESSION_PREFIX = "reading:session:";
+    private static final String REWARDED_PREFIX = "reading:rewarded:";
+    private static final int REWARD_SECONDS = 30 * 60;
+    private static final int MAX_DAILY_QUALIFIED_SECONDS = 4 * 60 * 60;
+    private static final DefaultRedisScript<Long> CLAIM_DAILY_SECONDS = new DefaultRedisScript<>("""
+            local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+            local requested = tonumber(ARGV[1])
+            local maximum = tonumber(ARGV[2])
+            local accepted = math.max(0, math.min(requested, maximum - current))
+            if accepted > 0 then
+              redis.call('INCRBY', KEYS[1], accepted)
+              if current == 0 then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
+            end
+            return accepted
+            """, Long.class);
 
     private final StringRedisTemplate stringRedisTemplate;
     private final UserFeignClient userFeignClient;
@@ -54,8 +74,7 @@ public class ReadingServiceImpl implements ReadingService {
         return Duration.between(now, nextMonday).getSeconds();
     }
 
-    @Override
-    public void record(long userId, int seconds) {
+    private void recordVerifiedSeconds(long userId, int seconds) {
         String key = currentWeekKey();
         String member = String.valueOf(userId);
         stringRedisTemplate.opsForZSet().incrementScore(key, member, seconds);
@@ -120,6 +139,53 @@ public class ReadingServiceImpl implements ReadingService {
             result.add(vo);
         }
         return result;
+    }
+
+    @Override
+    public ReadingSessionVO startSession(long userId, StartReadingSessionDTO dto) {
+        String token = UUID.randomUUID().toString().replace("-", "");
+        long now = System.currentTimeMillis();
+        String key = SESSION_PREFIX + token;
+        stringRedisTemplate.opsForHash().put(key, "userId", String.valueOf(userId));
+        stringRedisTemplate.opsForHash().put(key, "bookUrl", dto.getBookUrl());
+        stringRedisTemplate.opsForHash().put(key, "lastHeartbeat", String.valueOf(now));
+        stringRedisTemplate.opsForHash().put(key, "qualifiedSeconds", "0");
+        stringRedisTemplate.expire(key, Duration.ofHours(8));
+        return new ReadingSessionVO(token, 0, false);
+    }
+
+    @Override
+    public ReadingSessionVO heartbeat(long userId, ReadingHeartbeatDTO dto) {
+        String key = SESSION_PREFIX + dto.getSessionToken();
+        Object owner = stringRedisTemplate.opsForHash().get(key, "userId");
+        if (owner == null || !String.valueOf(userId).equals(String.valueOf(owner))) {
+            throw new com.shanyuefang.common.exception.BusinessException(com.shanyuefang.common.result.ResultCode.FORBIDDEN, "Invalid reading session");
+        }
+        long now = System.currentTimeMillis();
+        long previous = Long.parseLong(String.valueOf(stringRedisTemplate.opsForHash().get(key, "lastHeartbeat")));
+        // A hidden tab earns nothing; visible intervals are server-clamped to resist client-side time spoofing.
+        long earned = dto.isPageVisible() && now - previous >= 15_000L ? Math.min(90L, (now - previous) / 1000L) : 0L;
+        String dayKey = "reading:qualified:" + java.time.LocalDate.now(BEIJING) + ":" + userId;
+        Long accepted = earned == 0 ? 0L : stringRedisTemplate.execute(CLAIM_DAILY_SECONDS, List.of(dayKey),
+                String.valueOf(earned), String.valueOf(MAX_DAILY_QUALIFIED_SECONDS), String.valueOf(Duration.ofDays(2).toSeconds()));
+        earned = accepted == null ? 0L : accepted;
+        long current = Long.parseLong(String.valueOf(stringRedisTemplate.opsForHash().get(key, "qualifiedSeconds"))) + earned;
+        stringRedisTemplate.opsForHash().put(key, "qualifiedSeconds", String.valueOf(current));
+        stringRedisTemplate.opsForHash().put(key, "lastHeartbeat", String.valueOf(now));
+        if (earned > 0) recordVerifiedSeconds(userId, (int) earned);
+        boolean rewarded = false;
+        String rewardKey = REWARDED_PREFIX + java.time.LocalDate.now(BEIJING) + ":" + userId;
+        if (current >= REWARD_SECONDS && Boolean.TRUE.equals(stringRedisTemplate.opsForValue().setIfAbsent(rewardKey, "1", Duration.ofDays(2)))) {
+            try {
+                userFeignClient.grantCredits(Map.of("userId", userId, "amount", 1,
+                        "requestId", "reading:" + java.time.LocalDate.now(BEIJING) + ":" + userId, "reason", "Verified reading session"));
+                rewarded = true;
+            } catch (Exception e) {
+                stringRedisTemplate.delete(rewardKey);
+                log.warn("Unable to grant reading credit: userId={}", userId, e);
+            }
+        }
+        return new ReadingSessionVO(dto.getSessionToken(), current, rewarded);
     }
 
     /** 将秒数格式化为可读字符串，如 "2小时35分钟" */

@@ -38,6 +38,7 @@ class UserServiceTest {
     @Mock UserMapper userMapper;
     @Mock RedisTemplate<String, Object> redisTemplate;
     @Mock ValueOperations<String, Object> valueOps;
+    @Mock CreditService creditService;
 
     UserServiceImpl userService;
 
@@ -45,7 +46,7 @@ class UserServiceTest {
 
     @BeforeEach
     void setUp() {
-        userService = new UserServiceImpl(redisTemplate);
+        userService = new UserServiceImpl(redisTemplate, creditService);
         ReflectionTestUtils.setField(userService, "baseMapper", userMapper);
         ReflectionTestUtils.setField(userService, "entityClass", User.class);
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -82,6 +83,7 @@ class UserServiceTest {
 
         assertThatNoException().isThrownBy(() -> userService.register(dto));
         verify(userMapper).insert(argThat((User u) -> "bob".equals(u.getUsername())));
+        verify(creditService).grantStarterCredits(anyLong());
     }
 
     // ── login ────────────────────────────────────────────────

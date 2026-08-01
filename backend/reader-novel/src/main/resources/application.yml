@@ -75,3 +75,7 @@ knife4j:
 logging:
   level:
     com.shanyuefang: debug
+
+app:
+  agent:
+    internal-token: ${AGENT_INTERNAL_TOKEN:}

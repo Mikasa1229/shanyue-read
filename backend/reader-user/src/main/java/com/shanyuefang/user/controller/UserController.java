@@ -9,6 +9,8 @@ import com.shanyuefang.user.domain.vo.LevelActionResultVO;
 import com.shanyuefang.user.domain.vo.UserLevelVO;
 import com.shanyuefang.user.domain.vo.UserVO;
 import com.shanyuefang.user.service.UserService;
+import com.shanyuefang.user.service.CreditService;
+import com.shanyuefang.user.domain.vo.UserCreditVO;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.swagger.v3.oas.annotations.Operation;
@@ -28,6 +30,7 @@ import java.util.UUID;
 public class UserController {
 
     private final UserService userService;
+    private final CreditService creditService;
     private final MinioClient minioClient;
     private final MinioProperties minioProperties;
 
@@ -97,5 +100,9 @@ public class UserController {
     public R<LevelActionResultVO> recordLevelAction(@RequestHeader("X-User-Id") Long userId,
                                                      @Valid @RequestBody LevelActionDTO dto) {
         return R.ok(userService.recordLevelAction(userId, dto));
+    }
+    @GetMapping("/me/credits")
+    public R<UserCreditVO> getCredits(@RequestHeader("X-User-Id") Long userId) {
+        return R.ok(creditService.getCredits(userId));
     }
 }

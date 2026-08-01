@@ -42,6 +42,10 @@ spring:
           uri: lb://reader-checkin
           predicates:
             - Path=/api/checkins/**
+        - id: reader-agent
+          uri: lb://reader-agent
+          predicates:
+            - Path=/api/agent/**
 
   # Redis（Sa-Token 共享会话）
   data:
@@ -64,3 +68,8 @@ sa-token:
 logging:
   level:
     com.shanyuefang: debug
+
+app:
+  gateway:
+    # Shared only with reader-agent; it stops direct service-port callers from forging X-User-Id.
+    agent-forward-token: ${AGENT_GATEWAY_TOKEN:}

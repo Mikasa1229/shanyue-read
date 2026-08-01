@@ -3,6 +3,7 @@ package com.shanyuefang.checkin.service;
 import com.shanyuefang.checkin.domain.dto.CheckinDTO;
 import com.shanyuefang.checkin.domain.entity.Checkin;
 import com.shanyuefang.checkin.domain.vo.StreakVO;
+import com.shanyuefang.checkin.event.CheckinEventProducer;
 import com.shanyuefang.checkin.mapper.CheckinMapper;
 import com.shanyuefang.checkin.service.impl.CheckinServiceImpl;
 import com.shanyuefang.common.exception.BusinessException;
@@ -29,12 +30,13 @@ class CheckinServiceTest {
     @Mock CheckinMapper checkinMapper;
     @Mock RedisTemplate<String, Object> redisTemplate;
     @Mock ValueOperations<String, Object> valueOps;
+    @Mock CheckinEventProducer checkinEventProducer;
 
     CheckinServiceImpl checkinService;
 
     @BeforeEach
     void setUp() {
-        checkinService = new CheckinServiceImpl(redisTemplate, null);
+        checkinService = new CheckinServiceImpl(redisTemplate, checkinEventProducer);
         ReflectionTestUtils.setField(checkinService, "baseMapper", checkinMapper);
         ReflectionTestUtils.setField(checkinService, "entityClass", Checkin.class);
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -76,6 +78,7 @@ class CheckinServiceTest {
         verify(checkinMapper).insert(argThat((Checkin c) -> Long.valueOf(1L).equals(c.getUserId())));
         verify(valueOps).setBit(anyString(), anyLong(), eq(true));
         verify(redisTemplate).delete(contains("streak:" + userId));
+        verify(checkinEventProducer).publishCheckinCreated(any());
     }
 
     // ── getStreak ─────────────────────────────────────────────

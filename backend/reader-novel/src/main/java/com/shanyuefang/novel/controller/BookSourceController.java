@@ -7,6 +7,11 @@ import com.shanyuefang.novel.domain.vo.BookChapterVO;
 import com.shanyuefang.novel.domain.vo.BookSourceVO;
 import com.shanyuefang.novel.domain.vo.SearchBookVO;
 import com.shanyuefang.novel.service.BookSourceService;
+import com.shanyuefang.novel.messaging.KnowledgeIndexPublisher;
+import com.shanyuefang.novel.domain.entity.BookContentVersion;
+import com.shanyuefang.novel.mapper.BookContentVersionMapper;
+import com.shanyuefang.common.util.SnowflakeIdUtil;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -15,6 +20,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Tag(name = "书源管理", description = "legado 兼容书源的导入 / 搜索 / 章节 / 内容")
 @RestController
@@ -23,6 +31,8 @@ import java.util.Map;
 public class BookSourceController {
 
     private final BookSourceService bookSourceService;
+    private final KnowledgeIndexPublisher knowledgeIndexPublisher;
+    private final BookContentVersionMapper contentVersionMapper;
 
     // ─── 导入 ─────────────────────────────────────────────────
 
@@ -123,13 +133,56 @@ public class BookSourceController {
 
     @Operation(summary = "获取章节正文内容",
                description = "chapterUrl 为目录接口返回的章节 URL")
+    public R<Map<String, String>> content(Long id, String chapterUrl, String bookUrl, Integer chapterIndex) {
+        return content(id, chapterUrl, bookUrl, chapterIndex, null);
+    }
+
     @GetMapping("/{id}/content")
     public R<Map<String, String>> content(
             @PathVariable("id") Long id,
             @RequestParam(name = "chapterUrl")
-            @Parameter(description = "章节 URL") String chapterUrl) {
+            @Parameter(description = "章节 URL") String chapterUrl,
+            @RequestParam(required = false) String bookUrl,
+            @RequestParam(required = false) Integer chapterIndex,
+            @RequestParam(required = false) Long canonicalBookId) {
         String text = bookSourceService.getContent(id, chapterUrl);
+        if (bookUrl != null && chapterIndex != null && chapterIndex >= 0) {
+            try {
+                Long resolvedCanonicalBookId = canonicalBookId;
+                if (resolvedCanonicalBookId == null) {
+                    SearchBookVO detail = bookSourceService.getBookDetail(id, bookUrl);
+                    resolvedCanonicalBookId = detail.getCanonicalBookId();
+                }
+                if (resolvedCanonicalBookId != null) {
+                    String hash = sha256(text);
+                    BookContentVersion version = contentVersionMapper.selectOne(Wrappers.<BookContentVersion>lambdaQuery()
+                            .eq(BookContentVersion::getCanonicalBookId, resolvedCanonicalBookId)
+                            .eq(BookContentVersion::getChapterIndex, chapterIndex).eq(BookContentVersion::getContentHash, hash));
+                    if (version == null) {
+                        version = new BookContentVersion(); version.setId(SnowflakeIdUtil.next()); version.setCanonicalBookId(resolvedCanonicalBookId);
+                        version.setSourceId(id); version.setChapterIndex(chapterIndex); version.setChapterUrl(chapterUrl); version.setContentHash(hash);
+                        version.setFetchedAt(LocalDateTime.now()); version.setIndexStatus("PENDING"); contentVersionMapper.insert(version);
+                        knowledgeIndexPublisher.publish(resolvedCanonicalBookId, chapterIndex, text, hash);
+                    } else if (!"READY".equals(version.getIndexStatus())) {
+                        // Re-publish pending/failed versions so a broker or Agent restart is resumable.
+                        version.setIndexStatus("PENDING"); version.setFetchedAt(LocalDateTime.now()); contentVersionMapper.updateById(version);
+                        knowledgeIndexPublisher.publish(resolvedCanonicalBookId, chapterIndex, text, hash);
+                    }
+                }
+            } catch (Exception ignored) {
+                // Indexing is additive; source reading must remain available on an index failure.
+            }
+        }
         return R.ok(Map.of("content", text));
+    }
+
+    private String sha256(String content) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hash = new StringBuilder();
+            for (byte value : digest) hash.append(String.format("%02x", value));
+            return hash.toString();
+        } catch (Exception exception) { throw new IllegalStateException("SHA-256 unavailable", exception); }
     }
 
     @Operation(summary = "测试书源是否可访问")

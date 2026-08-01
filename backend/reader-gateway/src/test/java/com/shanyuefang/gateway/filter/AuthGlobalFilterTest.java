@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
+import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -62,6 +63,19 @@ class AuthGlobalFilterTest {
                 .verifyComplete();
 
         assertThat(captured).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("内部服务路径不经网关暴露")
+    void internalPath_returns404WithoutReachingAService() {
+        var exchange = exchangeFor("POST", "/internal/agent/mcp");
+        List<ServerWebExchange> captured = new ArrayList<>();
+
+        StepVerifier.create(filter.filter(exchange, ex -> { captured.add(ex); return Mono.empty(); }))
+                .verifyComplete();
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(captured).isEmpty();
     }
 
     // ── GET 公开只读路径放行 ────────────────────────────────────
@@ -154,6 +168,32 @@ class AuthGlobalFilterTest {
 
             assertThat(captured).hasSize(1);
             assertThat(captured.get(0).getRequest().getHeaders().getFirst("X-User-Id")).isEqualTo("42");
+        }
+    }
+
+    @Test
+    @DisplayName("鉴权成功 - 覆盖客户端伪造的 X-User-Id")
+    void validToken_replacesSpoofedUserIdHeader() {
+        ReflectionTestUtils.setField(filter, "agentForwardToken", "gateway-secret");
+        var request = MockServerHttpRequest.post("/api/agent/sessions")
+                .remoteAddress(new java.net.InetSocketAddress("203.0.113.8", 443))
+                .header("X-User-Id", "999999").header("X-Agent-Client-Ip", "127.0.0.1").build();
+        var exchange = MockServerWebExchange.from(request);
+        List<ServerWebExchange> captured = new ArrayList<>();
+
+        try (MockedStatic<SaReactorSyncHolder> holderMock = mockStatic(SaReactorSyncHolder.class);
+             MockedStatic<StpUtil> stpMock = mockStatic(StpUtil.class)) {
+            holderMock.when(() -> SaReactorSyncHolder.setContext(any())).thenAnswer(inv -> null);
+            holderMock.when(SaReactorSyncHolder::clearContext).thenAnswer(inv -> null);
+            stpMock.when(StpUtil::checkLogin).thenAnswer(inv -> null);
+            stpMock.when(StpUtil::getLoginIdAsLong).thenReturn(42L);
+
+            StepVerifier.create(filter.filter(exchange, ex -> { captured.add(ex); return Mono.empty(); })).verifyComplete();
+
+            assertThat(captured).hasSize(1);
+            assertThat(captured.get(0).getRequest().getHeaders().get("X-User-Id")).containsExactly("42");
+            assertThat(captured.get(0).getRequest().getHeaders().get("X-Agent-Client-Ip")).containsExactly("203.0.113.8");
+            assertThat(captured.get(0).getRequest().getHeaders().get("X-Agent-Gateway-Token")).containsExactly("gateway-secret");
         }
     }
 

@@ -17,11 +17,13 @@ import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * 全局鉴权过滤器
@@ -35,6 +37,9 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
     private final ObjectMapper objectMapper;
 
+    @Value("${app.gateway.agent-forward-token:}")
+    private String agentForwardToken;
+
     /** 无需登录的公开路径前缀 */
     private static final List<String> WHITE_LIST = List.of(
             "/api/auth/login",
@@ -45,6 +50,12 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
         String method = exchange.getRequest().getMethod().name();
+
+        // Discovery-locator routes must never make service-only interfaces public.
+        if (path.startsWith("/internal/")) {
+            exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
+            return exchange.getResponse().setComplete();
+        }
 
         // 公开路径放行
         if (isWhitelisted(path)) {
@@ -64,7 +75,18 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
             // 将 userId 注入下游 Header
             ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
-                    .header("X-User-Id", String.valueOf(userId))
+                    // Never preserve a caller-provided identity header beside the trusted value.
+                    .headers(headers -> {
+                        headers.remove("X-User-Id");
+                        // Downstream services receive a gateway-observed address, never a caller-supplied forwarding header.
+                        headers.remove("X-Agent-Client-Ip");
+                        headers.remove("X-Agent-Gateway-Token");
+                        headers.set("X-User-Id", String.valueOf(userId));
+                        String clientIp = exchange.getRequest().getRemoteAddress() == null
+                                ? "unknown" : String.valueOf(exchange.getRequest().getRemoteAddress().getAddress().getHostAddress());
+                        headers.set("X-Agent-Client-Ip", clientIp);
+                        if (StringUtils.hasText(agentForwardToken)) headers.set("X-Agent-Gateway-Token", agentForwardToken);
+                    })
                     .build();
 
             return chain.filter(exchange.mutate().request(mutatedRequest).build());

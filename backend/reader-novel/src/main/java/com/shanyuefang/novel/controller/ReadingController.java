@@ -1,8 +1,10 @@
 package com.shanyuefang.novel.controller;
 
 import com.shanyuefang.common.result.R;
-import com.shanyuefang.novel.domain.dto.ReadingRecordDTO;
+import com.shanyuefang.novel.domain.dto.ReadingHeartbeatDTO;
+import com.shanyuefang.novel.domain.dto.StartReadingSessionDTO;
 import com.shanyuefang.novel.domain.vo.RankingVO;
+import com.shanyuefang.novel.domain.vo.ReadingSessionVO;
 import com.shanyuefang.novel.service.ReadingService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,12 +23,16 @@ public class ReadingController {
     private final ReadingService readingService;
 
     @Operation(summary = "记录本次阅读时长（需登录）")
-    @PostMapping("/record")
-    public R<Void> record(
-            @RequestHeader("X-User-Id") Long userId,
-            @Valid @RequestBody ReadingRecordDTO dto) {
-        readingService.record(userId, dto.getSeconds());
-        return R.ok();
+    @PostMapping("/sessions")
+    public R<ReadingSessionVO> startSession(@RequestHeader("X-User-Id") Long userId,
+                                             @Valid @RequestBody StartReadingSessionDTO dto) {
+        return R.ok(readingService.startSession(userId, dto));
+    }
+
+    @PostMapping("/sessions/heartbeat")
+    public R<ReadingSessionVO> heartbeat(@RequestHeader("X-User-Id") Long userId,
+                                          @Valid @RequestBody ReadingHeartbeatDTO dto) {
+        return R.ok(readingService.heartbeat(userId, dto));
     }
 
     @Operation(summary = "获取阅读时长排行榜（公开）")

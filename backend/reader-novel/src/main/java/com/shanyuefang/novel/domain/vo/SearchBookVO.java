@@ -31,4 +31,7 @@ public class SearchBookVO {
     private Long sourceId;
     /** 来源书源名称 */
     private String sourceName;
+    /** Stable identity shared by all source mirrors of this work. */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long canonicalBookId;
 }

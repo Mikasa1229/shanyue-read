@@ -12,6 +12,8 @@ import com.shanyuefang.novel.domain.vo.HotBookVO;
 import com.shanyuefang.novel.domain.vo.ShelfBookVO;
 import com.shanyuefang.novel.mapper.BookshelfBookMapper;
 import com.shanyuefang.novel.service.BookshelfService;
+import com.shanyuefang.novel.service.CanonicalBookService;
+import com.shanyuefang.novel.domain.dto.ResolveCanonicalBookDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -35,6 +37,7 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
         implements BookshelfService {
 
     private final StringRedisTemplate stringRedisTemplate;
+    private final CanonicalBookService canonicalBookService;
 
     /** 热门书籍 ZSET：成员=bookUrl，分值=加入书架的用户数 */
     private static final String HOT_BOOKS_ZSET = "ranking:hot_books";
@@ -49,6 +52,7 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
                 .one();
         if (existing != null) {
             existing.setSourceId(dto.getSourceId());
+            existing.setCanonicalBookId(resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl()));
             existing.setSourceName(dto.getSourceName());
             existing.setBookName(dto.getBookName());
             existing.setAuthor(dto.getAuthor());
@@ -60,6 +64,7 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
         book.setId(SnowflakeIdUtil.next());
         book.setUserId(userId);
         book.setSourceId(dto.getSourceId());
+        book.setCanonicalBookId(resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl()));
         book.setSourceName(dto.getSourceName());
         book.setBookName(dto.getBookName());
         book.setAuthor(dto.getAuthor());
@@ -104,11 +109,28 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
                 .page(new Page<>(page, size));
         Page<ShelfBookVO> result = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         result.setRecords(raw.getRecords().stream().map(b -> {
+            backfillCanonicalId(b);
             ShelfBookVO vo = new ShelfBookVO();
             BeanUtils.copyProperties(b, vo);
             return vo;
         }).toList());
         return result;
+    }
+
+    private void backfillCanonicalId(BookshelfBook book) {
+        if (book.getCanonicalBookId() != null) return;
+        Long canonicalBookId = resolveCanonicalId(book.getSourceId(), book.getBookUrl(), book.getBookName(), book.getAuthor(), book.getCoverUrl());
+        if (canonicalBookId == null) return;
+        book.setCanonicalBookId(canonicalBookId);
+        updateById(book);
+    }
+
+    // Canonical identity is always resolved from server-side source metadata, never from client input.
+    private Long resolveCanonicalId(Long sourceId, String bookUrl, String title, String author, String coverUrl) {
+        if (sourceId == null || bookUrl == null || bookUrl.isBlank() || title == null || title.isBlank()) return null;
+        ResolveCanonicalBookDTO resolve = new ResolveCanonicalBookDTO();
+        resolve.setSourceId(sourceId); resolve.setBookUrl(bookUrl); resolve.setTitle(title); resolve.setAuthor(author); resolve.setCoverUrl(coverUrl);
+        return canonicalBookService.resolve(resolve).getCanonicalBookId();
     }
 
     @Override

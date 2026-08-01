@@ -45,6 +45,7 @@ class CommentServiceTest {
         CreateCommentDTO dto = new CreateCommentDTO();
         dto.setNovelId(100L);
         dto.setContent("这本书很好看");
+        dto.setScore(5);
 
         when(commentMapper.insert(any(Comment.class))).thenReturn(1);
         when(userFeignClient.batchGetUsers(any())).thenReturn(null);

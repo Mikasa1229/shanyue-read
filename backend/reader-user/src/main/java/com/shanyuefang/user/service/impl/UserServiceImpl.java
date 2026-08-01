@@ -7,6 +7,7 @@ import com.shanyuefang.common.result.ResultCode;
 import com.shanyuefang.common.util.SnowflakeIdUtil;
 import com.shanyuefang.user.domain.dto.LoginDTO;
 import com.shanyuefang.user.domain.dto.LevelActionDTO;
+import com.shanyuefang.user.domain.dto.CreditOperationDTO;
 import com.shanyuefang.user.domain.dto.RegisterDTO;
 import com.shanyuefang.user.domain.dto.UpdatePasswordDTO;
 import com.shanyuefang.user.domain.dto.UpdateUserDTO;
@@ -18,6 +19,7 @@ import com.shanyuefang.user.domain.vo.UserLevelVO;
 import com.shanyuefang.user.domain.vo.UserVO;
 import com.shanyuefang.user.mapper.UserMapper;
 import com.shanyuefang.user.service.UserService;
+import com.shanyuefang.user.service.CreditService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -55,6 +57,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private static final String KEY_TASK_COMPLETED = "user:level:task:completed:%d:%s";
 
     private final RedisTemplate<String, Object> redisTemplate;
+    private final CreditService creditService;
 
     private record DailyTaskRule(String taskId, String actionType, int target, int rewardExp,
                                  String title, String description) {}
@@ -94,6 +97,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
         // 3. 入库
         save(user);
+        creditService.grantStarterCredits(user.getId());
         log.info("用户注册成功: userId={}, username={}", user.getId(), user.getUsername());
     }
 
@@ -268,6 +272,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             if (progress >= rule.target()) {
                 redisTemplate.opsForSet().add(completedKey, rule.taskId());
                 gainedExp += rule.rewardExp();
+                grantTaskCredits(userId, today, rule.taskId());
             }
         }
 
@@ -292,6 +297,20 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             }
         }
         return 0;
+    }
+
+    private void grantTaskCredits(long userId, LocalDate date, String taskId) {
+        int amount = switch (taskId) {
+            case "CHECKIN_ONCE" -> 1;
+            default -> 0;
+        };
+        if (amount == 0) return;
+        CreditOperationDTO credit = new CreditOperationDTO();
+        credit.setUserId(userId);
+        credit.setAmount(amount);
+        credit.setRequestId("credit:" + taskId + ":" + userId + ":" + date);
+        credit.setReason(taskId);
+        creditService.grant(credit);
     }
 
     private List<UserLevelTaskVO> buildDailyTasks(Long userId) {

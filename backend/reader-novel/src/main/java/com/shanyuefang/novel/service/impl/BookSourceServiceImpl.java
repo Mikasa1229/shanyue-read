@@ -16,11 +16,16 @@ import com.shanyuefang.novel.engine.HttpFetcher;
 import com.shanyuefang.novel.engine.LegadoRuleEngine;
 import com.shanyuefang.novel.mapper.BookSourceMapper;
 import com.shanyuefang.novel.service.BookSourceService;
+import com.shanyuefang.novel.service.CanonicalBookService;
+import com.shanyuefang.novel.domain.dto.ResolveCanonicalBookDTO;
+import com.shanyuefang.novel.messaging.KnowledgeIndexPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.net.URI;
@@ -46,6 +51,8 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     private static final ObjectMapper OM = new ObjectMapper();
     private static final long CHAPTER_CACHE_TTL_MS = 5 * 60 * 1000L;
     private static final ConcurrentHashMap<String, CachedChapters> CHAPTER_CACHE = new ConcurrentHashMap<>();
+    private final CanonicalBookService canonicalBookService;
+    private final KnowledgeIndexPublisher knowledgeIndexPublisher;
 
     private record CachedChapters(long cacheAt, List<BookChapterVO> chapters) {}
 
@@ -146,6 +153,10 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         BookSource bs = getById(id);
         if (bs == null) throw new BusinessException(ResultCode.NOT_FOUND, "书源不存在");
         removeById(id);
+        List<Long> orphanedWorks = canonicalBookService.detachSource(id);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() { orphanedWorks.forEach(knowledgeIndexPublisher::publishDelete); }
+        });
     }
 
     // ─── 搜索 ─────────────────────────────────────────────────
@@ -195,6 +206,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
             vo.setKind(extractField(model.effectiveSearchKind(), item));
             vo.setLastChapter(extractField(model.effectiveSearchLastChapter(), item));
             vo.setBookUrl(resolveUrl(extractField(model.effectiveSearchBookUrl(), item), model.getBookSourceUrl()));
+            resolveCanonical(vo);
             results.add(vo);
         }
         return results;
@@ -257,6 +269,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         }
 
         vo.setIntro(firstNonBlank(vo.getIntro(), extractMetaDescription(body)));
+        resolveCanonical(vo);
 
         return vo;
     }
@@ -545,6 +558,22 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
             if (StringUtils.hasText(v)) return v;
         }
         return null;
+    }
+
+    private void resolveCanonical(SearchBookVO book) {
+        if (!StringUtils.hasText(book.getName()) || !StringUtils.hasText(book.getBookUrl()) || book.getSourceId() == null) return;
+        ResolveCanonicalBookDTO dto = new ResolveCanonicalBookDTO();
+        dto.setSourceId(book.getSourceId());
+        dto.setBookUrl(book.getBookUrl());
+        dto.setTitle(book.getName());
+        dto.setAuthor(book.getAuthor());
+        dto.setCoverUrl(book.getCoverUrl());
+        dto.setSummary(book.getIntro());
+        try {
+            book.setCanonicalBookId(canonicalBookService.resolve(dto).getCanonicalBookId());
+        } catch (Exception e) {
+            log.warn("Canonical book resolution failed: sourceId={}, bookUrl={}", book.getSourceId(), book.getBookUrl(), e);
+        }
     }
 
     private String extractTitle(String html) {

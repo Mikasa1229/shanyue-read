@@ -14,6 +14,8 @@ public class FavoriteBookVO {
 
     @JsonSerialize(using = ToStringSerializer.class)
     private Long sourceId;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long canonicalBookId;
 
     private String sourceName;
     private String bookName;

@@ -10,6 +10,8 @@ import com.shanyuefang.novel.domain.entity.FavoriteBook;
 import com.shanyuefang.novel.domain.vo.FavoriteBookVO;
 import com.shanyuefang.novel.mapper.FavoriteBookMapper;
 import com.shanyuefang.novel.service.FavoriteService;
+import com.shanyuefang.novel.service.CanonicalBookService;
+import com.shanyuefang.novel.domain.dto.ResolveCanonicalBookDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class FavoriteServiceImpl extends ServiceImpl<FavoriteBookMapper, FavoriteBook>
         implements FavoriteService {
+    private final CanonicalBookService canonicalBookService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -30,6 +33,7 @@ public class FavoriteServiceImpl extends ServiceImpl<FavoriteBookMapper, Favorit
                 .one();
         if (existing != null) {
             existing.setSourceId(dto.getSourceId());
+            existing.setCanonicalBookId(resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl()));
             existing.setSourceName(dto.getSourceName());
             existing.setBookName(dto.getBookName());
             existing.setAuthor(dto.getAuthor());
@@ -41,6 +45,7 @@ public class FavoriteServiceImpl extends ServiceImpl<FavoriteBookMapper, Favorit
         book.setId(SnowflakeIdUtil.next());
         book.setUserId(userId);
         book.setSourceId(dto.getSourceId());
+        book.setCanonicalBookId(resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl()));
         book.setSourceName(dto.getSourceName());
         book.setBookName(dto.getBookName());
         book.setAuthor(dto.getAuthor());
@@ -69,11 +74,28 @@ public class FavoriteServiceImpl extends ServiceImpl<FavoriteBookMapper, Favorit
                 .page(new Page<>(page, size));
         Page<FavoriteBookVO> result = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         result.setRecords(raw.getRecords().stream().map(b -> {
+            backfillCanonicalId(b);
             FavoriteBookVO vo = new FavoriteBookVO();
             BeanUtils.copyProperties(b, vo);
             return vo;
         }).toList());
         return result;
+    }
+
+    private void backfillCanonicalId(FavoriteBook book) {
+        if (book.getCanonicalBookId() != null) return;
+        Long canonicalBookId = resolveCanonicalId(book.getSourceId(), book.getBookUrl(), book.getBookName(), book.getAuthor(), book.getCoverUrl());
+        if (canonicalBookId == null) return;
+        book.setCanonicalBookId(canonicalBookId);
+        updateById(book);
+    }
+
+    // Canonical identity is always resolved from server-side source metadata, never from client input.
+    private Long resolveCanonicalId(Long sourceId, String bookUrl, String title, String author, String coverUrl) {
+        if (sourceId == null || bookUrl == null || bookUrl.isBlank() || title == null || title.isBlank()) return null;
+        ResolveCanonicalBookDTO resolve = new ResolveCanonicalBookDTO();
+        resolve.setSourceId(sourceId); resolve.setBookUrl(bookUrl); resolve.setTitle(title); resolve.setAuthor(author); resolve.setCoverUrl(coverUrl);
+        return canonicalBookService.resolve(resolve).getCanonicalBookId();
     }
 
     @Override

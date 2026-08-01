@@ -4,6 +4,9 @@ import com.shanyuefang.common.result.R;
 import com.shanyuefang.user.domain.entity.User;
 import com.shanyuefang.user.domain.vo.UserSimpleVO;
 import com.shanyuefang.user.service.UserService;
+import com.shanyuefang.user.service.CreditService;
+import com.shanyuefang.user.domain.dto.CreditOperationDTO;
+import com.shanyuefang.user.domain.vo.UserCreditVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +28,7 @@ import java.util.stream.Collectors;
 public class InternalUserController {
 
     private final UserService userService;
+    private final CreditService creditService;
 
     /**
      * 批量查询用户简要信息
@@ -48,5 +52,33 @@ public class InternalUserController {
                 }
         ));
         return R.ok(result);
+    }
+    @GetMapping("/credits")
+    public R<UserCreditVO> getCredits(@RequestParam Long userId) {
+        return R.ok(creditService.getCredits(userId));
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/credits/freeze")
+    public R<Void> freezeCredits(@jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody CreditOperationDTO dto) {
+        creditService.freeze(dto);
+        return R.ok();
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/credits/grant")
+    public R<Void> grantCredits(@jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody CreditOperationDTO dto) {
+        creditService.grant(dto);
+        return R.ok();
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/credits/settle")
+    public R<Void> settleCredits(@jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody CreditOperationDTO dto) {
+        creditService.settle(dto);
+        return R.ok();
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/credits/refund")
+    public R<Void> refundCredits(@jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody CreditOperationDTO dto) {
+        creditService.refund(dto);
+        return R.ok();
     }
 }
