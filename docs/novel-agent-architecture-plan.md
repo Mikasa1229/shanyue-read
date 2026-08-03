@@ -13,7 +13,7 @@
 | LightRAG 与图谱 | 已落地 | 实体识别优先的局部检索主路径：已读范围内两跳局部图、36 边预算、章节/图社区卡片；仅在局部证据为空时升级至分段社区，`BOOK`/`BOOK_SAFE` 永不进入问答上下文；内存和 PostgreSQL 双层子图缓存、阅读边界、图谱类型筛选与章节证据抽屉、显式别名归并、身份键同名实体消歧、线索-实体/事件关联、社区向量投影；10 章原创合成复杂 fixture 已完成真实 DeepSeek 抽取、运行态消歧、受限上下文 Token 记录和 5 案例答案证据门禁；Milvus 与 Neo4j 局部查询均有有界超时、失败冷却和 Prometheus 指标，暂停故障注入保持 SSE 完成 | 外部 Reranker 联调与端到端压测（可选增强，不阻塞核心验收） |
 | Agent 工具 | 已落地并验收 | 书籍搜索/详情、书架、阅读进度、图谱只读白名单，用户范围约束与消息审计；内网令牌保护的 JSON-RPC MCP Server（初始化、工具发现和只读调用，JSON-RPC 2.0、必填字段、类型和 `additionalProperties: false` 均由服务端强制校验）；可按供应商开关的 Spring AI 原生 Function/Tool Calling；官方 `@modelcontextprotocol/sdk` Streamable HTTP 客户端已实测初始化、生命周期、工具发现与跨服务只读调用 | 后续按 SDK 升级节奏回归 |
 | 推荐 | 已落地 | 书架续读、书架外发现、向量偏好与反馈、热门榜与收藏信号、用户确认后的真实加入书架、稳定分桶 A/B 实验与曝光/反馈/加书架指标 | 更丰富的长期转化归因 |
-| 管理与质量 | 已落地 | 索引运维、独立索引/删除重试和死信通道、删除完成态重投跳过与持久化账本、持久化 ADMIN/OPERATOR 角色、Prompt 版本发布与回滚、持久化模型与 Reranker 路由/百分比灰度、熔断、Prometheus 指标、OpenTelemetry 模型调用链、优先使用供应商 Token 用量（无返回则显式估算）、隐私安全的 Prompt 分段 Token 账本与管理端 `usage-breakdown`、平台模型可配置单价和调用成本、离线评估集门禁、持久化安全评估运行记录与管理台、固定 JDK/Maven/Node 的 CI 质量工作流；本地 PostgreSQL 已实际迁移至 Flyway V30；标准 `8086` 实例已通过 Gateway Secret 边界验证 | 外部 Reranker 联调与端到端压测（可选增强，不阻塞核心验收） |
+| 管理与质量 | 已落地 | 索引运维、独立索引/删除重试和死信通道、删除完成态重投跳过与持久化账本、持久化 ADMIN/OPERATOR 角色、Prompt 版本发布与回滚、持久化模型与 Reranker 路由/百分比灰度、熔断、Prometheus 指标、OpenTelemetry 模型调用链、优先使用供应商 Token 用量（无返回则显式估算）、隐私安全的 Prompt 分段 Token 账本与管理端 `usage-breakdown`、检索 trace 脱敏摘要、平台模型可配置单价和调用成本、离线评估集门禁、持久化安全评估运行记录与管理台、固定 JDK/Maven/Node 的 CI 质量工作流；本地 PostgreSQL 迁移脚本已推进至 Flyway V31；标准 `8086` 实例已通过 Gateway Secret 边界验证 | 外部 Reranker 联调与端到端压测（可选增强，不阻塞核心验收） |
 
 ## 1. 产品定位
 
@@ -169,7 +169,13 @@ Spring AI 的具体版本必须先与当前 Spring Boot 基线做兼容性验证
 
 向量库擅长找到相关文本，但不擅长回答多跳关系、伏笔回收和关系随章节演化的问题。图谱以 Neo4j 为主存储，RAG 为每条关系和事件提供可验证的文本证据。
 
-### 6.1 图模型
+### 6.1 检索边界与候选稳定性
+
+- Milvus 必须在向量 Top-K 前应用 `canonicalBookId == 当前作品` 与 `chapterIndex <= currentChapter` 过滤；过滤表达式由 AST 构造，以支持平台的 long 作品主键并避免文本解析器溢出。
+- PostgreSQL 证据兜底最多读取 600 条候选，并按章节倒序、主键正序稳定排序，再交给本地/外部 Reranker；禁止依赖未定义的数据库返回顺序。
+- `RetrievalResult` 记录候选总数、最终选中数和各数据源候选数，`RetrievalTrace` 只持久化这些计数、章节编号和来源，不写入问题、Prompt 或小说正文。
+
+### 6.2 图模型
 
 节点包括 Book、Chapter、Character、Organization、Location、Event、Clue。
 
@@ -187,7 +193,7 @@ Spring AI 的具体版本必须先与当前 Spring Boot 基线做兼容性验证
 | sourceModelVersion | 抽取模型版本 |
 | reviewStatus | 自动、已确认、已纠正 |
 
-### 6.2 构建流水线
+### 6.3 构建流水线
 
 书籍或章节变更触发 RabbitMQ 索引事件，之后依次执行：
 
@@ -198,7 +204,7 @@ Spring AI 的具体版本必须先与当前 Spring Boot 基线做兼容性验证
 5. 抽取关系、因果和线索状态，绑定章节证据并评分。
 6. 写入 Neo4j，同时将切片、角色和事件向量写入 Milvus，将关键词写入 Elasticsearch。
 
-### 6.3 图谱体验
+### 6.4 图谱体验
 
 - 悬浮窗口只展示当前人物的一度关系预览或当前章节附近的简短事件导航。
 - Agent 中心展示完整关系图、事件图和章节时间轴，支持筛选。

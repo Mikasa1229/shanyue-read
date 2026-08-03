@@ -25,7 +25,7 @@ try {
 }
 
 $versions = docker exec $PostgresContainer psql -U postgres -d db_agent -Atc "SELECT string_agg(version, ',' ORDER BY installed_rank) FROM flyway_schema_history WHERE success AND version IN ('26','27','28','29','30');"
-Assert-Condition ($versions.Trim() -eq '26,27,28,29,30') 'Flyway migrations V26-V30 are not all recorded as successful.'
+Assert-Condition ($versions.Trim() -eq '26,27,28,29,30,31') 'Flyway migrations V26-V31 are not all recorded as successful.'
 
 [pscustomobject]@{
     passed = $true

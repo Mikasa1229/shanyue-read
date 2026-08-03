@@ -16,6 +16,8 @@ if ($response.code -ne 200 -or $null -eq $response.data) { throw 'The administra
 
 $data = $response.data
 $requiredSections = @('system', 'history', 'graph', 'community', 'evidence', 'tool')
+$retrieval = $data.retrieval
+if ($null -eq $retrieval) { throw 'Missing privacy-safe retrieval trace aggregate.' }
 $sectionNames = @($data.sectionTokens.PSObject.Properties.Name)
 foreach ($name in $requiredSections) {
     if ($sectionNames -notcontains $name) { throw "Missing privacy-safe prompt section: $name" }
@@ -42,6 +44,12 @@ foreach ($row in $recent) {
         community = [long]$data.sectionTokens.community
         evidence = [long]$data.sectionTokens.evidence
         tool = [long]$data.sectionTokens.tool
+        retrievalTraceRequests = [long]$retrieval.traceRequests
+        retrievalCandidates = [long]$retrieval.candidateCount
+        retrievalEvidence = [long]$retrieval.evidenceCount
+        retrievalGraphEdges = [long]$retrieval.localGraphEdgeCount
+        retrievalCommunityCards = [long]$retrieval.communityCardCount
+        retrievalCommunityEscalations = [long]$retrieval.communityEscalations
     }
     timestamp = (Get-Date).ToUniversalTime().ToString('o')
 } | ConvertTo-Json -Depth 6
