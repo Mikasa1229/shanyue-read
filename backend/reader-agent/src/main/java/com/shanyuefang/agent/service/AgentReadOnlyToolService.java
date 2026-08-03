@@ -55,7 +55,7 @@ public class AgentReadOnlyToolService {
         if (dto.getCanonicalBookId() != null && dto.getCurrentChapter() != null && asksForReadingState(normalized)) {
             tools.add("reading_progress.read");
             List<String> timeline = knowledgeService.timeline(dto.getCanonicalBookId(), Math.max(0, dto.getCurrentChapter())).stream().limit(6).toList();
-            context.add("READING_PROGRESS (request boundary Ch. " + (dto.getCurrentChapter() + 1) + "): " + String.join(" | ", timeline));
+            context.add("阅读进度（本次请求边界为第 " + (dto.getCurrentChapter() + 1) + " 章）：" + String.join(" | ", timeline));
         }
 
         if (context.isEmpty()) return ToolResult.empty();
@@ -66,44 +66,44 @@ public class AgentReadOnlyToolService {
         try {
             R<List<Map<String, Object>>> response = shelfClient.list(properties.getInternalToken(), userId);
             List<Map<String, Object>> books = response == null || response.getData() == null ? List.of() : response.getData();
-            return "BOOKSHELF (only the requesting user's first 12 items): " + books.stream().limit(12)
-                    .map(book -> String.valueOf(book.getOrDefault("bookName", "Untitled")) + " / "
-                            + String.valueOf(book.getOrDefault("lastChapterName", "not started")))
-                    .reduce((left, right) -> left + "; " + right).orElse("empty");
+            return "书架（只展示当前用户的前 12 本书）：" + books.stream().limit(12)
+                    .map(book -> String.valueOf(book.getOrDefault("bookName", "未命名")) + " / "
+                            + String.valueOf(book.getOrDefault("lastChapterName", "尚未开始阅读")))
+                    .reduce((left, right) -> left + "；" + right).orElse("书架为空");
         } catch (Exception ignored) {
-            return "BOOKSHELF: temporarily unavailable.";
+            return "书架：暂时不可用。";
         }
     }
 
     private String readGraph(long bookId, int currentChapter, String request) {
         KnowledgeGraphVO graph = knowledgeService.graph(bookId, currentChapter);
-        String nodes = graph.getNodes().stream().limit(12).map(node -> node.getName() + "(" + node.getType() + ")").reduce((a, b) -> a + ", " + b).orElse("none");
-        String edges = graph.getEdges().stream().limit(LOCAL_GRAPH_EDGE_BUDGET).map(edge -> edge.getSource() + "-" + edge.getRelation() + "->" + edge.getTarget()).reduce((a, b) -> a + "; " + b).orElse("none");
+        String nodes = graph.getNodes().stream().limit(12).map(node -> node.getName() + "（" + node.getType() + "）").reduce((a, b) -> a + "、" + b).orElse("无");
+        String edges = graph.getEdges().stream().limit(LOCAL_GRAPH_EDGE_BUDGET).map(edge -> edge.getSource() + "-" + edge.getRelation() + "->" + edge.getTarget()).reduce((a, b) -> a + "；" + b).orElse("无");
         List<ClueVO> clues = knowledgeService.clues(bookId, currentChapter).stream().limit(4).toList();
         String normalized = request.toLowerCase(Locale.ROOT);
         List<String> seeds = graph.getNodes().stream().map(node -> node.getName()).filter(name -> normalized.contains(name.toLowerCase(Locale.ROOT)))
                 .limit(3).toList();
         if (seeds.isEmpty()) seeds = graph.getNodes().stream().limit(2).map(node -> node.getName()).toList();
         List<String> localEdges = graphKnowledgeStore.localNeighborhood(bookId, currentChapter, seeds, LOCAL_GRAPH_EDGE_BUDGET);
-        return "KNOWLEDGE_GRAPH (visible through Ch. " + (currentChapter + 1) + "): nodes=" + nodes + "; edges=" + edges
-                + "; bounded local expansion=" + String.join("; ", localEdges)
-                + "; open clues=" + clues.stream().map(ClueVO::getExcerpt).reduce((a, b) -> a + " | " + b).orElse("none");
+        return "人物关系图（可见范围截至第 " + (currentChapter + 1) + " 章）：节点=" + nodes + "；关系=" + edges
+                + "；有界局部扩展=" + String.join("；", localEdges)
+                + "；未闭合线索=" + clues.stream().map(ClueVO::getExcerpt).reduce((a, b) -> a + " | " + b).orElse("无");
     }
     private String readBookDetail(long bookId) {
         try {
             R<Map<String, Object>> response = canonicalBookClient.detail(properties.getInternalToken(), bookId);
             Map<String, Object> book = response == null || response.getData() == null ? Map.of() : response.getData();
-            return "BOOK_DETAIL: " + book.getOrDefault("title", "Untitled") + " / " + book.getOrDefault("author", "unknown")
-                    + "; " + String.valueOf(book.getOrDefault("summary", "No verified summary."));
-        } catch (Exception ignored) { return "BOOK_DETAIL: temporarily unavailable."; }
+            return "作品详情：" + book.getOrDefault("title", "未命名") + " / " + book.getOrDefault("author", "未知作者")
+                    + "；" + String.valueOf(book.getOrDefault("summary", "暂无已验证简介。"));
+        } catch (Exception ignored) { return "作品详情：暂时不可用。"; }
     }
     private String searchBooks(String request) {
         try {
             R<List<Map<String, Object>>> response = canonicalBookClient.search(properties.getInternalToken(), request.trim(), 6);
             List<Map<String, Object>> books = response == null || response.getData() == null ? List.of() : response.getData();
-            return "BOOK_SEARCH: " + books.stream().map(book -> String.valueOf(book.getOrDefault("title", "Untitled"))
-                    + " / " + String.valueOf(book.getOrDefault("author", "unknown"))).reduce((a, b) -> a + "; " + b).orElse("no indexed matches");
-        } catch (Exception ignored) { return "BOOK_SEARCH: temporarily unavailable."; }
+            return "作品搜索结果：" + books.stream().map(book -> String.valueOf(book.getOrDefault("title", "未命名"))
+                    + " / " + String.valueOf(book.getOrDefault("author", "未知作者"))).reduce((a, b) -> a + "；" + b).orElse("没有找到已索引作品");
+        } catch (Exception ignored) { return "作品搜索：暂时不可用。"; }
     }
 
     private boolean asksForShelf(String request) {

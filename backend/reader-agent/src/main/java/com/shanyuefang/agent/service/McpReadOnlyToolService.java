@@ -31,7 +31,7 @@ public class McpReadOnlyToolService {
             case "book.detail" -> detail(longValue(arguments, "canonicalBookId"));
             case "reading.state" -> timeline(userId, longValue(arguments, "canonicalBookId"), intValue(arguments, "currentChapter"));
             case "knowledge_graph.query" -> graph(userId, longValue(arguments, "canonicalBookId"), intValue(arguments, "currentChapter"));
-            default -> throw new BusinessException(ResultCode.PARAM_ERROR, "MCP tool is not allowlisted");
+            default -> throw new BusinessException(ResultCode.PARAM_ERROR, "MCP 工具不在只读白名单中");
         };
     }
 
@@ -40,7 +40,7 @@ public class McpReadOnlyToolService {
         return result == null || result.getData() == null ? List.of() : result.getData().stream().limit(12).toList();
     }
     private Object search(String query) {
-        if (query.isBlank() || query.length() > 160) throw new BusinessException(ResultCode.PARAM_ERROR, "Invalid book query");
+        if (query.isBlank() || query.length() > 160) throw new BusinessException(ResultCode.PARAM_ERROR, "作品搜索条件无效");
         R<List<Map<String, Object>>> result = canonicalBookClient.search(properties.getInternalToken(), query, 6);
         return result == null || result.getData() == null ? List.of() : result.getData();
     }
@@ -60,6 +60,6 @@ public class McpReadOnlyToolService {
                 "nodes", graph.getNodes().stream().limit(30).toList(), "edges", graph.getEdges().stream().limit(GRAPH_EDGE_BUDGET).toList());
     }
     private String string(Map<String, Object> values, String name) { Object value = values.get(name); return value == null ? "" : String.valueOf(value).trim(); }
-    private long longValue(Map<String, Object> values, String name) { try { long value = Long.parseLong(String.valueOf(values.get(name))); if (value > 0) return value; } catch (Exception ignored) { } throw new BusinessException(ResultCode.PARAM_ERROR, "Invalid " + name); }
-    private int intValue(Map<String, Object> values, String name) { try { int value = Integer.parseInt(String.valueOf(values.get(name))); if (value >= 0 && value <= 1_000_000) return value; } catch (Exception ignored) { } throw new BusinessException(ResultCode.PARAM_ERROR, "Invalid " + name); }
+    private long longValue(Map<String, Object> values, String name) { try { long value = Long.parseLong(String.valueOf(values.get(name))); if (value > 0) return value; } catch (Exception ignored) { } throw new BusinessException(ResultCode.PARAM_ERROR, "参数无效：" + name); }
+    private int intValue(Map<String, Object> values, String name) { try { int value = Integer.parseInt(String.valueOf(values.get(name))); if (value >= 0 && value <= 1_000_000) return value; } catch (Exception ignored) { } throw new BusinessException(ResultCode.PARAM_ERROR, "参数无效：" + name); }
 }

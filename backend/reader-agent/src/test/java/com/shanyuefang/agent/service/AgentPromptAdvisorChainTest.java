@@ -19,6 +19,6 @@ class AgentPromptAdvisorChainTest {
     @Test
     void injectsTheCopyrightGuardIntoEveryModelRequest() {
         assertThat(chain.instructions(new com.shanyuefang.agent.domain.dto.ChatMessageDTO(), null))
-                .anyMatch(value -> value.contains("Copyright advisor"));
+                .anyMatch(value -> value.contains("版权规则"));
     }
 }
