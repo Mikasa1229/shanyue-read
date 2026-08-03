@@ -55,4 +55,22 @@ class VectorKnowledgeStoreTest {
         assertThat(vectors.search("question", 1)).extracting(Document::getContent).containsExactly("visible");
         verify(store).similaritySearch(any(SearchRequest.class));
     }
+
+    @Test
+    void pushesBookAndReadingBoundaryIntoVectorSearchBeforeTopK() {
+        ObjectProvider<MilvusVectorStore> provider = mock(ObjectProvider.class);
+        MilvusVectorStore store = mock(MilvusVectorStore.class);
+        when(provider.getIfAvailable()).thenReturn(store);
+        when(store.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
+        AgentProperties properties = new AgentProperties();
+        properties.setMilvusEnabled(true);
+        VectorKnowledgeStore vectors = new VectorKnowledgeStore(provider, properties, mock(AgentMetrics.class));
+
+        vectors.search("陈平安", 5, 358679512818388992L, 30);
+
+        org.mockito.ArgumentCaptor<SearchRequest> request = org.mockito.ArgumentCaptor.forClass(SearchRequest.class);
+        verify(store).similaritySearch(request.capture());
+        assertThat(request.getValue().getFilterExpression().toString())
+                .contains("canonicalBookId", "358679512818388992", "chapterIndex", "30");
+    }
 }

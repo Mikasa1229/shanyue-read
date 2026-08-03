@@ -28,5 +28,7 @@ public class ModelUsage {
     private Long platformCostMicros;
     private String status;
     private String requestId;
+    /** JSON counts only; never contains prompt, query, novel excerpt, user id or session id. */
+    private String retrievalTraceJson;
     private LocalDateTime createdAt;
 }

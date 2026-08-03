@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.MilvusVectorStore;
 import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import com.shanyuefang.agent.config.AgentProperties;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -54,13 +55,26 @@ public class VectorKnowledgeStore {
     }
 
     public List<Document> search(String query, int limit) {
+        return search(query, limit, 0L, Integer.MAX_VALUE);
+    }
+
+    /** Applies the work and reading boundary inside Milvus before Top-K is selected. */
+    public List<Document> search(String query, int limit, long canonicalBookId, int currentChapter) {
         if (!enabled()) { agentMetrics.recordVectorRecall("disabled"); return List.of(); }
         if (isCoolingDown()) { agentMetrics.recordVectorRecall("fallback"); return List.of(); }
         MilvusVectorStore store = vectorStoreProvider.getIfAvailable();
         if (store == null) { agentMetrics.recordVectorRecall("fallback"); return List.of(); }
         try {
-            List<Document> result = runBounded(() -> store.similaritySearch(
-                    SearchRequest.query(query).withTopK(Math.max(8, limit * 4)).withSimilarityThresholdAll()));
+            SearchRequest request = SearchRequest.query(query).withTopK(Math.max(8, limit * 4)).withSimilarityThresholdAll();
+            if (canonicalBookId > 0 && currentChapter >= 0) {
+                // Build the AST directly: Spring AI 0.8.1's text parser parses integer
+                // literals as int and overflows on the platform's long canonical book ids.
+                FilterExpressionBuilder filters = new FilterExpressionBuilder();
+                request.withFilterExpression(filters.and(
+                        filters.eq("canonicalBookId", canonicalBookId),
+                        filters.lte("chapterIndex", currentChapter)).build());
+            }
+            List<Document> result = runBounded(() -> store.similaritySearch(request));
             unavailableUntilMillis.set(0L);
             agentMetrics.recordVectorRecall("success");
             return result == null ? List.of() : result;

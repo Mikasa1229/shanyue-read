@@ -178,26 +178,40 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     @Override
     public List<String> retrieve(Long canonicalBookId, Integer currentChapter, String question, int limit) {
-        return retrieveEvidence(canonicalBookId, currentChapter, question, limit, 0L).stream()
+        return retrieveEvidence(canonicalBookId, currentChapter, question, limit, 0L).selected().stream()
                 .map(RerankerService.Candidate::content).toList();
     }
 
     @Override
     public List<CitationVO> retrieveCitations(Long canonicalBookId, Integer currentChapter, String question, int limit) {
-        return retrieveEvidence(canonicalBookId, currentChapter, question, limit, 0L).stream()
+        return retrieveEvidence(canonicalBookId, currentChapter, question, limit, 0L).selected().stream()
                 .map(candidate -> toCitation(canonicalBookId, candidate.content())).toList();
     }
 
     @Override
     public List<String> retrieve(Long canonicalBookId, Integer currentChapter, String question, int limit, long rolloutSubject) {
-        return retrieveEvidence(canonicalBookId, currentChapter, question, limit, rolloutSubject).stream()
+        return retrieveEvidence(canonicalBookId, currentChapter, question, limit, rolloutSubject).selected().stream()
                 .map(RerankerService.Candidate::content).toList();
     }
 
     @Override
     public List<CitationVO> retrieveCitations(Long canonicalBookId, Integer currentChapter, String question, int limit, long rolloutSubject) {
-        return retrieveEvidence(canonicalBookId, currentChapter, question, limit, rolloutSubject).stream()
+        return retrieveEvidence(canonicalBookId, currentChapter, question, limit, rolloutSubject).selected().stream()
                 .map(candidate -> toCitation(canonicalBookId, candidate.content())).toList();
+    }
+
+    @Override
+    public RetrievalResult retrieveDetailed(Long canonicalBookId, Integer currentChapter, String question, int limit, long rolloutSubject) {
+        RetrievalOutcome outcome = retrieveEvidence(canonicalBookId, currentChapter, question, limit, rolloutSubject);
+        Map<String, Integer> sources = new LinkedHashMap<>();
+        outcome.candidates().forEach(candidate -> {
+            for (String source : candidate.sources().split(",")) {
+                String normalized = source.trim();
+                if (!normalized.isBlank()) sources.merge(normalized, 1, Integer::sum);
+            }
+        });
+        return new RetrievalResult(outcome.selected().stream().map(RerankerService.Candidate::content).toList(),
+                outcome.candidates().size(), outcome.selected().size(), sources);
     }
 
     /**
@@ -205,12 +219,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
      * boundary are known. This is a multi-source evidence layer, not a second graph architecture:
      * LightRAG supplies local entity/relationship context separately in AgentService.
      */
-    private List<RerankerService.Candidate> retrieveEvidence(Long canonicalBookId, Integer currentChapter, String question, int limit, long rolloutSubject) {
-        if (canonicalBookId == null || currentChapter == null || !StringUtils.hasText(question)) return List.of();
+    private RetrievalOutcome retrieveEvidence(Long canonicalBookId, Integer currentChapter, String question, int limit, long rolloutSubject) {
+        if (canonicalBookId == null || currentChapter == null || !StringUtils.hasText(question)) return new RetrievalOutcome(List.of(), List.of());
         int safeLimit = Math.max(1, Math.min(limit, 8));
         Map<String, RerankerService.Candidate> candidates = new LinkedHashMap<>();
 
-        vectorKnowledgeStore.search(question, safeLimit).stream()
+        vectorKnowledgeStore.search(question, safeLimit, canonicalBookId, currentChapter).stream()
                 .filter(document -> matchesReadableBook(document, canonicalBookId, currentChapter))
                 .limit(Math.max(4, safeLimit * 2))
                 .forEach(document -> addCandidate(candidates, chapterExcerpt(intMetadata(document, "chapterIndex"), document.getContent()), 0.60D, "MILVUS"));
@@ -220,8 +234,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
         List<Double> queryVector = embeddingService.embed(question);
         List<ScoredChunk> postgres = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
-                        .eq(KnowledgeChunk::getCanonicalBookId, canonicalBookId)
-                        .le(KnowledgeChunk::getChapterIndex, currentChapter)
+                .eq(KnowledgeChunk::getCanonicalBookId, canonicalBookId)
+                .le(KnowledgeChunk::getChapterIndex, currentChapter)
+                        .orderByDesc(KnowledgeChunk::getChapterIndex)
+                        .orderByAsc(KnowledgeChunk::getId)
                         .last("LIMIT 600"))
                 .stream().map(chunk -> new ScoredChunk(chunk, embeddingService.similarity(queryVector, readVector(chunk.getEmbeddingJson()))
                         + 0.35D * lexicalScore(question, chunk.getContent() + " " + safe(chunk.getKeywords()))))
@@ -231,9 +247,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         List<RerankerService.Candidate> boundedCandidates = new ArrayList<>(candidates.values());
         // Preserve the original interface path for internal jobs/tests that have no user cohort;
         // interactive requests pass a positive user id and participate in Reranker gray rollout.
-        return rolloutSubject > 0
+        List<RerankerService.Candidate> selected = rolloutSubject > 0
                 ? rerankerService.rerank(question, boundedCandidates, safeLimit, rolloutSubject)
                 : rerankerService.rerank(question, boundedCandidates, safeLimit);
+        return new RetrievalOutcome(boundedCandidates, selected == null ? List.of() : selected);
     }
 
     private void addCandidate(Map<String, RerankerService.Candidate> candidates, String content, double score, String source) {
@@ -890,6 +907,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     private String excerpt(String content, int length) { return content.length() <= length ? content : content.substring(0, length) + "..."; }
     private String safe(String content) { return content == null ? "" : content; }
+    private record RetrievalOutcome(List<RerankerService.Candidate> candidates, List<RerankerService.Candidate> selected) { }
     private record ScoredChunk(KnowledgeChunk chunk, double score) { }
     private record SimilarCandidate(double score, Set<String> sharedKeywords) { }
 }

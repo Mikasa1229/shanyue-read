@@ -76,6 +76,8 @@ class AgentAdminControllerTest {
         assertEquals(1L, data.get("sectionCompositionRequests"));
         assertEquals(Map.of("system", 10L, "history", 11L, "graph", 12L,
                 "community", 13L, "evidence", 14L, "tool", 15L), data.get("sectionTokens"));
+        assertEquals(Map.of("traceRequests", 0, "candidateCount", 0L, "evidenceCount", 0L, "localGraphEdgeCount", 0L,
+                "communityCardCount", 0L, "communityEscalations", 0L), data.get("retrieval"));
         List<?> recent = (List<?>) data.get("recent");
         assertEquals(1, recent.size());
         Map<?, ?> row = (Map<?, ?>) recent.get(0);

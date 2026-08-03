@@ -30,7 +30,7 @@ class KnowledgeServiceImplEvidenceRecallTest {
         Document visible = new Document("1", "Milvus visible evidence", Map.of("canonicalBookId", 99L, "chapterIndex", 1));
         Document future = new Document("2", "Future spoiler", Map.of("canonicalBookId", 99L, "chapterIndex", 3));
         Document otherBook = new Document("3", "Other work", Map.of("canonicalBookId", 100L, "chapterIndex", 1));
-        when(vectors.search(anyString(), anyInt())).thenReturn(List.of(visible, future, otherBook));
+        when(vectors.search(anyString(), anyInt(), anyLong(), anyInt())).thenReturn(List.of(visible, future, otherBook));
 
         ElasticsearchKnowledgeStore elasticsearch = mock(ElasticsearchKnowledgeStore.class);
         when(elasticsearch.search(99L, 2, "relationship", 6)).thenReturn(List.of(

@@ -31,6 +31,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.shanyuefang.agent.config.KnowledgeMessagingConfig;
 import com.shanyuefang.agent.domain.vo.KnowledgeIndexJobVO;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -215,16 +216,64 @@ public class AgentAdminController {
                     row.put("toolTokens", safe(value.getToolTokens()));
                     row.put("tokenUsageSource", value.getTokenUsageSource());
                     row.put("status", value.getStatus());
+                    row.put("retrieval", retrievalSummary(value));
                     return row;
                 }).toList();
+        List<Map<String, Object>> retrieval = values.stream().map(this::retrievalSummary)
+                .filter(value -> Boolean.TRUE.equals(value.get("available"))).toList();
+        long retrievalEvidence = retrieval.stream().mapToLong(value -> ((Number) value.getOrDefault("evidenceCount", 0)).longValue()).sum();
+        long retrievalCandidates = retrieval.stream().mapToLong(value -> ((Number) value.getOrDefault("candidateCount", 0)).longValue()).sum();
+        long retrievalGraphEdges = retrieval.stream().mapToLong(value -> ((Number) value.getOrDefault("localGraphEdgeCount", 0)).longValue()).sum();
+        long retrievalCommunities = retrieval.stream().mapToLong(value -> ((Number) value.getOrDefault("communityCardCount", 0)).longValue()).sum();
+        long retrievalEscalations = retrieval.stream().filter(value -> Boolean.TRUE.equals(value.get("communityEscalated"))).count();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("days", boundedDays);
         result.put("requests", values.size());
         result.put("sectionTokens", sections);
         result.put("sectionCompositionRequests", values.stream().filter(this::hasPromptComposition).count());
         result.put("tokenUsageSources", sources);
+        result.put("retrieval", Map.of("traceRequests", retrieval.size(), "candidateCount", retrievalCandidates,
+                "evidenceCount", retrievalEvidence,
+                "localGraphEdgeCount", retrievalGraphEdges, "communityCardCount", retrievalCommunities,
+                "communityEscalations", retrievalEscalations));
         result.put("recent", recent);
         return R.ok(result);
+    }
+
+    /** Allowlist retrieval counters before exposing them to the administrator UI. */
+    private Map<String, Object> retrievalSummary(ModelUsage usage) {
+        if (usage == null || usage.getRetrievalTraceJson() == null || usage.getRetrievalTraceJson().isBlank()) {
+            return Map.of("available", false);
+        }
+        try {
+            JsonNode node = objectMapper.readTree(usage.getRetrievalTraceJson());
+            if (node == null || !node.isObject()) return Map.of("available", false);
+            Map<String, Object> value = new LinkedHashMap<>();
+            value.put("available", true);
+            value.put("canonicalBookId", node.path("canonicalBookId").asLong(0));
+            value.put("readingBoundaryChapter", node.path("readingBoundaryChapter").asInt(-1));
+            value.put("evidenceCount", Math.max(0, node.path("evidenceCount").asInt(0)));
+            value.put("candidateCount", Math.max(0, node.path("candidateCount").asInt(0)));
+            value.put("selectedCount", Math.max(0, node.path("selectedCount").asInt(0)));
+            value.put("localGraphEdgeCount", Math.max(0, node.path("localGraphEdgeCount").asInt(0)));
+            value.put("communityCardCount", Math.max(0, node.path("communityCardCount").asInt(0)));
+            value.put("communityEscalated", node.path("communityEscalated").asBoolean(false));
+            List<Integer> chapters = new java.util.ArrayList<>();
+            JsonNode chapterNode = node.path("evidenceChapters");
+            if (chapterNode.isArray()) chapterNode.elements().forEachRemaining(item -> {
+                if (chapters.size() < 20 && item.canConvertToInt()) chapters.add(Math.max(0, item.asInt()));
+            });
+            value.put("evidenceChapters", chapters);
+            Map<String, Integer> sourceCounts = new LinkedHashMap<>();
+            JsonNode sourceNode = node.path("sourceCandidateCounts");
+            if (sourceNode.isObject()) sourceNode.fields().forEachRemaining(entry -> {
+                if (sourceCounts.size() < 8 && entry.getValue().canConvertToInt()) sourceCounts.put(entry.getKey(), Math.max(0, entry.getValue().asInt()));
+            });
+            value.put("sourceCandidateCounts", sourceCounts);
+            return value;
+        } catch (Exception ignored) {
+            return Map.of("available", false);
+        }
     }
 
     private long sum(List<ModelUsage> values, java.util.function.Function<ModelUsage, Integer> getter) {

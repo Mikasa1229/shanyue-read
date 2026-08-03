@@ -9,11 +9,16 @@ import com.shanyuefang.agent.domain.vo.ReadingMapVO;
 import com.shanyuefang.agent.domain.vo.GraphReviewClaimVO;
 
 import java.util.List;
+import java.util.Map;
 
 public interface KnowledgeService {
     void indexChapter(IndexChapterDTO dto);
     List<String> retrieve(Long canonicalBookId, Integer currentChapter, String question, int limit);
     List<CitationVO> retrieveCitations(Long canonicalBookId, Integer currentChapter, String question, int limit);
+    default RetrievalResult retrieveDetailed(Long canonicalBookId, Integer currentChapter, String question, int limit, long rolloutSubject) {
+        List<String> evidence = retrieve(canonicalBookId, currentChapter, question, limit, rolloutSubject);
+        return new RetrievalResult(evidence == null ? List.of() : evidence, 0, evidence == null ? 0 : evidence.size(), Map.of());
+    }
     default List<String> retrieve(Long canonicalBookId, Integer currentChapter, String question, int limit, long rolloutSubject) {
         return retrieve(canonicalBookId, currentChapter, question, limit);
     }
@@ -36,4 +41,13 @@ public interface KnowledgeService {
     List<GraphReviewClaimVO> graphReviewClaims(long canonicalBookId, int limit);
     void reviewGraphClaim(long canonicalBookId, String claimType, long claimId, String reviewStatus);
     void deleteBookKnowledge(long canonicalBookId);
+
+    /** Candidate counts and source contribution are safe to persist; candidate text is not. */
+    record RetrievalResult(List<String> evidence, int candidateCount, int selectedCount,
+                           Map<String, Integer> sourceCandidateCounts) {
+        public RetrievalResult {
+            evidence = evidence == null ? List.of() : List.copyOf(evidence);
+            sourceCandidateCounts = sourceCandidateCounts == null ? Map.of() : Map.copyOf(sourceCandidateCounts);
+        }
+    }
 }
