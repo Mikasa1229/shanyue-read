@@ -44,3 +44,8 @@ book_source/
 
 #上传的文件
 backend/uploads/
+
+# Local load-test downloads and Python bytecode
+.tools/
+__pycache__/
+*.py[cod]
