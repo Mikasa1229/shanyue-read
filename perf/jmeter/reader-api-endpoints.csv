@@ -1,0 +1,9 @@
+/api/novels?page=1&size=20,200
+/api/novels?page=2&size=20,200
+/api/reading/ranking?top=20,200
+/api/book-sources?page=1&size=20,200
+/api/book-sources/search?keyword=%E5%89%91%E6%9D%A5,200
+/api/novels/1,200
+/api/auth,401
+/api/bookshelf/hot?top=20,401
+/api/agent/infrastructure,401
