@@ -5,6 +5,8 @@
   "sourceDocument": "docs/剑来公开知识基准.md",
   "facts": [
     {"factId":"meta.author","subject":"剑来","predicate":"作者","object":"烽火戏诸侯","level":"PUBLIC_SAFE"},
+    {"factId":"meta.serial-platform","subject":"剑来","predicate":"连载平台","object":"纵横中文网","level":"PUBLIC_SAFE","sourceRefs":["baidu-mobile"],"verification":"PUBLIC_SOURCE_ONLY"},
+    {"factId":"meta.completed-at","subject":"剑来","predicate":"完结时间","object":"2025-01-24","level":"PUBLIC_SAFE","sourceRefs":["baidu-mobile"],"verification":"META_TIMED"},
     {"factId":"meta.protagonist","subject":"剑来","predicate":"主角","object":"陈平安","level":"PUBLIC_SAFE"},
     {"factId":"meta.origin","subject":"陈平安","predicate":"早期生活地点","object":"骊珠洞天泥瓶巷","level":"PUBLIC_SAFE"},
     {"factId":"rel.chen-ning","subject":"陈平安","predicate":"重要伴侣","object":"宁姚","level":"PUBLIC_PLOT"},
@@ -30,6 +32,9 @@
     {"factId":"world.manghuang","subject":"蛮荒天下","predicate":"核心族群","object":"妖族","level":"PUBLIC_SAFE"},
     {"factId":"world.five-color","subject":"五彩天下","predicate":"形成与核心群体","object":"文圣、白也开辟，剑气长城剑修活动的重要天地","level":"PUBLIC_PLOT"},
     {"factId":"world.haoran-nine-continents","subject":"浩然天下","predicate":"地理结构","object":"中土神州、宝瓶州、婆娑州、金甲州、皑皑州、俱芦州、桐叶州、扶摇洲、流霞州九州","level":"PUBLIC_SAFE"},
+    {"factId":"world.confucian-taoist-buddhist","subject":"剑来世界","predicate":"三教体系","object":"儒家、道家、佛家分别对应浩然、青冥、莲花等核心天下","level":"PUBLIC_SAFE","sourceRefs":["baidu-mobile","toutiao-mobile"],"verification":"PUBLIC_SOURCE_ONLY"},
+    {"factId":"setting.cave-heavens","subject":"洞天福地","predicate":"世界设定","object":"道家公开资料常以三十六洞天、七十二福地概括修行空间","level":"PUBLIC_SAFE","sourceRefs":["baidu-mobile","toutiao-mobile"],"verification":"PUBLIC_SOURCE_ONLY"},
+    {"factId":"structure.fifteen-volumes","subject":"剑来","predicate":"卷结构","object":"正文十五卷并含番外篇，卷名从《笼中雀》至《温柔乡》","level":"PUBLIC_SAFE","sourceRefs":["baidu-mobile"],"verification":"PUBLIC_SOURCE_ONLY"},
     {"factId":"place.lizhu","subject":"骊珠洞天","predicate":"剧情功能","object":"早期小镇机缘与成长主舞台","level":"PUBLIC_PLOT"},
     {"factId":"place.luoposhan","subject":"落魄山","predicate":"剧情功能","object":"陈平安建立宗门和安置同伴的基地","level":"PUBLIC_PLOT"},
     {"factId":"place.changcheng","subject":"剑气长城","predicate":"剧情功能","object":"剑修城市与蛮荒战争主舞台","level":"PUBLIC_PLOT"},
