@@ -40,6 +40,7 @@ import com.shanyuefang.agent.service.RerankerService;
 import com.shanyuefang.agent.feign.CanonicalBookFeignClient;
 import com.shanyuefang.agent.config.AgentProperties;
 import com.shanyuefang.common.util.SnowflakeIdUtil;
+import com.shanyuefang.common.util.NovelContentNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -105,13 +106,26 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void indexChapter(IndexChapterDTO dto) {
-        String normalized = dto.getContent().replaceAll("\\r\\n?", "\\n").trim();
-        String hash = sha256(normalized);
+        NovelContentNormalizer.Result analysis = NovelContentNormalizer.analyze(dto.getContent());
+        String normalized = analysis.normalizedContent();
+        String hash = analysis.normalizedHash();
         String embeddingVersion = agentProperties.getEmbeddingModelVersion();
         KnowledgeDocument existing = documentMapper.selectOne(Wrappers.<KnowledgeDocument>lambdaQuery()
                 .eq(KnowledgeDocument::getCanonicalBookId, dto.getCanonicalBookId())
                 .eq(KnowledgeDocument::getChapterIndex, dto.getChapterIndex())
-                .eq(KnowledgeDocument::getContentHash, hash));
+                .eq(KnowledgeDocument::getCanonicalContentHash, hash));
+        if (existing == null) {
+            existing = documentMapper.selectList(Wrappers.<KnowledgeDocument>lambdaQuery()
+                            .eq(KnowledgeDocument::getCanonicalBookId, dto.getCanonicalBookId())
+                            .eq(KnowledgeDocument::getChapterIndex, dto.getChapterIndex())
+                            .eq(KnowledgeDocument::getIndexStatus, "READY"))
+                    .stream()
+                    .filter(candidate -> candidate.getSemanticFingerprint() != null
+                            && NovelContentNormalizer.similarity(candidate.getSemanticFingerprint(), analysis.semanticFingerprint()) >= 0.93D
+                            && candidate.getContentQualityScore() != null
+                            && analysis.qualityScore() >= candidate.getContentQualityScore() - 0.10D)
+                    .findFirst().orElse(null);
+        }
         if (existing != null && "READY".equals(existing.getIndexStatus())
                 && embeddingVersion.equals(existing.getEmbeddingModelVersion())) return;
 
@@ -138,6 +152,11 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         document.setCanonicalBookId(dto.getCanonicalBookId());
         document.setChapterIndex(dto.getChapterIndex());
         document.setContentHash(hash);
+        document.setSourceContentHash(analysis.rawHash());
+        document.setCanonicalContentHash(analysis.normalizedHash());
+        document.setSemanticFingerprint(analysis.semanticFingerprint());
+        document.setContentQualityScore(analysis.qualityScore());
+        document.setNormalizationVersion(NovelContentNormalizer.VERSION);
         document.setContentVersion(dto.getContentVersion());
         document.setEmbeddingModelVersion(embeddingVersion);
         document.setIndexStatus("INDEXING");

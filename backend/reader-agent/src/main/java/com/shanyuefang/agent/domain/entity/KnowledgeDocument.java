@@ -13,6 +13,11 @@ public class KnowledgeDocument {
     private Long sourceId;
     private Integer chapterIndex;
     private String contentHash;
+    private String sourceContentHash;
+    private String canonicalContentHash;
+    private Long semanticFingerprint;
+    private Double contentQualityScore;
+    private String normalizationVersion;
     private String contentVersion;
     private String embeddingModelVersion;
     private String indexStatus;

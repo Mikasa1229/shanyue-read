@@ -11,6 +11,7 @@ import com.shanyuefang.novel.messaging.KnowledgeIndexPublisher;
 import com.shanyuefang.novel.domain.entity.BookContentVersion;
 import com.shanyuefang.novel.mapper.BookContentVersionMapper;
 import com.shanyuefang.common.util.SnowflakeIdUtil;
+import com.shanyuefang.common.util.NovelContentNormalizer;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -154,19 +155,46 @@ public class BookSourceController {
                     resolvedCanonicalBookId = detail.getCanonicalBookId();
                 }
                 if (resolvedCanonicalBookId != null) {
-                    String hash = sha256(text);
+                    NovelContentNormalizer.Result analysis = NovelContentNormalizer.analyze(text);
+                    // Keep contentHash backward-compatible as the raw audit hash; normalizedContentHash
+                    // is the canonical RAG reuse key.
+                    String hash = analysis.rawHash();
                     BookContentVersion version = contentVersionMapper.selectOne(Wrappers.<BookContentVersion>lambdaQuery()
                             .eq(BookContentVersion::getCanonicalBookId, resolvedCanonicalBookId)
                             .eq(BookContentVersion::getChapterIndex, chapterIndex).eq(BookContentVersion::getContentHash, hash));
                     if (version == null) {
+                        version = contentVersionMapper.selectList(Wrappers.<BookContentVersion>lambdaQuery()
+                                        .eq(BookContentVersion::getCanonicalBookId, resolvedCanonicalBookId)
+                                        .eq(BookContentVersion::getChapterIndex, chapterIndex))
+                                .stream()
+                            .filter(candidate -> analysis.normalizedHash().equals(candidate.getNormalizedContentHash()))
+                                .findFirst().orElse(null);
+                    }
+                    if (version == null) {
+                        version = contentVersionMapper.selectList(Wrappers.<BookContentVersion>lambdaQuery()
+                                        .eq(BookContentVersion::getCanonicalBookId, resolvedCanonicalBookId)
+                                        .eq(BookContentVersion::getChapterIndex, chapterIndex)
+                                        .eq(BookContentVersion::getIndexStatus, "READY"))
+                                .stream()
+                                .filter(candidate -> candidate.getSemanticFingerprint() != null
+                                        && NovelContentNormalizer.similarity(candidate.getSemanticFingerprint(), analysis.semanticFingerprint()) >= 0.93D
+                                        && candidate.getQualityScore() != null
+                                        && analysis.qualityScore() >= candidate.getQualityScore() - 0.10D)
+                                .findFirst().orElse(null);
+                        if (version != null) version.setReuseDecision("FUZZY_REUSED");
+                    }
+                    if (version == null) {
                         version = new BookContentVersion(); version.setId(SnowflakeIdUtil.next()); version.setCanonicalBookId(resolvedCanonicalBookId);
                         version.setSourceId(id); version.setChapterIndex(chapterIndex); version.setChapterUrl(chapterUrl); version.setContentHash(hash);
+                        version.setRawContentHash(analysis.rawHash()); version.setNormalizedContentHash(analysis.normalizedHash());
+                        version.setSemanticFingerprint(analysis.semanticFingerprint()); version.setQualityScore(analysis.qualityScore());
+                        version.setNormalizationVersion(NovelContentNormalizer.VERSION); version.setReuseDecision("NEW");
                         version.setFetchedAt(LocalDateTime.now()); version.setIndexStatus("PENDING"); contentVersionMapper.insert(version);
-                        knowledgeIndexPublisher.publish(resolvedCanonicalBookId, chapterIndex, text, hash);
+                        knowledgeIndexPublisher.publish(resolvedCanonicalBookId, chapterIndex, analysis.normalizedContent(), hash);
                     } else if (!"READY".equals(version.getIndexStatus())) {
                         // Re-publish pending/failed versions so a broker or Agent restart is resumable.
                         version.setIndexStatus("PENDING"); version.setFetchedAt(LocalDateTime.now()); contentVersionMapper.updateById(version);
-                        knowledgeIndexPublisher.publish(resolvedCanonicalBookId, chapterIndex, text, hash);
+                        knowledgeIndexPublisher.publish(resolvedCanonicalBookId, chapterIndex, analysis.normalizedContent(), hash);
                     }
                 }
             } catch (Exception ignored) {
