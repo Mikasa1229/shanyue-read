@@ -16,6 +16,12 @@ public class SpoilerBoundaryService {
     private final AgentProperties properties;
 
     public int clamp(long userId, long canonicalBookId, int requestedChapter) {
+        return clamp(userId, canonicalBookId, requestedChapter, false);
+    }
+
+    /** A reader may explicitly opt into spoilers for a deliberate retrospective analysis. */
+    public int clamp(long userId, long canonicalBookId, int requestedChapter, boolean spoilersConfirmed) {
+        if (spoilersConfirmed) return Math.max(0, requestedChapter);
         try {
             R<Map<String, Integer>> response = shelfClient.readingBoundary(properties.getInternalToken(), userId, canonicalBookId);
             int serverBoundary = response == null || response.getData() == null ? 0 : response.getData().getOrDefault("currentChapter", 0);

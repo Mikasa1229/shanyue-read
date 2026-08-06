@@ -24,9 +24,18 @@ public interface LightRagService {
         public static LightRagQuery empty() { return new LightRagQuery(List.of(), List.of(), false); }
 
         public List<String> communities() {
-            return cards.stream().map(card -> "[" + card.level() + " Ch. " + (card.chapterStart() + 1) + "-"
-                    + (card.chapterEnd() + 1) + "] " + card.summary()
-                    + (card.entitySummary().isBlank() || "none".equals(card.entitySummary()) ? "" : " Entities: " + card.entitySummary())).toList();
+            return cards.stream().map(card -> "【" + levelLabel(card.level()) + "·第" + (card.chapterStart() + 1) + "至"
+                    + (card.chapterEnd() + 1) + "章】" + card.summary()
+                    + (card.entitySummary().isBlank() || "none".equals(card.entitySummary()) || "无".equals(card.entitySummary()) ? "" : " 实体：" + card.entitySummary())).toList();
+        }
+
+        private static String levelLabel(String level) {
+            return switch (level == null ? "" : level) {
+                case "CHAPTER" -> "章节卡片";
+                case "ARC" -> "章节片段";
+                case "GRAPH" -> "关系社区";
+                default -> "阅读上下文";
+            };
         }
 
         public List<CitationVO> citations(long canonicalBookId, int limit) {

@@ -17,6 +17,7 @@ import com.shanyuefang.agent.domain.vo.AgentSessionVO;
 import com.shanyuefang.agent.domain.vo.CitationVO;
 import com.shanyuefang.agent.domain.vo.UserAgentPreferenceVO;
 import com.shanyuefang.agent.domain.vo.UserModelConfigVO;
+import com.shanyuefang.agent.domain.vo.ModelConnectionTestVO;
 import com.shanyuefang.agent.mapper.AgentMessageMapper;
 import com.shanyuefang.agent.mapper.AgentSessionMapper;
 import com.shanyuefang.agent.mapper.ModelUsageMapper;
@@ -135,6 +136,23 @@ public class AgentServiceImpl implements AgentService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentSessionVO renameSession(long userId, long sessionId, String title) {
+        AgentSession session = requireSession(userId, sessionId);
+        if (!retainsConversations(userId)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "未开启对话记录保存，无法重命名会话");
+        }
+        String normalized = title == null ? "" : title.trim();
+        if (!StringUtils.hasText(normalized)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "会话标题不能为空");
+        }
+        session.setTitle(normalized);
+        session.setUpdatedAt(LocalDateTime.now());
+        sessionMapper.updateById(session);
+        return toSessionVO(session);
+    }
+
+    @Override
     public List<AgentMessageVO> listMessages(long userId, long sessionId) {
         requireSession(userId, sessionId);
         if (!retainsConversations(userId)) return List.of();
@@ -143,6 +161,42 @@ public class AgentServiceImpl implements AgentService {
                         .eq(AgentMessage::getDeleted, false)
                         .orderByAsc(AgentMessage::getCreatedAt))
                 .stream().map(this::toMessageVO).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateUserMessage(long userId, long sessionId, long messageId, String content) {
+        requireSession(userId, sessionId);
+        if (!retainsConversations(userId)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "未开启对话保存，无法编辑历史消息");
+        }
+        AgentMessage target = messageMapper.selectOne(Wrappers.<AgentMessage>lambdaQuery()
+                .eq(AgentMessage::getId, messageId)
+                .eq(AgentMessage::getSessionId, sessionId)
+                .eq(AgentMessage::getDeleted, false));
+        if (target == null || !"USER".equals(target.getRole())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只能编辑当前会话中的用户消息");
+        }
+        String sanitized = advisorChain.validateUserRequest(content);
+        if (sanitized.length() > properties.getMaxInputChars()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "消息内容过长");
+        }
+        target.setContent(sanitized);
+        target.setCitationsJson(null);
+        target.setToolTraceJson(null);
+        messageMapper.updateById(target);
+        // A changed prompt invalidates every later answer and its citations in this branch.
+        List<Long> followingIds = messageMapper.selectList(Wrappers.<AgentMessage>lambdaQuery()
+                        .eq(AgentMessage::getSessionId, sessionId)
+                        .eq(AgentMessage::getDeleted, false)
+                        .orderByAsc(AgentMessage::getCreatedAt)
+                        .orderByAsc(AgentMessage::getId))
+                .stream()
+                .dropWhile(message -> message.getId() == null || message.getId() != messageId)
+                .skip(1)
+                .map(AgentMessage::getId)
+                .toList();
+        if (!followingIds.isEmpty()) messageMapper.deleteBatchIds(followingIds);
     }
 
     @Override
@@ -174,7 +228,9 @@ public class AgentServiceImpl implements AgentService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "消息内容过长");
         }
 
-        if (retainConversations) saveMessage(sessionId, "USER", content, null);
+        if (retainConversations && !Boolean.TRUE.equals(dto.getReuseExistingUserMessage())) {
+            saveMessage(sessionId, "USER", content, null);
+        }
         String requestId = UUID.randomUUID().toString().replace("-", "");
         ModelSelection selection = selectModel(userId, dto);
         if (PLATFORM.equals(selection.mode())) rateLimiter.checkPlatformCircuit();
@@ -276,11 +332,13 @@ public class AgentServiceImpl implements AgentService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public UserModelConfigVO saveModelConfig(long userId, SaveModelConfigDTO dto) {
-        String provider = dto.getProvider().trim().toLowerCase(Locale.ROOT);
+        // The wire protocol is the contract; vendor names are not part of user configuration.
+        String provider = "openai-compatible";
+        String baseUrl = normalizeBaseUrl(dto.getBaseUrl(), provider, properties.getByokAllowedHosts());
         UserModelConfig config = modelConfigMapper.selectOne(Wrappers.<UserModelConfig>lambdaQuery()
                 .eq(UserModelConfig::getUserId, userId)
-                .eq(UserModelConfig::getProvider, provider)
                 .eq(UserModelConfig::getModel, dto.getModel().trim())
+                .eq(UserModelConfig::getBaseUrl, baseUrl)
                 .eq(UserModelConfig::getDeleted, false));
         if (config == null) {
             config = new UserModelConfig();
@@ -291,7 +349,7 @@ public class AgentServiceImpl implements AgentService {
             config.setCreatedAt(LocalDateTime.now());
         }
         config.setEncryptedApiKey(apiKeyCipher.encrypt(dto.getApiKey().trim()));
-        config.setBaseUrl(normalizeBaseUrl(dto.getBaseUrl(), provider, properties.getByokAllowedHosts()));
+        config.setBaseUrl(baseUrl);
         config.setKeyHint(mask(dto.getApiKey()));
         config.setEnabled(true);
         config.setUpdatedAt(LocalDateTime.now());
@@ -322,7 +380,7 @@ public class AgentServiceImpl implements AgentService {
     }
 
     @Override
-    public void testModelConfig(long userId, long configId) {
+    public ModelConnectionTestVO testModelConfig(long userId, long configId) {
         // A BYOK probe still spends the user's provider quota, so it shares the normal user request limit.
         rateLimiter.check(userId);
         UserModelConfig config = ownedModelConfig(userId, configId);
@@ -330,24 +388,40 @@ public class AgentServiceImpl implements AgentService {
                 apiKeyCipher.decrypt(config.getEncryptedApiKey()), normalizeBaseUrl(config.getBaseUrl(), config.getProvider(), properties.getByokAllowedHosts()));
         OpenAiChatOptions options = new OpenAiChatOptions();
         options.setModel(selection.model());
-        options.setMaxTokens(1);
+        // Reasoning-capable OpenAI-compatible models may consume a few hundred
+        // invisible reasoning tokens before emitting a final answer. The probe stays
+        // intentionally small, but 512 avoids falsely rejecting such a valid model.
+        options.setMaxTokens(512);
         options.setTemperature(0f);
-        ChatResponse response = new OpenAiChatClient(new OpenAiApi(selection.baseUrl(), selection.apiKey()), options)
-                .call(new Prompt(List.of(new UserMessage("请只回复“连接正常”。")), options));
+        long startedAt = System.nanoTime();
+        ChatResponse response;
+        try {
+            response = new OpenAiChatClient(new OpenAiApi(chatCompletionsBaseUrl(selection.baseUrl()), selection.apiKey()), options)
+                .call(new Prompt(List.of(new UserMessage("只输出：连接正常。不要思考，不要解释。")), options));
+        } catch (Exception exception) {
+            throw new BusinessException(ResultCode.SERVICE_UNAVAILABLE, readableModelTestFailure(exception));
+        }
         String responseContent = response.getResult() == null || response.getResult().getOutput() == null
                 ? null : response.getResult().getOutput().getContent();
         if (!StringUtils.hasText(responseContent)) {
             throw new BusinessException(ResultCode.SERVICE_UNAVAILABLE, "个人模型没有返回测试响应");
         }
+        String preview = responseContent.replaceAll("\\s+", " ").trim();
+        return new ModelConnectionTestVO(selection.model(), selection.baseUrl(),
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
+                preview.substring(0, Math.min(preview.length(), 80)));
     }
 
     @Override
     public void deleteModelConfig(long userId, long configId) {
-        UserModelConfig config = ownedModelConfig(userId, configId);
-        config.setDeleted(true);
-        config.setEnabled(false);
-        config.setEncryptedApiKey("deleted");
-        modelConfigMapper.updateById(config);
+        // This is deliberately not BaseMapper.deleteById: the model table's legacy
+        // logical-delete mapping can report success without changing its row.  A
+        // physical delete both destroys the encrypted BYOK key and frees the model
+        // name for the user to save again.
+        int affected = modelConfigMapper.deleteOwnedConfig(userId, configId);
+        if (affected != 1) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "未找到模型配置或它已被删除");
+        }
     }
 
     private UserModelConfig ownedModelConfig(long userId, long configId) {
@@ -397,7 +471,7 @@ public class AgentServiceImpl implements AgentService {
     }
 
     private ModelCallResult callModel(long userId, ModelSelection selection, ChatMessageDTO dto, String promptText) {
-        OpenAiApi api = new OpenAiApi(selection.baseUrl(), selection.apiKey());
+        OpenAiApi api = new OpenAiApi(chatCompletionsBaseUrl(selection.baseUrl()), selection.apiKey());
         OpenAiChatOptions options = new OpenAiChatOptions();
         options.setModel(selection.model());
         options.setMaxTokens(properties.getMaxOutputTokens());
@@ -417,7 +491,7 @@ public class AgentServiceImpl implements AgentService {
         options.setMaxTokens(properties.getMaxOutputTokens());
         options.setTemperature(0.5f);
         configureNativeTools(options, userId, dto);
-        OpenAiChatClient client = new OpenAiChatClient(new OpenAiApi(selection.baseUrl(), selection.apiKey()), options);
+        OpenAiChatClient client = new OpenAiChatClient(new OpenAiApi(chatCompletionsBaseUrl(selection.baseUrl()), selection.apiKey()), options);
         StringBuilder answer = new StringBuilder();
         AtomicReference<Usage> providerUsage = new AtomicReference<>();
         client.stream(new Prompt(List.of(
@@ -768,19 +842,47 @@ public class AgentServiceImpl implements AgentService {
         }
         String host = uri.getHost().toLowerCase(Locale.ROOT);
         if ("localhost".equals(host) || host.indexOf(':') >= 0 || host.matches("^\\d{1,3}(?:\\.\\d{1,3}){3}$")) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "模型 Base URL 必须使用已审核的 DNS 主机");
+            throw new BusinessException(ResultCode.PARAM_ERROR, "模型 Base URL 不支持本机或 IP 地址");
         }
-        java.util.Set<String> trustedHosts = new java.util.HashSet<>(java.util.List.of("api.deepseek.com", "api.openai.com"));
-        if (StringUtils.hasText(allowedHosts)) {
-            for (String candidate : allowedHosts.split(",")) {
-                String normalized = candidate.trim().toLowerCase(Locale.ROOT);
-                if (!normalized.isEmpty()) trustedHosts.add(normalized);
+        // BYOK accepts every public OpenAI-compatible endpoint. The old static host allow-list
+        // made a generic OpenAI-compatible form unusable; DNS resolution blocks SSRF targets.
+        try {
+            java.net.InetAddress[] addresses = java.net.InetAddress.getAllByName(host);
+            if (addresses.length == 0 || java.util.Arrays.stream(addresses).anyMatch(AgentServiceImpl::isPrivateOrReservedAddress)) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "模型 Base URL 必须解析到公网地址");
             }
+        } catch (java.net.UnknownHostException exception) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "模型 Base URL 主机无法解析，请检查地址");
         }
-        if (!trustedHosts.contains(host)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "模型 Base URL 主机未通过审核");
-        }
-        return uri.toString().replaceAll("/+$", "");
+        // Spring AI owns the OpenAI `/v1/chat/completions` suffix. Providers often
+        // document a `/v1` base URL, so persist one canonical root to avoid `/v1/v1`.
+        return chatCompletionsBaseUrl(uri.toString());
+    }
+
+    /** Spring AI appends /v1/chat/completions itself, so normalize documentation URLs ending in /v1. */
+    static String chatCompletionsBaseUrl(String baseUrl) {
+        String normalized = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+        return normalized.matches("(?i).*/v1$") ? normalized.substring(0, normalized.length() - 3) : normalized;
+    }
+
+    private static String readableModelTestFailure(Exception exception) {
+        String message = exception.getMessage() == null ? "" : exception.getMessage();
+        if (message.contains("404")) return "模型接口返回 404：请确认 Base URL 是 OpenAI 兼容服务地址，系统会自动补全 /v1/chat/completions";
+        if (message.contains("401") || message.contains("403")) return "模型接口拒绝了密钥，请检查 API Key 是否有效且具有该模型权限";
+        if (message.contains("429")) return "模型接口触发限流或余额不足，请稍后重试或检查服务商额度";
+        if (message.contains("timeout") || message.contains("timed out")) return "模型接口响应超时，请检查网络或服务商状态";
+        return "模型连接测试失败：" + (StringUtils.hasText(message) ? message.replaceAll("[\\r\\n]+", " ").substring(0, Math.min(message.length(), 160)) : "服务商没有返回可用响应");
+    }
+
+    private static boolean isPrivateOrReservedAddress(java.net.InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress() || address.isMulticastAddress()) return true;
+        byte[] bytes = address.getAddress();
+        if (bytes.length != 4) return false;
+        int first = Byte.toUnsignedInt(bytes[0]);
+        int second = Byte.toUnsignedInt(bytes[1]);
+        return first == 0 || first >= 224 || (first == 100 && second >= 64 && second <= 127)
+                || (first == 192 && second == 0) || (first == 198 && (second == 18 || second == 19));
     }
 
     @Override

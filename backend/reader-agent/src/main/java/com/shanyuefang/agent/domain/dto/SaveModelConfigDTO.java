@@ -1,14 +1,16 @@
 package com.shanyuefang.agent.domain.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 @Data
 public class SaveModelConfigDTO {
-    @NotBlank
-    @Pattern(regexp = "(?i)deepseek|openai", message = "Only configured providers are supported")
+    /**
+     * Deprecated compatibility field. All user models use the OpenAI-compatible
+     * Chat Completions protocol regardless of the vendor behind the endpoint.
+     */
+    @Size(max = 64)
     private String provider;
     @NotBlank
     @Size(max = 128)

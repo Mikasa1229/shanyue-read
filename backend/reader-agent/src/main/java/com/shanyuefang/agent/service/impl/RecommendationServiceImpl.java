@@ -79,11 +79,11 @@ public class RecommendationServiceImpl implements RecommendationService {
                 List<String> matches = preferredGenres.stream().filter(metadata::contains).toList();
                 String reason = progress == null ? "Start reading to unlock a spoiler-safe recap."
                         : "Continue from " + progress;
-                if (personalize && !matches.isEmpty()) reason += " Matches your preference: " + String.join(", ", matches) + ".";
+                if (personalize && !matches.isEmpty()) reason += " 符合你的偏好：" + String.join("、", matches) + "。";
                 else if (personalize && !preferredGenres.isEmpty()) reason += " Ranked using your saved reading preferences.";
                 int feedbackBoost = feedbackBoost(canonicalBookId == null ? null : feedback.get(canonicalBookId));
                 double vectorScore = canonicalBookId == null || userVector == null ? 0d : preferenceSimilarity(userVector, canonicalBookId);
-                if (personalize && vectorScore > 0.20d) reason += " Matches your semantic reading profile.";
+                if (personalize && vectorScore > 0.20d) reason += " 与你的阅读偏好特征相近。";
                 candidates.add(new Candidate(title, reason, canonicalBookId, matches.size() + feedbackBoost
                         + (canonicalBookId != null && favoriteBookIds.contains(canonicalBookId) ? 2 : 0), progress == null ? 0 : 1, vectorScore));
             }
@@ -105,10 +105,10 @@ public class RecommendationServiceImpl implements RecommendationService {
                 Map<String, Object> detail = details.computeIfAbsent(canonicalBookId, this::canonicalDetail);
                 // A discovery card must resolve to an actual source, not merely an orphaned vector profile.
                 if (!hasReadableSource(detail)) continue;
-                String title = String.valueOf(detail.getOrDefault("title", "Indexed work #" + canonicalBookId));
-                String reason = vectorScore > 0.20d ? "Matches your semantic reading profile."
-                        : !matches.isEmpty() ? "Matches your preference: " + String.join(", ", matches) + "."
-                        : "An indexed work outside your current shelf.";
+                String title = String.valueOf(detail.getOrDefault("title", "已索引作品 #" + canonicalBookId));
+                String reason = vectorScore > 0.20d ? "与您的阅读偏好特征相近。"
+                        : !matches.isEmpty() ? "符合您的偏好：" + String.join("、", matches) + "。"
+                        : "一部尚未加入您书架的已索引作品。";
                 candidates.add(new Candidate(title, reason, canonicalBookId, matches.size() + feedbackBoost(feedback.get(canonicalBookId))
                         + (favoriteBookIds.contains(canonicalBookId) ? 2 : 0), 0, vectorScore));
             }
@@ -118,8 +118,8 @@ public class RecommendationServiceImpl implements RecommendationService {
                 for (Map<String, Object> hot : hotResponse == null || hotResponse.getData() == null ? List.<Map<String, Object>>of() : hotResponse.getData()) {
                     Long canonicalBookId = parseBookId(hot.get("canonicalBookId"));
                     if (canonicalBookId == null || shelfBookIds.contains(canonicalBookId) || isExcluded(feedback.get(canonicalBookId))) continue;
-                    String title = String.valueOf(hot.getOrDefault("title", "Popular work"));
-                    candidates.add(new Candidate(title, "Popular with readers based on bookshelf additions.", canonicalBookId, 0, 0,
+                    String title = String.valueOf(hot.getOrDefault("title", "热门作品"));
+                    candidates.add(new Candidate(title, "根据读者加入书架的情况推荐。", canonicalBookId, 0, 0,
                             Math.min(0.15d, parseHotScore(hot.get("shelfCount")) / 1000d)));
                 }
             } catch (Exception ignored) { /* Popularity is an optional ranking signal. */ }
@@ -133,13 +133,13 @@ public class RecommendationServiceImpl implements RecommendationService {
                     .collect(java.util.stream.Collectors.toMap(Candidate::canonicalBookId, candidate -> candidate, (left, right) -> left, java.util.LinkedHashMap::new)).values().stream()
                     .limit(5).map(candidate -> Map.of("title", candidate.title(), "reason", candidate.reason(), "canonicalBookId", candidate.canonicalBookId().toString()))
                     .toList();
-            List<Map<String, String>> finalResults = results.isEmpty() ? List.of(Map.of("title", shelfBooks.isEmpty() ? "Build your reading shelf" : "No suitable shelf suggestions", "reason",
-                    shelfBooks.isEmpty() ? "Add a book or wait for indexed works to unlock personalized discoveries."
-                            : "Your avoided themes currently filter the available shelf items.")) : results;
+            List<Map<String, String>> finalResults = results.isEmpty() ? List.of(Map.of("title", shelfBooks.isEmpty() ? "先建立你的书架" : "暂时没有合适的书架推荐", "reason",
+                    shelfBooks.isEmpty() ? "先添加作品，或等待作品完成索引后再获取个性化推荐。"
+                            : "你设置的避开内容暂时筛除了可推荐的书架作品。")) : results;
             experimentService.recordExposure(userId, finalResults.size());
             return finalResults;
         } catch (Exception ignored) {
-            return List.of(Map.of("title", "Shelf is temporarily unavailable", "reason", "Your reading data remains unchanged; please retry shortly."));
+            return List.of(Map.of("title", "书架暂时不可用", "reason", "你的阅读数据没有改变，请稍后重试。"));
         }
     }
 
@@ -156,19 +156,19 @@ public class RecommendationServiceImpl implements RecommendationService {
                         int current = Math.max(0, parseInteger(book.get("lastChapterIndex"), 0));
                         Integer total = parsePositiveInteger(book.get("totalChapters"));
                         int target = total != null && total - current <= 2 ? 1 : 2;
-                        String title = String.valueOf(book.getOrDefault("bookName", "Untitled work"));
+                        String title = String.valueOf(book.getOrDefault("bookName", "未命名作品"));
                         String reason = book.get("lastChapterName") == null
-                                ? "Start gently: read the opening chapter and decide whether to continue."
-                                : "Resume from your verified reading position; this does not use unread plot information.";
+                                ? "从第一章开始轻松阅读，再决定是否继续。"
+                                : "从已确认的阅读进度继续，不会使用未读剧情信息。";
                         return new ReadingPlanVO.Item(parseBookId(book.get("canonicalBookId")), title, current, total, target, reason);
                     }).toList();
             int target = items.stream().mapToInt(ReadingPlanVO.Item::getSuggestedChaptersToday).sum();
             String summary = items.isEmpty()
-                    ? "Add a readable work to your shelf to build a reading plan from verified progress."
-                    : "A light plan for today: " + target + " chapter" + (target == 1 ? "" : "s") + " across your most recent shelf activity.";
+                    ? "将可阅读的作品加入书架后，即可依据已确认的阅读进度生成计划。"
+                    : "今天的轻量计划：从你最近阅读的作品中安排 " + target + " 章。";
             return new ReadingPlanVO(target, items.size(), summary, items);
         } catch (Exception ignored) {
-            return new ReadingPlanVO(0, 0, "Your shelf is temporarily unavailable; no reading activity was changed.", List.of());
+            return new ReadingPlanVO(0, 0, "书架暂时不可用，未更改任何阅读记录。", List.of());
         }
     }
 

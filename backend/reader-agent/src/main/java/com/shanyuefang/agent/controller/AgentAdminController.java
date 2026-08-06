@@ -20,6 +20,7 @@ import com.shanyuefang.agent.domain.entity.RecommendationExperiment;
 import com.shanyuefang.agent.service.RecommendationExperimentService;
 import com.shanyuefang.agent.service.AgentEvaluationService;
 import com.shanyuefang.agent.service.KnowledgeService;
+import com.shanyuefang.agent.service.BookKnowledgeBuildService;
 import com.shanyuefang.agent.domain.dto.AgentAnswerEvaluationDTO;
 import com.shanyuefang.agent.domain.dto.GraphClaimReviewDTO;
 import com.shanyuefang.agent.domain.vo.GraphReviewClaimVO;
@@ -70,6 +71,7 @@ public class AgentAdminController {
     private final RecommendationExperimentService recommendationExperimentService;
     private final AgentEvaluationService evaluationService;
     private final KnowledgeService knowledgeService;
+    private final BookKnowledgeBuildService bookKnowledgeBuildService;
     @GetMapping("/overview")
     public R<Map<String, Object>> overview(@RequestHeader("X-User-Id") long userId) {
         adminAccess.require(userId);
@@ -97,6 +99,14 @@ public class AgentAdminController {
         adminAccess.require(userId);
         if (canonicalBookId <= 0) return R.fail(ResultCode.PARAM_ERROR, "Canonical book ID must be positive");
         knowledgeService.rebuildGraph(canonicalBookId);
+        return R.ok();
+    }
+    @PostMapping("/books/{canonicalBookId}/graph:clear")
+    public R<Void> clearGraph(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId) {
+        adminAccess.require(userId);
+        if (canonicalBookId <= 0) return R.fail(ResultCode.PARAM_ERROR, "Canonical book ID must be positive");
+        knowledgeService.clearGraph(canonicalBookId);
+        bookKnowledgeBuildService.markCleared(canonicalBookId);
         return R.ok();
     }
     @GetMapping("/books/{canonicalBookId}/graph-review-claims")

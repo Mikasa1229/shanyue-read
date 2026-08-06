@@ -43,7 +43,7 @@ class LightRagServiceImplTest {
 
         assertFalse(result.escalated());
         assertTrue(result.localGraphEdges().stream().anyMatch(value -> value.contains("同伴")));
-        assertTrue(result.communities().stream().allMatch(value -> value.contains("[CHAPTER") || value.contains("[GRAPH")));
+        assertTrue(result.communities().stream().allMatch(value -> value.contains("【章节卡片") || value.contains("【关系社区")));
     }
 
     @Test
@@ -65,7 +65,7 @@ class LightRagServiceImplTest {
                 .query(7L, 3, "unknown theme", 3, 1200);
 
         assertTrue(result.escalated());
-        assertTrue(result.communities().stream().allMatch(value -> value.contains("[ARC")));
+        assertTrue(result.communities().stream().allMatch(value -> value.contains("【章节片段")));
         assertFalse(result.communities().stream().anyMatch(value -> value.contains("BOOK")));
     }
 

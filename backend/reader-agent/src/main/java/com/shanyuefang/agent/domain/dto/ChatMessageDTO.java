@@ -18,4 +18,5 @@ public class ChatMessageDTO {
     private String currentBookTitle;
     @Size(max = 64)
     private String interviewCharacter;
+    private Boolean reuseExistingUserMessage = false;
 }

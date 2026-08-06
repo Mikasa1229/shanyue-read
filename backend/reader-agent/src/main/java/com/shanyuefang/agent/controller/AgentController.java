@@ -2,6 +2,8 @@ package com.shanyuefang.agent.controller;
 
 import com.shanyuefang.agent.domain.dto.ChatMessageDTO;
 import com.shanyuefang.agent.domain.dto.CreateSessionDTO;
+import com.shanyuefang.agent.domain.dto.RenameAgentSessionDTO;
+import com.shanyuefang.agent.domain.dto.UpdateAgentMessageDTO;
 import com.shanyuefang.agent.domain.dto.SaveModelConfigDTO;
 import com.shanyuefang.agent.domain.dto.SaveAgentPreferenceDTO;
 import com.shanyuefang.agent.domain.dto.RecommendationFeedbackDTO;
@@ -25,6 +27,9 @@ import com.shanyuefang.agent.service.RecommendationFeedbackService;
 import com.shanyuefang.agent.service.SpoilerBoundaryService;
 import com.shanyuefang.agent.service.ShelfGroupService;
 import com.shanyuefang.agent.service.ModelRouteService;
+import com.shanyuefang.agent.service.BookKnowledgeBuildService;
+import com.shanyuefang.agent.domain.dto.StartBookKnowledgeBuildDTO;
+import com.shanyuefang.agent.domain.entity.BookKnowledgeBuildTask;
 import com.shanyuefang.agent.config.AgentProperties;
 import com.shanyuefang.agent.feign.CanonicalBookFeignClient;
 import com.shanyuefang.common.result.R;
@@ -55,6 +60,7 @@ public class AgentController {
     private final SpoilerBoundaryService spoilerBoundaryService;
     private final ShelfGroupService shelfGroupService;
     private final ModelRouteService modelRouteService;
+    private final BookKnowledgeBuildService bookKnowledgeBuildService;
 
     @PostMapping("/sessions")
     public R<AgentSessionVO> createSession(@RequestHeader("X-User-Id") Long userId,
@@ -73,10 +79,26 @@ public class AgentController {
         return R.ok(agentService.searchSessions(userId, keyword));
     }
 
+    @PutMapping("/sessions/{sessionId}/title")
+    public R<AgentSessionVO> renameSession(@RequestHeader("X-User-Id") Long userId,
+                                            @PathVariable Long sessionId,
+                                            @Valid @RequestBody RenameAgentSessionDTO dto) {
+        return R.ok(agentService.renameSession(userId, sessionId, dto.getTitle()));
+    }
+
     @GetMapping("/sessions/{sessionId}/messages")
     public R<List<AgentMessageVO>> listMessages(@RequestHeader("X-User-Id") Long userId,
                                                   @PathVariable Long sessionId) {
         return R.ok(agentService.listMessages(userId, sessionId));
+    }
+
+    @PutMapping("/sessions/{sessionId}/messages/{messageId}")
+    public R<Void> updateUserMessage(@RequestHeader("X-User-Id") Long userId,
+                                     @PathVariable Long sessionId,
+                                     @PathVariable Long messageId,
+                                     @Valid @RequestBody UpdateAgentMessageDTO dto) {
+        agentService.updateUserMessage(userId, sessionId, messageId, dto.getContent());
+        return R.ok();
     }
 
     @GetMapping("/sessions/{sessionId}/export")
@@ -153,9 +175,8 @@ public class AgentController {
     }
 
     @PostMapping("/models/{configId}:test")
-    public R<Void> testModel(@RequestHeader("X-User-Id") Long userId, @PathVariable Long configId) {
-        agentService.testModelConfig(userId, configId);
-        return R.ok();
+    public R<com.shanyuefang.agent.domain.vo.ModelConnectionTestVO> testModel(@RequestHeader("X-User-Id") Long userId, @PathVariable Long configId) {
+        return R.ok(agentService.testModelConfig(userId, configId));
     }
 
     @PutMapping("/models/{configId}/enabled")
@@ -201,43 +222,88 @@ public class AgentController {
 
     @GetMapping("/books/{canonicalBookId}/graph")
     public R<KnowledgeGraphVO> graph(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
-                                     @RequestParam(defaultValue = "0") int currentChapter) {
-        return R.ok(knowledgeService.graph(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter)));
+                                     @RequestParam(defaultValue = "0") int currentChapter,
+                                     @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        return R.ok(knowledgeService.graph(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed)));
+    }
+
+    @GetMapping("/books/{canonicalBookId}/knowledge-build:prepare")
+    public R<Map<String, Object>> prepareKnowledgeBuild(@RequestHeader("X-User-Id") long userId,
+                                                         @PathVariable long canonicalBookId,
+                                                         @RequestParam(required = false) Integer startChapter,
+                                                         @RequestParam(required = false) Integer endChapter) {
+        return R.ok(bookKnowledgeBuildService.prepare(userId, canonicalBookId, startChapter, endChapter));
+    }
+
+    @PostMapping("/books/{canonicalBookId}/knowledge-build")
+    public R<BookKnowledgeBuildTask> startKnowledgeBuild(@RequestHeader("X-User-Id") long userId,
+                                                         @PathVariable long canonicalBookId,
+                                                         @Valid @RequestBody StartBookKnowledgeBuildDTO dto) {
+        return R.ok(bookKnowledgeBuildService.start(userId, canonicalBookId, dto));
+    }
+
+    @GetMapping("/knowledge-build/tasks")
+    public R<List<BookKnowledgeBuildTask>> myKnowledgeBuildTasks(@RequestHeader("X-User-Id") long userId,
+                                                                  @RequestParam(defaultValue = "30") int limit) {
+        return R.ok(bookKnowledgeBuildService.myTasks(userId, limit));
+    }
+
+    @DeleteMapping("/knowledge-build/tasks/{taskId}")
+    public R<Void> deleteKnowledgeBuildTask(@RequestHeader("X-User-Id") long userId, @PathVariable long taskId) {
+        bookKnowledgeBuildService.deleteTask(userId, taskId);
+        return R.ok();
+    }
+
+    @GetMapping("/books/knowledge-status")
+    public R<Map<Long, Map<String, Object>>> knowledgeStatuses(@RequestParam List<Long> canonicalBookIds) {
+        return R.ok(bookKnowledgeBuildService.statuses(canonicalBookIds));
+    }
+
+    @GetMapping("/books/{canonicalBookId}/knowledge-status")
+    public R<Map<String, Object>> knowledgeStatus(@PathVariable long canonicalBookId) {
+        return R.ok(bookKnowledgeBuildService.status(canonicalBookId));
     }
 
     @GetMapping("/books/{canonicalBookId}/clues")
     public R<List<ClueVO>> clues(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
-                                 @RequestParam(defaultValue = "0") int currentChapter) {
-        return R.ok(knowledgeService.clues(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter)));
+                                 @RequestParam(defaultValue = "0") int currentChapter,
+                                 @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        return R.ok(knowledgeService.clues(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed)));
     }
 
     @GetMapping("/books/{canonicalBookId}/timeline")
     public R<List<String>> timeline(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
-                                    @RequestParam(defaultValue = "0") int currentChapter) {
-        return R.ok(knowledgeService.timeline(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter)));
+                                    @RequestParam(defaultValue = "0") int currentChapter,
+                                    @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        return R.ok(knowledgeService.timeline(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed)));
     }
 
     @GetMapping("/books/{canonicalBookId}/reading-map")
     public R<ReadingMapVO> readingMap(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
-                                      @RequestParam(defaultValue = "0") int currentChapter) {
-        return R.ok(knowledgeService.readingMap(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter)));
+                                      @RequestParam(defaultValue = "0") int currentChapter,
+                                      @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        return R.ok(knowledgeService.readingMap(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed)));
     }
 
     @GetMapping("/books/{canonicalBookId}/capsule")
     public R<PlotCapsuleVO> capsule(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
-                                    @RequestParam(defaultValue = "0") int currentChapter) {
-        int boundary = spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter);
-        List<String> timeline = knowledgeService.timeline(canonicalBookId, boundary).stream().limit(6).toList();
+                                    @RequestParam(defaultValue = "0") int currentChapter,
+                                    @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        int boundary = spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed);
+        List<String> allTimeline = knowledgeService.timeline(canonicalBookId, boundary);
+        // Show the reader's latest story context rather than the first indexed cards.
+        List<String> timeline = allTimeline.subList(Math.max(0, allTimeline.size() - 6), allTimeline.size());
         List<ClueVO> clues = knowledgeService.clues(canonicalBookId, boundary).stream().limit(5).toList();
         return R.ok(new PlotCapsuleVO(boundary, timeline, clues,
-                "This recap is generated only from indexed chapters through the selected reading position."));
+                spoilersConfirmed ? "你已确认允许剧透；内容会覆盖至所选章节。" : "内容仅来自已建立索引且不超过当前阅读边界的章节，不会引用后续剧情。"));
     }
 
     @GetMapping("/books/{canonicalBookId}/similar")
     public R<List<SimilarBookVO>> similar(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
                                  @RequestParam(defaultValue = "0") int currentChapter,
+                                 @RequestParam(defaultValue = "false") boolean spoilersConfirmed,
                                  @RequestParam(defaultValue = "6") int limit) {
-        return R.ok(knowledgeService.similarBooks(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter), limit));
+        return R.ok(knowledgeService.similarBooks(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed), limit));
     }
 
     @GetMapping("/books/{canonicalBookId}/reader-link")
@@ -268,7 +334,7 @@ public class AgentController {
                 Map.entry("embeddingModel", agentProperties.getEmbeddingModel()),
                 Map.entry("embeddingDimensions", agentProperties.getEmbeddingDimensions()),
                 Map.entry("embeddingModelVersion", agentProperties.getEmbeddingModelVersion()),
-                Map.entry("retrievalArchitecture", "LightRAG local graph + evidence multi-recall"),
+                Map.entry("retrievalArchitecture", "从问题实体出发的 LightRAG 关系脉络，结合原文章节交叉佐证"),
                 Map.entry("rerankerModel", configuredRerankerModel),
                 Map.entry("activeRerankerModel", activeRerankerModel),
                 Map.entry("rerankerRolloutSubjectPresent", userId != null),

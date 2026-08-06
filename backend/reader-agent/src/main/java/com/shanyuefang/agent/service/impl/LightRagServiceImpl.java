@@ -203,7 +203,7 @@ public class LightRagServiceImpl implements LightRagService {
             String relations = edges.stream().filter(edge -> component.contains(edge.getSourceNodeId()) && component.contains(edge.getTargetNodeId()))
                     .limit(16).map(KnowledgeGraphEdge::getRelation).distinct().reduce((left, right) -> left + ", " + right).orElse("linked");
             String key = "graph-" + hash(members.stream().map(node -> String.valueOf(node.getId())).reduce((left, right) -> left + ":" + right).orElse("")) .substring(0, 24);
-            upsert(bookId, "GRAPH", start, end, "Verified graph community. Relations: " + relations + ".", entitySummary, key);
+            upsert(bookId, "GRAPH", start, end, "已核验的关系社区，关联类型：" + relations + "。", entitySummary, key);
         }
     }
     private String entities(long bookId, int start, int end) {
@@ -211,7 +211,7 @@ public class LightRagServiceImpl implements LightRagService {
                 .le(KnowledgeGraphNode::getFirstChapter, end).ge(KnowledgeGraphNode::getLastChapter, start)
                 .eq(KnowledgeGraphNode::getReviewStatus, APPROVED).ge(KnowledgeGraphNode::getConfidence, properties.getMinGraphConfidence())
                 .orderByDesc(KnowledgeGraphNode::getConfidence).last("LIMIT 16"))
-                .stream().map(node -> node.getName() + "(" + node.getNodeType() + ")").reduce((left, right) -> left + ", " + right).orElse("none");
+                .stream().map(node -> node.getName() + "（" + nodeTypeLabel(node.getNodeType()) + "）").reduce((left, right) -> left + "、" + right).orElse("无");
     }
     private String safe(String value) { return value == null ? "" : value; }
     /**
@@ -219,7 +219,7 @@ public class LightRagServiceImpl implements LightRagService {
      * provenance and recurring terms, so the answer path can decide whether to fetch exact evidence.
      */
     private String summarize(List<KnowledgeChunk> chunks) {
-        if (chunks.isEmpty()) return "No indexed evidence.";
+        if (chunks.isEmpty()) return "暂无已建立索引的正文依据。";
         Map<String, Integer> keywords = new LinkedHashMap<>();
         StringBuilder evidence = new StringBuilder();
         for (KnowledgeChunk chunk : chunks) {
@@ -234,15 +234,25 @@ public class LightRagServiceImpl implements LightRagService {
             if (excerpt.isBlank()) continue;
             int remaining = 840 - evidence.length();
             int limit = Math.min(Math.min(160, excerpt.length()), remaining);
-            evidence.append(" Ch.").append(chunk.getChapterIndex() + 1).append(": ")
+            evidence.append(" 第").append(chunk.getChapterIndex() + 1).append("章：")
                     .append(excerpt, 0, Math.max(0, limit)).append(";");
         }
         String terms = keywords.entrySet().stream().sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-                .limit(12).map(Map.Entry::getKey).reduce((left, right) -> left + ", " + right).orElse("none");
+                .limit(12).map(Map.Entry::getKey).reduce((left, right) -> left + "、" + right).orElse("无");
         int first = chunks.get(0).getChapterIndex() + 1;
         int last = chunks.get(chunks.size() - 1).getChapterIndex() + 1;
-        String result = "Community chapters " + first + "-" + last + ". Recurring terms: " + terms + ". Evidence:" + evidence;
+        String result = "第" + first + "至" + last + "章的内容卡片。重复出现的词：" + terms + "。原文依据：" + evidence;
         return result.substring(0, Math.min(1200, result.length()));
+    }
+    private String nodeTypeLabel(String type) {
+        return switch (type == null ? "" : type) {
+            case "CHARACTER" -> "人物";
+            case "LOCATION" -> "地点";
+            case "ORGANIZATION" -> "组织";
+            case "EVENT" -> "事件";
+            case "CLUE" -> "线索";
+            default -> "实体";
+        };
     }
     private String write(List<Double> vector) { try { return objectMapper.writeValueAsString(vector); } catch (Exception e) { throw new IllegalStateException(e); } }
     private List<Double> read(String value) { try { return objectMapper.readValue(value, new com.fasterxml.jackson.core.type.TypeReference<List<Double>>() { }); } catch (Exception e) { return List.of(); } }

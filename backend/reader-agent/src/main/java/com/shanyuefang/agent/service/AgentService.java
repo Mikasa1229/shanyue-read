@@ -7,6 +7,7 @@ import com.shanyuefang.agent.domain.vo.AgentMessageVO;
 import com.shanyuefang.agent.domain.vo.AgentReplyVO;
 import com.shanyuefang.agent.domain.vo.AgentSessionVO;
 import com.shanyuefang.agent.domain.vo.UserModelConfigVO;
+import com.shanyuefang.agent.domain.vo.ModelConnectionTestVO;
 
 import java.util.List;
 import java.util.Map;
@@ -18,7 +19,9 @@ public interface AgentService {
     AgentSessionVO createSession(long userId, CreateSessionDTO dto);
     List<AgentSessionVO> listSessions(long userId);
     List<AgentSessionVO> searchSessions(long userId, String keyword);
+    AgentSessionVO renameSession(long userId, long sessionId, String title);
     List<AgentMessageVO> listMessages(long userId, long sessionId);
+    void updateUserMessage(long userId, long sessionId, long messageId, String content);
     Map<String, Object> exportSession(long userId, long sessionId);
     void deleteSession(long userId, long sessionId);
     AgentReplyVO chat(long userId, long sessionId, ChatMessageDTO dto);
@@ -26,6 +29,6 @@ public interface AgentService {
     UserModelConfigVO saveModelConfig(long userId, SaveModelConfigDTO dto);
     List<UserModelConfigVO> listModelConfigs(long userId);
     UserModelConfigVO setModelConfigEnabled(long userId, long configId, boolean enabled);
-    void testModelConfig(long userId, long configId);
+    ModelConnectionTestVO testModelConfig(long userId, long configId);
     void deleteModelConfig(long userId, long configId);
 }

@@ -21,6 +21,21 @@ import static org.mockito.Mockito.when;
 
 class ProfileVectorServiceImplTest {
     @Test
+    void boundsBookProfileContentWhenIndexedKeywordsContainRawChapterText() throws Exception {
+        KnowledgeVectorProfileMapper mapper = mock(KnowledgeVectorProfileMapper.class);
+        when(mapper.selectOne(any())).thenReturn(null);
+        EmbeddingService embeddings = mock(EmbeddingService.class);
+        when(embeddings.embed(any())).thenReturn(java.util.List.of(0.1D));
+        ProfileVectorStore store = mock(ProfileVectorStore.class);
+
+        new ProfileVectorServiceImpl(mapper, new AgentProperties(), embeddings, store, new ObjectMapper())
+                .refreshBookProfile(9L, java.util.List.of("x".repeat(80_000)));
+
+        org.mockito.ArgumentCaptor<KnowledgeVectorProfile> profile = org.mockito.ArgumentCaptor.forClass(KnowledgeVectorProfile.class);
+        verify(mapper).insert(profile.capture());
+        org.junit.jupiter.api.Assertions.assertTrue(profile.getValue().getContent().length() < 10_000);
+    }
+    @Test
     void reprojectsUnchangedProfileWhenEmbeddingVersionChanges() {
         KnowledgeVectorProfileMapper mapper = mock(KnowledgeVectorProfileMapper.class);
         KnowledgeVectorProfile existing = new KnowledgeVectorProfile();

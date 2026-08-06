@@ -34,7 +34,7 @@ class RecommendationServiceImplTest {
 
         List<Map<String, String>> results = service.dynamicShelf(1L);
 
-        assertEquals("Build your reading shelf", results.get(0).get("title"));
+        assertEquals("先建立你的书架", results.get(0).get("title"));
     }
 
     @Test
@@ -53,7 +53,7 @@ class RecommendationServiceImplTest {
 
         List<Map<String, String>> results = service.dynamicShelf(1L);
 
-        assertEquals("Build your reading shelf", results.get(0).get("title"));
+        assertEquals("先建立你的书架", results.get(0).get("title"));
     }
 
     private RecommendationServiceImpl service(NovelShelfFeignClient shelf, CanonicalBookFeignClient canonical, KnowledgeVectorProfileMapper profiles) {

@@ -32,6 +32,13 @@ public interface KnowledgeService {
     ReadingMapVO readingMap(long canonicalBookId, int currentChapter);
     List<SimilarBookVO> similarBooks(long canonicalBookId, int currentChapter, int limit);
     void rebuildGraph(long canonicalBookId);
+    void rebuildGraph(long canonicalBookId, StructuredGraphExtractor.ModelConfig modelConfig,
+                      java.util.function.IntConsumer chapterProgress);
+    /** Extracts only the chosen inclusive range and preserves other LightRAG claims. */
+    void buildGraphRange(long canonicalBookId, int startChapter, int endChapter,
+                         StructuredGraphExtractor.ModelConfig modelConfig,
+                         java.util.function.IntConsumer chapterProgress);
+    void clearGraph(long canonicalBookId);
 
     /** Repairs optional evidence projections without re-extracting or rewriting graph claims. */
     void reprojectEvidence(long canonicalBookId, int maxChunks);

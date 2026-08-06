@@ -36,7 +36,13 @@ public class ProfileVectorServiceImpl implements ProfileVectorService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void refreshBookProfile(long canonicalBookId, List<String> indexedKeywords) {
-        String content = "Indexed book profile: " + String.join(" ", indexedKeywords.stream().distinct().limit(160).toList());
+        // Source keywords may include long raw excerpts. A profile is a retrieval
+        // summary, not a second copy of the novel; bound it below Milvus VARCHAR
+        // limits so optional vector projection cannot stall graph builds.
+        String content = "Indexed book profile: " + String.join(" ", indexedKeywords.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> value.length() > 120 ? value.substring(0, 120) : value)
+                .distinct().limit(80).toList());
         upsert("BOOK", canonicalBookId, canonicalBookId, content);
     }
 
