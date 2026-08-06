@@ -4,6 +4,8 @@ export const apiCreateAgentSession = (dto = {}) => http.post('/agent/sessions', 
 export const apiListAgentSessions = () => http.get('/agent/sessions')
 export const apiSearchAgentSessions = (keyword) => http.get('/agent/sessions/search', { params: { keyword } })
 export const apiGetAgentMessages = (sessionId) => http.get(`/agent/sessions/${sessionId}/messages`)
+export const apiRenameAgentSession = (sessionId, dto) => http.put(`/agent/sessions/${sessionId}/title`, dto)
+export const apiUpdateAgentMessage = (sessionId, messageId, dto) => http.put(`/agent/sessions/${sessionId}/messages/${messageId}`, dto)
 export const apiExportAgentSession = (sessionId) => http.get(`/agent/sessions/${sessionId}/export`)
 export const apiDeleteAgentSession = (sessionId) => http.delete(`/agent/sessions/${sessionId}`)
 export const apiListAgentModels = () => http.get('/agent/models')
@@ -46,13 +48,20 @@ export const apiSaveRecommendationFeedback = (dto) => http.post('/agent/recommen
 export const apiGetAgentPreferences = () => http.get('/agent/preferences')
 export const apiSaveAgentPreferences = (dto) => http.put('/agent/preferences', dto)
 export const apiEraseAgentPersonalData = (eraseConversations = true) => http.delete('/agent/preferences/personal-data', { params: { eraseConversations } })
-export const apiGetAgentGraph = (bookId, chapter) => http.get(`/agent/books/${bookId}/graph`, { params: { currentChapter: chapter } })
-export const apiGetAgentClues = (bookId, chapter) => http.get(`/agent/books/${bookId}/clues`, { params: { currentChapter: chapter } })
-export const apiGetAgentTimeline = (bookId, chapter) => http.get(`/agent/books/${bookId}/timeline`, { params: { currentChapter: chapter } })
-export const apiGetAgentReadingMap = (bookId, chapter) => http.get(`/agent/books/${bookId}/reading-map`, { params: { currentChapter: chapter } })
-export const apiGetPlotCapsule = (bookId, chapter) => http.get(`/agent/books/${bookId}/capsule`, { params: { currentChapter: chapter } })
-export const apiGetSimilarBooks = (bookId, chapter) => http.get(`/agent/books/${bookId}/similar`, { params: { currentChapter: chapter } })
+const insightParams = (chapter, spoilersConfirmed = false) => ({ currentChapter: chapter, spoilersConfirmed })
+export const apiGetAgentGraph = (bookId, chapter, spoilersConfirmed = false) => http.get(`/agent/books/${bookId}/graph`, { params: insightParams(chapter, spoilersConfirmed) })
+export const apiGetAgentClues = (bookId, chapter, spoilersConfirmed = false) => http.get(`/agent/books/${bookId}/clues`, { params: insightParams(chapter, spoilersConfirmed) })
+export const apiGetAgentTimeline = (bookId, chapter, spoilersConfirmed = false) => http.get(`/agent/books/${bookId}/timeline`, { params: insightParams(chapter, spoilersConfirmed) })
+export const apiGetAgentReadingMap = (bookId, chapter, spoilersConfirmed = false) => http.get(`/agent/books/${bookId}/reading-map`, { params: insightParams(chapter, spoilersConfirmed) })
+export const apiGetPlotCapsule = (bookId, chapter, spoilersConfirmed = false) => http.get(`/agent/books/${bookId}/capsule`, { params: insightParams(chapter, spoilersConfirmed) })
+export const apiGetSimilarBooks = (bookId, chapter, spoilersConfirmed = false) => http.get(`/agent/books/${bookId}/similar`, { params: insightParams(chapter, spoilersConfirmed) })
 export const apiGetAgentReaderLink = (bookId) => http.get(`/agent/books/${bookId}/reader-link`)
+export const apiPrepareBookKnowledgeBuild = (bookId, range = {}) => http.get(`/agent/books/${bookId}/knowledge-build:prepare`, { params: range })
+export const apiStartBookKnowledgeBuild = (bookId, dto) => http.post(`/agent/books/${bookId}/knowledge-build`, dto)
+export const apiGetBookKnowledgeTasks = (limit = 30) => http.get('/agent/knowledge-build/tasks', { params: { limit } })
+export const apiDeleteBookKnowledgeTask = (taskId) => http.delete(`/agent/knowledge-build/tasks/${taskId}`)
+export const apiGetBookKnowledgeStatuses = (ids) => http.get('/agent/books/knowledge-status', { params: { canonicalBookIds: Array.isArray(ids) ? ids.join(',') : ids } })
+export const apiGetBookKnowledgeStatus = (bookId) => http.get(`/agent/books/${bookId}/knowledge-status`)
 
 export async function streamAgentMessage(sessionId, dto, handlers = {}) {
   const token = localStorage.getItem('token')
@@ -64,7 +73,11 @@ export async function streamAgentMessage(sessionId, dto, handlers = {}) {
     },
     body: JSON.stringify(dto)
   })
-  if (!response.ok || !response.body) throw new Error('智能助手暂时不可用')
+  if (!response.ok || !response.body) {
+    if (response.status === 404) throw new Error('Agent 服务未通过网关连接，请确认后端网关与 Agent 使用同一份配置')
+    if (response.status === 401) throw new Error('请先登录后再使用 Agent')
+    throw new Error(`Agent 请求失败（${response.status}）`)
+  }
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()

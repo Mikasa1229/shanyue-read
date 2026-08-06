@@ -39,7 +39,17 @@ http.interceptors.response.use(
     return Promise.reject(new Error(data.message || '请求失败'))
   },
   (err) => {
-    const msg = err.response?.data?.message || err.message || '网络异常'
+    const requestUrl = err.config?.url || ''
+    const status = err.response?.status
+    const responseBody = err.response?.data
+    // The Agent security filter deliberately emits this exact opaque response when
+    // a request bypasses the trusted gateway. Other 404s are ordinary missing
+    // resources and must not be misreported as a gateway configuration failure.
+    const gatewayRejected = requestUrl.includes('/agent') && status === 404 &&
+      responseBody?.code === 404 && responseBody?.message === 'Not found'
+    const msg = gatewayRejected
+      ? 'Agent 服务未通过网关连接，请确认网关与 Agent 使用同一份 AGENT_GATEWAY_TOKEN 配置并重启服务'
+      : responseBody?.message || err.message || '网络异常'
     return Promise.reject(new Error(msg))
   }
 )
