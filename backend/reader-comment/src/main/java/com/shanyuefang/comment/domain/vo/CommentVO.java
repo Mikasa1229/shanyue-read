@@ -12,6 +12,7 @@ public class CommentVO {
 
     private Long id;
     private Long novelId;
+    private String activityType;
     private Long userId;
 
     /** 作者昵称（从用户服务 Feign 获取后组装）*/

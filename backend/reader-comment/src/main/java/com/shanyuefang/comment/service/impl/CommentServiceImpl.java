@@ -33,6 +33,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> implements CommentService {
 
+    private static final String KNOWLEDGE_GRAPH_BUILD = "KNOWLEDGE_GRAPH_BUILD";
+
     private static final long[] LEVEL_EXP = {0L, 100L, 300L, 700L, 1500L, 3000L, 5500L};
     private static final String[] LEVEL_NAMES = {"Lv0 新人", "Lv1 青铜", "Lv2 白银", "Lv3 黄金", "Lv4 白金", "Lv5 钻石", "Lv6 大会员"};
 
@@ -45,6 +47,7 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
         Comment comment = new Comment();
         comment.setId(SnowflakeIdUtil.next());
         comment.setNovelId(dto.getNovelId());
+        comment.setActivityType(normalizeActivityType(dto.getActivityType()));
         comment.setUserId(userId);
         comment.setContent(dto.getContent());
         comment.setScore(dto.getScore());
@@ -86,15 +89,17 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
         } else {
             // 根点评：有书籍信息时要求评分
             boolean hasBookContext = dto.getNovelId() != null || StringUtils.hasText(dto.getBookTitle()) || StringUtils.hasText(dto.getBookUrl());
-            if (hasBookContext && dto.getScore() == null) {
+            if (hasBookContext && dto.getScore() == null && comment.getActivityType() == null) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "请为该书打分（1-5）");
             }
         }
 
         save(comment);
 
+        publishVerifiedDailyActions(comment);
+
         // 异步通知小说服务更新 comment_count（只统计根评论，且 novelId 不为 null 时才通知）
-        if (comment.getRootId() == null && dto.getNovelId() != null) {
+        if (comment.getRootId() == null && dto.getNovelId() != null && comment.getActivityType() == null) {
             eventProducer.sendCommentCreated(dto.getNovelId(), comment.getId());
         }
 
@@ -228,5 +233,24 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment> impl
             }
         }
         return LEVEL_NAMES[0];
+    }
+
+    private String normalizeActivityType(String value) {
+        if (!StringUtils.hasText(value)) return null;
+        if (KNOWLEDGE_GRAPH_BUILD.equals(value.trim())) return KNOWLEDGE_GRAPH_BUILD;
+        throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的动态类型");
+    }
+
+    private void publishVerifiedDailyActions(Comment comment) {
+        if (comment.getRootId() != null || comment.getActivityType() != null) return;
+        try {
+            userFeignClient.recordVerifiedAction(comment.getUserId(), Map.of("actionType", "COMMENT", "value", 1));
+            if (comment.getScore() != null) {
+                userFeignClient.recordVerifiedAction(comment.getUserId(), Map.of("actionType", "RATE", "value", 1));
+            }
+        } catch (Exception exception) {
+            // The completed-set and credit request ids make retries safe; a comment must not be rolled back for a reward outage.
+            log.warn("点评任务行为上报失败: commentId={}", comment.getId(), exception);
+        }
     }
 }

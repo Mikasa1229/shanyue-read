@@ -132,7 +132,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { apiCreateComment, apiDeleteComment, apiGetComments } from '@/api/comment'
-import { apiRecordLevelAction } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
 
@@ -178,8 +177,6 @@ async function submitComment() {
       score: replyTo.value ? undefined : newScore.value,
       parentId: replyTo.value?.id ?? null
     })
-    apiRecordLevelAction('COMMENT').catch(() => {})
-    if (!replyTo.value) apiRecordLevelAction('RATE').catch(() => {})
     show('发送成功')
     newContent.value = ''
     newScore.value = 4

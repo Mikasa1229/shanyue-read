@@ -59,18 +59,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private final RedisTemplate<String, Object> redisTemplate;
     private final CreditService creditService;
 
-    private record DailyTaskRule(String taskId, String actionType, int target, int rewardExp,
+    private record DailyTaskRule(String taskId, String actionType, int target, int rewardExp, int rewardCredits,
                                  String title, String description) {}
 
     private List<DailyTaskRule> buildDailyTaskRules() {
         return List.of(
-                new DailyTaskRule("CHECKIN_ONCE", ACTION_CHECKIN, 1, 12,
+                new DailyTaskRule("CHECKIN_ONCE", ACTION_CHECKIN, 1, 12, 1,
                         "每日打卡", "完成 1 次打卡"),
-                new DailyTaskRule("READ_30_MIN", ACTION_READ_SECONDS, 1800, 20,
+                new DailyTaskRule("READ_30_MIN", ACTION_READ_SECONDS, 1800, 20, 2,
                         "每日阅读", "累计阅读 30 分钟"),
-                new DailyTaskRule("WRITE_REVIEW", ACTION_COMMENT, 1, 18,
+                new DailyTaskRule("WRITE_REVIEW", ACTION_COMMENT, 1, 18, 1,
                         "写点评", "发布 1 条点评"),
-                new DailyTaskRule("RATE_BOOK", ACTION_RATE, 1, 10,
+                new DailyTaskRule("RATE_BOOK", ACTION_RATE, 1, 10, 1,
                         "书籍评分", "提交 1 次评分")
         );
     }
@@ -245,8 +245,26 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
         String actionType = dto.getActionType().trim().toUpperCase();
         int value = dto.getValue();
-        if (!Set.of(ACTION_CHECKIN, ACTION_READ_SECONDS, ACTION_COMMENT, ACTION_RATE).contains(actionType)) {
+        if (!Set.of(ACTION_CHECKIN, ACTION_COMMENT, ACTION_RATE).contains(actionType)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "不支持的行为类型");
+        }
+
+        return recordDailyAction(userId, actionType, value);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public LevelActionResultVO recordVerifiedReading(Long userId, int seconds) {
+        if (seconds <= 0 || seconds > 90) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "有效阅读时长必须在 1 到 90 秒之间");
+        }
+        return recordDailyAction(userId, ACTION_READ_SECONDS, seconds);
+    }
+
+    private LevelActionResultVO recordDailyAction(Long userId, String actionType, int value) {
+        User user = getById(userId);
+        if (user == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "用户不存在");
         }
 
         LocalDate today = LocalDate.now();
@@ -302,7 +320,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private void grantTaskCredits(long userId, LocalDate date, String taskId) {
         int amount = switch (taskId) {
             case "CHECKIN_ONCE" -> 1;
-            default -> 0;
+            case "READ_30_MIN" -> 2;
+            case "WRITE_REVIEW", "RATE_BOOK" -> 1;
+            default -> throw new IllegalArgumentException("Unknown daily task: " + taskId);
         };
         if (amount == 0) return;
         CreditOperationDTO credit = new CreditOperationDTO();
@@ -331,6 +351,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             vo.setTarget(rule.target());
             vo.setProgress(Math.min(progress, rule.target()));
             vo.setRewardExp(rule.rewardExp());
+            vo.setRewardCredits(rule.rewardCredits());
             vo.setCompleted(completed != null && completed.contains(rule.taskId()));
             list.add(vo);
         }

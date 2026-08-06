@@ -7,7 +7,7 @@
           <div class="user-card">
             <div class="user-avatar-wrap">
               <div class="user-avatar">
-                <img v-if="userInfo?.avatar" :src="userInfo.avatar" :alt="userInfo.nickname" />
+                <img v-if="userInfo?.avatar && !avatarLoadFailed" :src="userInfo.avatar" :alt="userInfo.nickname" @error="avatarLoadFailed = true" />
                 <span v-else class="avatar-text">{{ userInfo?.nickname?.charAt(0) ?? '读' }}</span>
               </div>
               <button class="avatar-edit-btn" title="更换头像" :disabled="avatarUploading" @click="$refs.avatarInput.click()">
@@ -33,7 +33,7 @@
                 <div v-for="task in levelInfo.dailyTasks || []" :key="task.taskId" class="task-row">
                   <span class="task-name">{{ task.title }}</span>
                   <span class="task-progress" :class="{ done: task.completed }">
-                    {{ task.completed ? '已完成' : `${task.progress}/${task.target}` }}
+                    {{ task.completed ? `已完成 · +${task.rewardCredits || 0} 积分` : `${task.progress}/${task.target} · +${task.rewardCredits || 0} 积分` }}
                   </span>
                 </div>
               </div>
@@ -206,6 +206,7 @@ const { show } = useToast()
 const userInfo = computed(() => userStore.userInfo)
 const levelInfo = ref(null)
 const avatarUploading = ref(false)
+const avatarLoadFailed = ref(false)
 
 async function handleAvatarChange(e) {
   const file = e.target.files?.[0]
@@ -217,6 +218,7 @@ async function handleAvatarChange(e) {
     fd.append('file', file)
     await apiUploadAvatar(fd)
     await userStore.fetchProfile()
+    avatarLoadFailed.value = false
     show('头像已更新')
   } catch (err) {
     show(err.message)

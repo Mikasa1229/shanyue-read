@@ -7,6 +7,8 @@ import com.shanyuefang.user.service.UserService;
 import com.shanyuefang.user.service.CreditService;
 import com.shanyuefang.user.domain.dto.CreditOperationDTO;
 import com.shanyuefang.user.domain.vo.UserCreditVO;
+import com.shanyuefang.user.domain.vo.LevelActionResultVO;
+import com.shanyuefang.user.domain.dto.LevelActionDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -80,5 +82,16 @@ public class InternalUserController {
     public R<Void> refundCredits(@jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody CreditOperationDTO dto) {
         creditService.refund(dto);
         return R.ok();
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/level/verified-reading")
+    public R<LevelActionResultVO> recordVerifiedReading(@RequestParam Long userId, @RequestParam int seconds) {
+        return R.ok(userService.recordVerifiedReading(userId, seconds));
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/level/action")
+    public R<LevelActionResultVO> recordVerifiedAction(@RequestParam Long userId,
+                                                        @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody LevelActionDTO dto) {
+        return R.ok(userService.recordLevelAction(userId, dto));
     }
 }

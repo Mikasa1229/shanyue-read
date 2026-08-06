@@ -22,4 +22,10 @@ public class UserFeignClientFallback implements UserFeignClient {
         log.warn("用户服务 Feign 调用降级，ids={}", ids);
         return R.ok(Collections.emptyMap());
     }
+
+    @Override
+    public R<Object> recordVerifiedAction(long userId, Map<String, Object> action) {
+        log.warn("用户服务任务行为上报降级: userId={}, action={}", userId, action == null ? null : action.get("actionType"));
+        return R.ok();
+    }
 }

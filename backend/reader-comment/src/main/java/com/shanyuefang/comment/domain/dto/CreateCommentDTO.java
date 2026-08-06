@@ -15,6 +15,13 @@ import lombok.Data;
 @Data
 public class CreateCommentDTO {
 
+    /**
+     * Optional structured feed event. Normal user reviews leave this empty.
+     * It lets the square render system-assisted reading activities without
+     * pretending that they are ratings.
+     */
+    private String activityType;
+
     /** 小说 ID，书源书籍书评时可为 null */
     private Long novelId;
 

@@ -59,6 +59,24 @@ class CommentServiceTest {
     }
 
     @Test
+    @DisplayName("知识图谱动态 - 不作为评分计数，保留结构化活动类型")
+    void createComment_knowledgeGraphActivityDoesNotCreateRatingEvent() {
+        CreateCommentDTO dto = new CreateCommentDTO();
+        dto.setNovelId(100L);
+        dto.setBookTitle("剑来");
+        dto.setActivityType("KNOWLEDGE_GRAPH_BUILD");
+        dto.setContent("我构建了《剑来》第 1 章到第 10 章的知识图谱。");
+        when(commentMapper.insert(any(Comment.class))).thenReturn(1);
+        when(userFeignClient.batchGetUsers(any())).thenReturn(null);
+
+        CommentVO result = commentService.createComment(1L, dto);
+
+        assertThat(result.getActivityType()).isEqualTo("KNOWLEDGE_GRAPH_BUILD");
+        assertThat(result.getScore()).isNull();
+        verify(eventProducer, never()).sendCommentCreated(any(), any());
+    }
+
+    @Test
     @DisplayName("创建回复 - 父评论不存在时抛出 NOT_FOUND")
     void createComment_whenParentNotFound_throwsNotFound() {
         CreateCommentDTO dto = new CreateCommentDTO();

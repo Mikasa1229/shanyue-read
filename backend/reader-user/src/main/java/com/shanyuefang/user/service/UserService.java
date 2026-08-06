@@ -37,4 +37,7 @@ public interface UserService extends IService<User> {
 
     /** 记录用户行为并尝试发放任务经验 */
     LevelActionResultVO recordLevelAction(Long userId, LevelActionDTO dto);
+
+    /** Receives a bounded reading increment from the server-side reading session only. */
+    LevelActionResultVO recordVerifiedReading(Long userId, int seconds);
 }

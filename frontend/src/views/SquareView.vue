@@ -38,7 +38,7 @@
               <span class="feed-user">{{ item.userNickname }}</span>
               <span v-if="item.userLevel" class="feed-level">{{ item.userLevel }}</span>
               <span class="feed-action">
-                {{ item.score ? `打了 ${item.score.toFixed(1)} 分` : '写了点评' }}
+                {{ item.activityType === 'KNOWLEDGE_GRAPH_BUILD' ? '构建了知识图谱' : item.score ? `打了 ${item.score.toFixed(1)} 分` : '写了点评' }}
               </span>
               <span class="feed-time">{{ formatTime(item.createdAt) }}</span>
             </div>
@@ -53,7 +53,7 @@
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
               </svg>
               <router-link v-if="item.novelId" :to="`/novel/${item.novelId}`" class="badge-title badge-link">
-                {{ item.novelId ? '查看原著' : '' }}
+                《{{ item.bookTitle || '查看作品' }}》
               </router-link>
               <a v-else-if="item.sourceId && item.bookUrl" href="#" class="badge-title badge-link" @click.prevent="goSourceDetail(item)">
                 《{{ item.bookTitle }}》
@@ -123,7 +123,6 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiGetRecentComments, apiCreateComment } from '@/api/comment'
-import { apiRecordLevelAction } from '@/api/user'
 import { useToast } from '@/composables/useToast'
 import { useUserStore } from '@/stores/user'
 
@@ -147,8 +146,6 @@ async function submitReview() {
       score: reviewScore.value,
       content: reviewContent.value.trim()
     })
-    apiRecordLevelAction('COMMENT').catch(() => {})
-    apiRecordLevelAction('RATE').catch(() => {})
     reviewOpen.value = false
     reviewBookTitle.value = ''
     reviewContent.value = ''

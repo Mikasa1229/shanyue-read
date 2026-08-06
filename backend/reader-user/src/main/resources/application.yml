@@ -77,12 +77,14 @@ sa-token:
   token-style: uuid
 
 app:
-  upload-dir: ${UPLOAD_DIR:uploads}   # 头像等文件存储目录（相对于工作目录）
+  # Keep the local upload location stable when the jar is started from the repository root.
+  # UPLOAD_DIR can override this in deployed environments.
+  upload-dir: ${UPLOAD_DIR:backend/uploads}
   minio:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     access-key: ${MINIO_ACCESS_KEY:minioadmin}
     secret-key: ${MINIO_SECRET_KEY:minioadmin}
-    bucket: ${MINIO_BUCKET:reader-avatars}
+    bucket: ${MINIO_BUCKET:reader-assets}
     public-url: ${MINIO_PUBLIC_URL:http://localhost:9000}
 
 knife4j:
