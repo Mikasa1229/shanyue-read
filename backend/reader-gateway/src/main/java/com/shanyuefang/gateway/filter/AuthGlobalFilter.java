@@ -112,7 +112,9 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         return path.startsWith("/api/novels")
                 || path.startsWith("/api/comments")
                 || path.startsWith("/api/book-sources")
-                || path.startsWith("/api/reading/ranking");
+                || path.startsWith("/api/reading/ranking")
+                || path.startsWith("/api/covers/")
+                || path.startsWith("/uploads/");
     }
 
     private Mono<Void> unauthorized(ServerWebExchange exchange) {

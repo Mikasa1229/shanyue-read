@@ -11,6 +11,19 @@ This runbook covers the final acceptance checks that require a real provider, a 
 - For the single-node local Elasticsearch Compose profile, Agent-created indexes use `number_of_replicas: 0`; production replica counts must instead match the number of eligible data nodes.
 - After deploying a new Agent process with a non-empty, matching `AGENT_GATEWAY_TOKEN`, run `./scripts/validate-agent-deployment.ps1`. It checks Agent health, Flyway V26--V31, and that an unauthenticated direct browser API request receives `404`; it deliberately does not read or print secrets.
 - For local process replacement after a code/config change, build the Agent JAR and run `./scripts/restart-agent.ps1`; it loads `.env` without printing values, starts the service with a hidden window, and waits for `/actuator/health` `UP`.
+
+## 浏览器看到 Agent 404 时先检查什么
+
+Agent 的浏览器接口统一走 `frontend -> reader-gateway:8080 -> reader-agent:8086`。`reader-agent` 对缺少或不匹配 `X-Agent-Gateway-Token` 的 `/api/agent/**` 请求会故意返回 404，这是隐藏内部服务边界的安全策略，并不表示 `AgentController` 缺少对应接口。
+
+按以下顺序排查：
+
+1. 确认 Gateway 和 Agent 是用同一份 `.env` 启动的，尤其是 `AGENT_GATEWAY_TOKEN`；手动在 IDE 中启动某一个服务时不会自动读取项目根目录 `.env`。
+2. 优先使用 `scripts/start-backend.ps1` 或 `scripts/restart-agent.ps1` 启动，它们会在不打印密钥的情况下加载 `.env`。
+3. 访问 `http://localhost:8086/api/agent/sessions` 得到 404 是预期的直连保护；通过 `http://localhost:8080/api/agent/sessions` 并携带登录 Token 才是正确链路。
+4. 如果只有 SSE 对话失败，检查浏览器是否仍在使用旧的前端构建；前端现在会把 404 显示为“网关与 Agent 共享密钥不一致”，而不是笼统的“接口不存在”。
+
+前端所有 Agent API 路径均对应 `reader-agent` 的 `/api/agent/**` 控制器；`书籍洞察`只是对已读边界内的 LightRAG 图谱、线索、时间线、回忆胶囊、阅读分岔地图和相似书 DNA 的聚合展示，不会读取用户尚未读到的章节。
 - Use an original or licensed fixture work with at least ten numbered chapters, two identically named characters distinguished by explicit text, open/resolved clues, and a causal event chain.
 - When posting Chinese fixture chapters from PowerShell, send `UTF-8` bytes with `Content-Type: application/json; charset=utf-8`; the Windows default code page can turn evidence into replacement characters and invalidate graph-quality results.
 
