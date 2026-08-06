@@ -49,3 +49,6 @@ backend/uploads/
 .tools/
 __pycache__/
 *.py[cod]
+
+# Local recovery snapshot created while repairing an editor encoding failure.
+*.mojibake-backup
