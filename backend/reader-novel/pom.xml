@@ -78,6 +78,12 @@
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
         </dependency>
+        <!-- MinIO object storage for cover snapshots; covers must not be written to local disk. -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.7</version>
+        </dependency>
         <!-- JSoup：HTML 解析（书源规则引擎用） -->
         <dependency>
             <groupId>org.jsoup</groupId>

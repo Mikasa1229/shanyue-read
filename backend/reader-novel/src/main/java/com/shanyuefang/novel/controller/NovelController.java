@@ -7,6 +7,7 @@ import com.shanyuefang.novel.domain.dto.NovelPageDTO;
 import com.shanyuefang.novel.domain.dto.UpdateNovelDTO;
 import com.shanyuefang.novel.domain.vo.NovelVO;
 import com.shanyuefang.novel.service.NovelService;
+import com.shanyuefang.novel.util.CoverSnapshotUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -15,6 +16,7 @@ import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 @Tag(name = "小说接口")
 @Validated
@@ -24,6 +26,18 @@ import org.springframework.web.bind.annotation.*;
 public class NovelController {
 
     private final NovelService novelService;
+    private final CoverSnapshotUtil coverSnapshotUtil;
+
+    @Operation(summary = "上传小说封面")
+    @PostMapping("/cover")
+    public R<String> uploadCover(@RequestHeader("X-User-Id") Long userId,
+                                 @RequestParam("file") MultipartFile file) throws Exception {
+        if (file == null || file.isEmpty() || file.getContentType() == null
+                || !file.getContentType().startsWith("image/")) {
+            throw new IllegalArgumentException("请选择有效的图片文件");
+        }
+        return R.ok(coverSnapshotUtil.upload(file.getBytes(), file.getOriginalFilename(), file.getContentType()));
+    }
 
     @Operation(summary = "发布小说")
     @PostMapping

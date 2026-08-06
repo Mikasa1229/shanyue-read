@@ -31,4 +31,7 @@ public interface UserFeignClient {
 
     @PostMapping("/credits/grant")
     R<Void> grantCredits(@RequestBody Map<String, Object> request);
+
+    @PostMapping("/level/verified-reading")
+    R<Object> recordVerifiedReading(@RequestParam("userId") long userId, @RequestParam("seconds") int seconds);
 }

@@ -6,12 +6,10 @@ import com.shanyuefang.novel.feign.UserFeignClient;
 import com.shanyuefang.novel.service.impl.ReadingServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 
@@ -33,7 +31,6 @@ class ReadingServiceImplTest {
     @Mock private UserFeignClient userClient;
     @Mock private HashOperations<String, Object, Object> hashes;
     @Mock private ZSetOperations<String, String> rankings;
-    @Mock private ValueOperations<String, String> values;
 
     @Test
     void heartbeat_usesAtomicDailyClaimAndOnlyRanksAcceptedSeconds() {
@@ -47,8 +44,6 @@ class ReadingServiceImplTest {
         when(hashes.get("reading:session:session-token", "qualifiedSeconds")).thenReturn("1790");
         when(redis.execute(any(DefaultRedisScript.class), anyList(), anyString(), anyString(), anyString())).thenReturn(10L);
         when(redis.opsForZSet()).thenReturn(rankings);
-        when(redis.opsForValue()).thenReturn(values);
-        when(values.setIfAbsent(anyString(), anyString(), any())).thenReturn(false);
         when(redis.getExpire(anyString(), any())).thenReturn(-1L);
 
         ReadingSessionVO result = service.heartbeat(8L, dto);
@@ -56,6 +51,7 @@ class ReadingServiceImplTest {
         assertThat(result.getQualifiedSeconds()).isEqualTo(1800L);
         verify(redis).execute(any(DefaultRedisScript.class), anyList(), eq("30"), eq("14400"), eq("172800"));
         verify(rankings).incrementScore(anyString(), eq("8"), eq(10D));
+        verify(userClient).recordVerifiedReading(8L, 10);
     }
 
     @Test

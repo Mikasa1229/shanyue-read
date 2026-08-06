@@ -17,6 +17,7 @@ import com.shanyuefang.novel.engine.LegadoRuleEngine;
 import com.shanyuefang.novel.mapper.BookSourceMapper;
 import com.shanyuefang.novel.service.BookSourceService;
 import com.shanyuefang.novel.service.CanonicalBookService;
+import com.shanyuefang.novel.util.CoverSnapshotUtil;
 import com.shanyuefang.novel.domain.dto.ResolveCanonicalBookDTO;
 import com.shanyuefang.novel.messaging.KnowledgeIndexPublisher;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +53,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     private static final long CHAPTER_CACHE_TTL_MS = 5 * 60 * 1000L;
     private static final ConcurrentHashMap<String, CachedChapters> CHAPTER_CACHE = new ConcurrentHashMap<>();
     private final CanonicalBookService canonicalBookService;
+    private final CoverSnapshotUtil coverSnapshotUtil;
     private final KnowledgeIndexPublisher knowledgeIndexPublisher;
 
     private record CachedChapters(long cacheAt, List<BookChapterVO> chapters) {}
@@ -201,7 +203,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
             vo.setSourceName(bs.getSourceName());
             vo.setName(extractField(model.effectiveSearchName(), item));
             vo.setAuthor(extractField(model.effectiveSearchAuthor(), item));
-            vo.setCoverUrl(extractField(model.effectiveSearchCover(), item));
+            vo.setCoverUrl(snapshotCover(resolveUrl(extractField(model.effectiveSearchCover(), item), model.getBookSourceUrl())));
             vo.setIntro(extractField(model.effectiveSearchIntro(), item));
             vo.setKind(extractField(model.effectiveSearchKind(), item));
             vo.setLastChapter(extractField(model.effectiveSearchLastChapter(), item));
@@ -233,7 +235,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         if (info != null) {
             vo.setName(extractField(info.getName(), body));
             vo.setAuthor(extractField(info.getAuthor(), body));
-            vo.setCoverUrl(resolveUrl(extractField(info.getCoverUrl(), body), model.getBookSourceUrl()));
+            vo.setCoverUrl(snapshotCover(resolveUrl(extractField(info.getCoverUrl(), body), model.getBookSourceUrl())));
             vo.setIntro(extractField(info.getIntro(), body));
             vo.setKind(extractField(info.getKind(), body));
             vo.setLastChapter(extractField(info.getLastChapter(), body));
@@ -243,7 +245,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         // 兼容没有 ruleBookInfo 的书源，尽量用搜索规则做兜底
         vo.setName(firstNonBlank(vo.getName(), extractField(model.effectiveSearchName(), body), extractTitle(body)));
         vo.setAuthor(firstNonBlank(vo.getAuthor(), extractField(model.effectiveSearchAuthor(), body)));
-        vo.setCoverUrl(firstNonBlank(vo.getCoverUrl(), resolveUrl(extractField(model.effectiveSearchCover(), body), model.getBookSourceUrl())));
+        vo.setCoverUrl(snapshotCover(firstNonBlank(vo.getCoverUrl(), resolveUrl(extractField(model.effectiveSearchCover(), body), model.getBookSourceUrl()))));
         vo.setIntro(firstNonBlank(vo.getIntro(), extractField(model.effectiveSearchIntro(), body), extractMetaDescription(body)));
         vo.setKind(firstNonBlank(vo.getKind(), extractField(model.effectiveSearchKind(), body)));
         vo.setLastChapter(firstNonBlank(vo.getLastChapter(), extractField(model.effectiveSearchLastChapter(), body)));
@@ -258,7 +260,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                         .orElse(candidates.stream().findFirst().orElse(null));
                 if (matched != null) {
                     vo.setIntro(firstNonBlank(vo.getIntro(), matched.getIntro()));
-                    vo.setCoverUrl(firstNonBlank(vo.getCoverUrl(), matched.getCoverUrl()));
+                    vo.setCoverUrl(snapshotCover(firstNonBlank(vo.getCoverUrl(), matched.getCoverUrl())));
                     vo.setAuthor(firstNonBlank(vo.getAuthor(), matched.getAuthor()));
                     vo.setKind(firstNonBlank(vo.getKind(), matched.getKind()));
                     vo.setLastChapter(firstNonBlank(vo.getLastChapter(), matched.getLastChapter()));
@@ -574,6 +576,10 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         } catch (Exception e) {
             log.warn("Canonical book resolution failed: sourceId={}, bookUrl={}", book.getSourceId(), book.getBookUrl(), e);
         }
+    }
+
+    private String snapshotCover(String coverUrl) {
+        return coverSnapshotUtil.snapshot(coverUrl);
     }
 
     private String extractTitle(String html) {

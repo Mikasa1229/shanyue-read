@@ -25,7 +25,7 @@
             <div v-if="book.lastChapterName" class="reading-badge">续读</div>
           </div>
           <div class="card-meta">
-            <div class="book-name" :title="book.bookName">{{ book.bookName }}</div>
+            <div class="shelf-name-row"><div class="book-name" :title="book.bookName">{{ book.bookName }}</div><span v-if="book.knowledgeStatus === 'READY'" class="knowledge-badge">AI 知识库</span></div>
             <div class="book-author">{{ book.author || '未知作者' }}</div>
             <div v-if="book.lastChapterName" class="last-chapter" :title="book.lastChapterName">
               {{ book.lastChapterName }}
@@ -65,6 +65,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import { apiGetMyShelf, apiRemoveFromShelf } from '@/api/bookshelf'
+import { apiGetBookKnowledgeStatuses } from '@/api/agent'
 
 const router = useRouter()
 const { show } = useToast()
@@ -81,6 +82,13 @@ async function loadPage(page = 1) {
   try {
     const res = await apiGetMyShelf(page, 20)
     books.value  = res?.records ?? []
+    const ids = [...new Set(books.value.map(book => book.canonicalBookId).filter(Boolean))]
+    if (ids.length) {
+      try {
+        const statuses = await apiGetBookKnowledgeStatuses(ids)
+        books.value = books.value.map(book => ({ ...book, knowledgeStatus: statuses?.[book.canonicalBookId]?.status }))
+      } catch (_) { /* Agent badges are optional and never block the bookshelf. */ }
+    }
     total.value  = res?.total   ?? 0
     totalPages.value = res?.pages ?? 1
   } catch (e) {
@@ -141,6 +149,9 @@ onMounted(() => loadPage(1))
   flex-direction: column;
   gap: var(--space-2);
 }
+.shelf-name-row { display:flex; align-items:center; gap:6px; min-width:0; }
+.shelf-name-row .book-name { min-width:0; }
+.knowledge-badge { flex:0 0 auto; padding:2px 6px; border:1px solid #8bb894; border-radius:999px; background:#edf8ef; color:#39734a; font-size:.62rem; font-weight:700; white-space:nowrap; }
 
 .cover-wrap {
   position: relative;

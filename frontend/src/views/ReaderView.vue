@@ -198,7 +198,6 @@ import { apiUpdateReadingProgress } from '@/api/bookshelf'
 import { apiReadingHeartbeat, apiStartReadingSession } from '@/api/reading'
 import { apiAddFavorite, apiCheckFavorited } from '@/api/favorite'
 import { apiCreateComment } from '@/api/comment'
-import { apiRecordLevelAction } from '@/api/user'
 import { useToast } from '@/composables/useToast'
 
 const route  = useRoute()
@@ -399,8 +398,6 @@ async function submitShare() {
       score: shareScore.value,
       content: shareContent.value.trim()
     })
-    apiRecordLevelAction('COMMENT').catch(() => {})
-    apiRecordLevelAction('RATE').catch(() => {})
     shareOpen.value = false
     shareContent.value = ''
     shareScore.value = 4
@@ -412,12 +409,6 @@ async function submitShare() {
 }
 
 function reportReadDuration() {
-  if (readerOpenTime <= 0 || !userStore.isLoggedIn) return
-  const seconds = Math.floor((Date.now() - readerOpenTime) / 1000)
-  if (seconds >= 5) {
-    // Reading rewards and ranking only accept server-verified heartbeats.
-    apiRecordLevelAction('READ_SECONDS', seconds).catch(() => {})
-  }
   readerOpenTime = 0
 }
 

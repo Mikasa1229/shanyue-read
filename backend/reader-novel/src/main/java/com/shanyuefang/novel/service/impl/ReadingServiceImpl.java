@@ -37,7 +37,6 @@ public class ReadingServiceImpl implements ReadingService {
     /** Redis ZSET key 前缀：成员=userId，分值=本周累计阅读秒数。完整 key 如 ranking:reading_time:2026-W15 */
     private static final String RANKING_KEY_PREFIX = "ranking:reading_time:";
     private static final String SESSION_PREFIX = "reading:session:";
-    private static final String REWARDED_PREFIX = "reading:rewarded:";
     private static final int REWARD_SECONDS = 30 * 60;
     private static final int MAX_DAILY_QUALIFIED_SECONDS = 4 * 60 * 60;
     private static final DefaultRedisScript<Long> CLAIM_DAILY_SECONDS = new DefaultRedisScript<>("""
@@ -174,15 +173,12 @@ public class ReadingServiceImpl implements ReadingService {
         stringRedisTemplate.opsForHash().put(key, "lastHeartbeat", String.valueOf(now));
         if (earned > 0) recordVerifiedSeconds(userId, (int) earned);
         boolean rewarded = false;
-        String rewardKey = REWARDED_PREFIX + java.time.LocalDate.now(BEIJING) + ":" + userId;
-        if (current >= REWARD_SECONDS && Boolean.TRUE.equals(stringRedisTemplate.opsForValue().setIfAbsent(rewardKey, "1", Duration.ofDays(2)))) {
+        if (earned > 0) {
             try {
-                userFeignClient.grantCredits(Map.of("userId", userId, "amount", 1,
-                        "requestId", "reading:" + java.time.LocalDate.now(BEIJING) + ":" + userId, "reason", "Verified reading session"));
-                rewarded = true;
+                userFeignClient.recordVerifiedReading(userId, Math.toIntExact(earned));
+                rewarded = current >= REWARD_SECONDS;
             } catch (Exception e) {
-                stringRedisTemplate.delete(rewardKey);
-                log.warn("Unable to grant reading credit: userId={}", userId, e);
+                log.warn("Unable to report verified reading progress: userId={}", userId, e);
             }
         }
         return new ReadingSessionVO(dto.getSessionToken(), current, rewarded);

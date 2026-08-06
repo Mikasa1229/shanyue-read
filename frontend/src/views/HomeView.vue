@@ -101,7 +101,7 @@
                   </div>
                 </div>
                 <div class="book-meta">
-                  <div class="book-name">{{ book.name || '未知书名' }}</div>
+                  <div class="book-name-row"><div class="book-name">{{ book.name || '未知书名' }}</div><span v-if="isKnowledgeReady(book)" class="knowledge-badge">AI 知识库</span></div>
                   <div class="book-author">{{ book.author || '未知作者' }}</div>
                   <div v-if="book.intro" class="book-intro">{{ book.intro }}</div>
                   <div class="book-actions mt-4">
@@ -143,6 +143,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { apiAggregateSearch, apiGetChapters } from '@/api/bookSource'
+import { apiGetBookKnowledgeStatuses } from '@/api/agent'
 import { useToast } from '@/composables/useToast'
 
 const userStore = useUserStore()
@@ -210,6 +211,13 @@ async function doSearch() {
   try {
     const res = await apiAggregateSearch(q)
     results.value = res ?? []
+    const ids = [...new Set(results.value.map(book => book.canonicalBookId).filter(Boolean))]
+    if (ids.length) {
+      try {
+        const statuses = await apiGetBookKnowledgeStatuses(ids)
+        results.value = results.value.map(book => ({ ...book, knowledgeStatus: statuses?.[book.canonicalBookId]?.status }))
+      } catch (_) { /* Search remains available if the optional Agent service is offline. */ }
+    }
     searched.value = true
   } catch (e) {
     show(e.message)
@@ -220,6 +228,8 @@ async function doSearch() {
     loading.value = false
   }
 }
+
+function isKnowledgeReady (book) { return book.knowledgeStatus === 'READY' }
 
 // ─── 章节列表 ──────────────────────────────────────────────────
 const chapterBook = ref({ title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', canonicalBookId: '', list: [], loading: false })
@@ -561,6 +571,8 @@ onMounted(() => {
   color: var(--ink-0);
   line-height: 1.3;
 }
+.book-name-row { display:flex; align-items:center; gap:7px; min-width:0; }
+.knowledge-badge { flex:0 0 auto; padding:2px 6px; border:1px solid #8bb894; border-radius:999px; background:#edf8ef; color:#39734a; font-size:.62rem; font-weight:700; letter-spacing:.04em; }
 .book-author {
   font-size: 0.8125rem;
   color: var(--ink-3);

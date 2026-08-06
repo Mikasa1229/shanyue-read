@@ -197,6 +197,19 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
         Map<String, BookshelfBook> metaMap = metaList.stream()
                 .collect(Collectors.toMap(BookshelfBook::getBookUrl, b -> b, (a, b) -> a));
 
+        // Redis can retain entries after test data or old shelf rows are removed. Never expose
+        // an orphaned URL as an "unknown" book; remove it so later requests stay clean.
+        List<String> orphanedUrls = bookUrls.stream()
+                .filter(url -> !metaMap.containsKey(url))
+                .toList();
+        if (!orphanedUrls.isEmpty()) {
+            try {
+                stringRedisTemplate.opsForZSet().remove(HOT_BOOKS_ZSET, orphanedUrls.toArray());
+            } catch (Exception e) {
+                log.debug("清理失效热门书籍缓存失败: {}", e.getMessage());
+            }
+        }
+
         // 4. 组装结果
         List<HotBookVO> result = new ArrayList<>();
         int rank = 1;
@@ -207,14 +220,22 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
             vo.setShelfCount(countMap.getOrDefault(bookUrl, 0L));
 
             BookshelfBook meta = metaMap.get(bookUrl);
-            if (meta != null) {
-                vo.setBookName(meta.getBookName());
-                vo.setAuthor(meta.getAuthor());
-                vo.setCoverUrl(meta.getCoverUrl());
-                vo.setSourceId(meta.getSourceId());
-                vo.setSourceName(meta.getSourceName());
-            }
+            if (meta == null) continue;
+            vo.setBookName(meta.getBookName());
+            vo.setAuthor(meta.getAuthor());
+            vo.setCoverUrl(meta.getCoverUrl());
+            vo.setSourceId(meta.getSourceId());
+            vo.setSourceName(meta.getSourceName());
             result.add(vo);
+        }
+        // Re-number after orphan filtering so the visible list has contiguous ranks.
+        for (int index = 0; index < result.size(); index++) result.get(index).setRank(index + 1);
+        if (result.isEmpty()) {
+            // A stale Redis ranking may contain only deleted/test rows. Rebuild from the durable
+            // bookshelf table instead of showing an empty ranking after cache cleanup.
+            List<HotBookVO> dbResult = baseMapper.selectHotBooks(limit);
+            for (int index = 0; index < dbResult.size(); index++) dbResult.get(index).setRank(index + 1);
+            return dbResult;
         }
         return result;
     }
