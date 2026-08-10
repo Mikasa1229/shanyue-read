@@ -1,0 +1,131 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "round":  "round-2",
+    "generatedAt":  "2026-08-09T19:37:33.9312597+08:00",
+    "bookId":  358679512818388992,
+    "chapterRange":  {
+                         "start":  1,
+                         "end":  100
+                     },
+    "counts":  {
+                   "aliases":  120,
+                   "edges":  37,
+                   "clues":  0,
+                   "nodes":  77
+               },
+    "nodeCountByType":  {
+                            "ORGANIZATION":  10,
+                            "LOCATION":  14,
+                            "CHARACTER":  53
+                        },
+    "edgeCountByType":  {
+                            "FAMILY_OF":  2,
+                            "LIVES_IN":  1,
+                            "SUPPORTS":  2,
+                            "OPPOSES":  5,
+                            "VISITS":  6,
+                            "SERVES":  2,
+                            "TRAVELS_WITH":  2,
+                            "INTERACTS_WITH":  10,
+                            "KNOWS":  3,
+                            "MENTORS":  1,
+                            "MEMBER_OF":  3
+                        },
+    "metrics":  {
+                    "isolatedNodeRate":  0.6234,
+                    "characterConnectedRate":  0.4151,
+                    "edgeNodeRatio":  0.4805,
+                    "lowValueAtomicEventRate":  0,
+                    "unsupportedEdgeEvidenceRate":  0.5405,
+                    "aliasFragmentGroupCount":  1,
+                    "requiredRelationRecall":  0.6
+                },
+    "failures":  {
+                     "lowValueEvents":  [
+
+                                        ],
+                     "missingRequiredRelations":  [
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "宋集薪",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      }
+                                                  ],
+                     "aliasFragments":  [
+                                            {
+                                                "canonical":  "齐静春",
+                                                "fragments":  [
+                                                                  "齐先生",
+                                                                  "齐静春"
+                                                              ]
+                                            }
+                                        ],
+                     "unsupportedEdges":  [
+                                              {
+                                                  "type":  "INTERACTS_WITH",
+                                                  "chapter":  5,
+                                                  "evidence":  "陈平安来到东门，看到那汉子盘腿坐在栅栏门口的树墩上"
+                                              },
+                                              {
+                                                  "type":  "SUPPORTS",
+                                                  "chapter":  7,
+                                                  "evidence":  "陈平安也没有让这孩子失望，有意无意护在他身前"
+                                              },
+                                              {
+                                                  "type":  "INTERACTS_WITH",
+                                                  "chapter":  15,
+                                                  "evidence":  "陈平安先将那包裹放在床上，跟黑衣少女说是新买的衣裳"
+                                              },
+                                              {
+                                                  "type":  "INTERACTS_WITH",
+                                                  "chapter":  16,
+                                                  "evidence":  "苻南华，此时端坐在宋姓少年对面"
+                                              },
+                                              {
+                                                  "type":  "VISITS",
+                                                  "chapter":  18,
+                                                  "evidence":  "在陈平安即将跑出院子的时候，黑衣少女突然喊道"
+                                              },
+                                              {
+                                                  "type":  "OPPOSES",
+                                                  "chapter":  19,
+                                                  "evidence":  "蔡金简一提起那个草鞋少年，就满心厌恶"
+                                              },
+                                              {
+                                                  "type":  "VISITS",
+                                                  "chapter":  24,
+                                                  "evidence":  "把顾粲带进院子"
+                                              },
+                                              {
+                                                  "type":  "KNOWS",
+                                                  "chapter":  27,
+                                                  "evidence":  "陈平安离开泥瓶巷之前，就跟刘羡阳和黑衣少女约好了"
+                                              },
+                                              {
+                                                  "type":  "INTERACTS_WITH",
+                                                  "chapter":  27,
+                                                  "evidence":  "刘羡阳时不时偷瞄黑衣少女的情形"
+                                              },
+                                              {
+                                                  "type":  "INTERACTS_WITH",
+                                                  "chapter":  29,
+                                                  "evidence":  "陈平安将送给少女的三条石板鱼"
+                                              },
+                                              {
+                                                  "type":  "INTERACTS_WITH",
+                                                  "chapter":  35,
+                                                  "evidence":  "陈平安取回柴刀，少女已经站在院墙那边"
+                                              },
+                                              {
+                                                  "type":  "VISITS",
+                                                  "chapter":  35,
+                                                  "evidence":  "深夜里，一个少年偷偷潜入泥瓶巷，如野猫夜行，无声无息，悄悄来到顾粲家的院子"
+                                              }
+                                          ]
+                 }
+}

@@ -1,0 +1,66 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "round":  "round-3",
+    "generatedAt":  "2026-08-09T19:52:26.0469018+08:00",
+    "bookId":  358679512818388992,
+    "chapterRange":  {
+                         "start":  1,
+                         "end":  100
+                     },
+    "counts":  {
+                   "aliases":  125,
+                   "edges":  41,
+                   "clues":  0,
+                   "nodes":  70
+               },
+    "nodeCountByType":  {
+                            "ORGANIZATION":  9,
+                            "LOCATION":  17,
+                            "CHARACTER":  44
+                        },
+    "edgeCountByType":  {
+                            "FAMILY_OF":  1,
+                            "LIVES_IN":  1,
+                            "SUPPORTS":  2,
+                            "OPPOSES":  4,
+                            "VISITS":  3,
+                            "SERVES":  4,
+                            "TRAVELS_WITH":  5,
+                            "INTERACTS_WITH":  11,
+                            "KNOWS":  5,
+                            "MENTORS":  2,
+                            "MEMBER_OF":  3
+                        },
+    "metrics":  {
+                    "isolatedNodeRate":  0.6143,
+                    "characterConnectedRate":  0.4773,
+                    "edgeNodeRatio":  0.5857,
+                    "lowValueAtomicEventRate":  0,
+                    "unsupportedEdgeEvidenceRate":  0,
+                    "aliasFragmentGroupCount":  0,
+                    "requiredRelationRecall":  0.6
+                },
+    "failures":  {
+                     "lowValueEvents":  [
+
+                                        ],
+                     "missingRequiredRelations":  [
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "宁姚",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "宋集薪",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      }
+                                                  ],
+                     "aliasFragments":  [
+
+                                        ],
+                     "unsupportedEdges":  [
+
+                                          ]
+                 }
+}

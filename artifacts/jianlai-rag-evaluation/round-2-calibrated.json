@@ -1,0 +1,72 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "round":  "round-2-calibrated",
+    "generatedAt":  "2026-08-09T19:38:34.8377587+08:00",
+    "bookId":  358679512818388992,
+    "chapterRange":  {
+                         "start":  1,
+                         "end":  100
+                     },
+    "counts":  {
+                   "aliases":  120,
+                   "edges":  37,
+                   "clues":  0,
+                   "nodes":  77
+               },
+    "nodeCountByType":  {
+                            "ORGANIZATION":  10,
+                            "LOCATION":  14,
+                            "CHARACTER":  53
+                        },
+    "edgeCountByType":  {
+                            "FAMILY_OF":  2,
+                            "LIVES_IN":  1,
+                            "SUPPORTS":  2,
+                            "OPPOSES":  5,
+                            "VISITS":  6,
+                            "SERVES":  2,
+                            "TRAVELS_WITH":  2,
+                            "INTERACTS_WITH":  10,
+                            "KNOWS":  3,
+                            "MENTORS":  1,
+                            "MEMBER_OF":  3
+                        },
+    "metrics":  {
+                    "isolatedNodeRate":  0.6234,
+                    "characterConnectedRate":  0.4151,
+                    "edgeNodeRatio":  0.4805,
+                    "lowValueAtomicEventRate":  0,
+                    "unsupportedEdgeEvidenceRate":  0,
+                    "aliasFragmentGroupCount":  1,
+                    "requiredRelationRecall":  0.6
+                },
+    "failures":  {
+                     "lowValueEvents":  [
+
+                                        ],
+                     "missingRequiredRelations":  [
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "宋集薪",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      }
+                                                  ],
+                     "aliasFragments":  [
+                                            {
+                                                "canonical":  "齐静春",
+                                                "fragments":  [
+                                                                  "齐先生",
+                                                                  "齐静春"
+                                                              ]
+                                            }
+                                        ],
+                     "unsupportedEdges":  [
+
+                                          ]
+                 }
+}

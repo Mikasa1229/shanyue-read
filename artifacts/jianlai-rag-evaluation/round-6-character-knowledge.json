@@ -1,0 +1,186 @@
+{
+  "schemaVersion": "1.0",
+  "round": "round-6-character-knowledge",
+  "generatedAt": "2026-08-09T23:15:44.1187126+08:00",
+  "bookId": 358679512818388992,
+  "chapterRange": {
+    "start": 1,
+    "end": 100
+  },
+  "counts": {
+    "nodes": 83,
+    "clues": 20,
+    "edges": 55,
+    "aliases": 9
+  },
+  "nodeCountByType": {
+    "EVENT": 7,
+    "CLUE": 20,
+    "CHARACTER": 38,
+    "LOCATION": 15,
+    "ORGANIZATION": 3
+  },
+  "edgeCountByType": {
+    "OPPOSES": 4,
+    "INTERACTS_WITH": 8,
+    "LIVES_IN": 1,
+    "KNOWS": 4,
+    "TRAVELS_WITH": 4,
+    "VISITS": 5,
+    "SUPPORTS": 1,
+    "FAMILY_OF": 3,
+    "SERVES": 1,
+    "PARTICIPATES_IN": 21,
+    "MENTORS": 3
+  },
+  "metrics": {
+    "isolatedNodeRate": 0.5783,
+    "characterConnectedRate": 0.5526,
+    "edgeNodeRatio": 0.6627,
+    "lowValueAtomicEventRate": 0.0,
+    "unsupportedEdgeEvidenceRate": 0.2727,
+    "aliasFragmentGroupCount": 0,
+    "canonicalAliasPollutionCount": 0,
+    "requiredRelationRecall": 0.4,
+    "genericCharacterRelationRate": 0.4444,
+    "identityResolutionRecall": 1.0,
+    "forbiddenRelationCount": 1,
+    "retrievalRecallAt5": 1.0,
+    "retrievalMrr": 0.8,
+    "spoilerBoundaryViolationCount": 0
+  },
+  "failures": {
+    "forbiddenRelations": [
+      {
+        "source": "陈平安",
+        "target": "姚老头",
+        "types": [
+          "MENTORS"
+        ],
+        "evidence": [
+          "姚老头性子孤僻，不近人情，动辄打骂陈平安"
+        ]
+      }
+    ],
+    "missingIdentityResolutions": [],
+    "missingRequiredRelations": [
+      {
+        "source": "陈平安",
+        "target": "刘羡阳",
+        "hit": false
+      },
+      {
+        "source": "陈平安",
+        "target": "泥瓶巷",
+        "hit": false
+      },
+      {
+        "source": "宋集薪",
+        "target": "泥瓶巷",
+        "hit": false
+      }
+    ],
+    "aliasPollution": [],
+    "lowValueEvents": [],
+    "aliasFragments": [],
+    "unsupportedEdges": [
+      {
+        "type": "INTERACTS_WITH",
+        "chapter": 28,
+        "evidence": "少年一路踩着细碎星光，出了小镇一直往小溪去，虽然是在夜幕里，可是陈平安跑得不比白天慢。陈平安刻意绕开了水位最深的廊桥位置，那边溪水要远远高出其它地方，陈平安拣选了一段溪水仅仅没过膝盖的溪流，他摘下背后..."
+      },
+      {
+        "type": "FAMILY_OF",
+        "chapter": 0,
+        "evidence": "二月二，龙抬头。暮色里，小镇名叫泥瓶巷的僻静地方，有位孤苦伶仃的清瘦少年，此时他正按照习俗，一手持蜡烛，一手持桃枝，照耀房梁、墙壁、木床等处，用桃枝敲敲打打，试图借此驱赶蛇蝎、蜈蚣等，嘴里念念有词，是..."
+      },
+      {
+        "type": "INTERACTS_WITH",
+        "chapter": 7,
+        "evidence": "陈平安回到院子后，眼皮子就一直在跳，左眼跳财，右眼跳灾。于是陈平安坐到门槛上，开始想象自己在拉坯，双手悬空，很快草鞋少年就进入忘我状态。少年勤勉是一方面，此举能够扛饿，也很重要，所以陈平安养成了一有心..."
+      },
+      {
+        "type": "OPPOSES",
+        "chapter": 14,
+        "evidence": "在少年走出泥瓶巷的时候，刚好碰到宋集薪的婢女稚圭，她在将那名高挑女子送去顾粲家后，没有急于回家，而是穿过巷弄那头，去逛了一遍杏花巷那边小铺子，虽然没有购买什么物件，心情仍是不错，一路蹦蹦跳跳，欢快轻盈..."
+      },
+      {
+        "type": "INTERACTS_WITH",
+        "chapter": 18,
+        "evidence": "在陈平安即将跑出院子的时候，黑衣少女突然喊道：“等等，我有些事情要跟你说。”陈平安假装没听到，正要打开院门的时候，少女提高嗓门，“陈平安！”陈平安只得转身跑回门槛那边，她脸色已经比之前红润几分，只是嗓..."
+      },
+      {
+        "type": "KNOWS",
+        "chapter": 14,
+        "evidence": "在少年走出泥瓶巷的时候，刚好碰到宋集薪的婢女稚圭，她在将那名高挑女子送去顾粲家后，没有急于回家，而是穿过巷弄那头，去逛了一遍杏花巷那边小铺子，虽然没有购买什么物件，心情仍是不错，一路蹦蹦跳跳，欢快轻盈..."
+      },
+      {
+        "type": "INTERACTS_WITH",
+        "chapter": 31,
+        "evidence": "陈平安挑水回到刘羡阳家的院子，倒入灶房水缸里，然后跑到房门口喊道：“刘羡阳，我用一下你家的柴禾油盐，要给宁姑娘炖鱼汤补补身体，可以吧？”美滋滋睡着回笼觉的刘羡阳被惊醒后，怒吼道：“姓陈的！你烦不烦，老..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 45,
+        "evidence": "【主线·已完成】第46章：“是我宁姚对不起你陈平安和刘羡阳”；第55章：“宁姚来到陈平安身边”；第55章：“陈平安收起宁姚借给自己的压衣刀”"
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 48,
+        "evidence": "【主线·已完成】第49章：“一堆破碎瓦砾当中，老猿耳朵微动，听到细微动静，咧咧嘴，弯腰拿起一块破瓦，掂量一番后，起身后迅猛砸出，瓦片如刀切豆腐一般，轻而易举穿透墙壁和屋顶，带着风雷之声破空而去，瓦片去..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      }
+    ],
+    "retrieval": [
+      {
+        "id": "early-home",
+        "hit": true,
+        "firstRank": 2,
+        "reciprocalRank": 0.5,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "liu-relationship",
+        "hit": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "ning-first-thread",
+        "hit": true,
+        "firstRank": 2,
+        "reciprocalRank": 0.5,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "qi-alias",
+        "hit": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "spoiler-boundary",
+        "hit": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      }
+    ]
+  }
+}

@@ -59,7 +59,7 @@ This record intentionally excludes provider keys, access tokens, model output te
 ## Real-model fixture run
 
 - A temporary canonical work was indexed from the copyright-cleared fixture using explicit UTF-8 requests; all `10/10` chapter calls returned HTTP `200`.
-- DeepSeek graph extraction produced `24` PostgreSQL nodes, `27` edges, `1` approved deterministic clue, and `20` LightRAG community cards. LLM claims carry `llm:deepseek:deepseek-chat` provenance and remain `PENDING` until review; rule claims remain `APPROVED`.
+- This historical DeepSeek fixture run produced `24` PostgreSQL nodes, `27` edges, one deterministic clue, and `20` LightRAG community cards under the review policy that existed on 2026-08-01. The current build no longer creates visible regex/rule claims; explicit user builds publish only LLM claims that pass strict evidence/type/alias gates, while administrators can subsequently set `PENDING` or `REJECTED`.
 - Runtime identity keys kept the two same-name characters separate: `character:黎青:城东的黎青` and `character:黎青:城西的黎青`. The extractor now expands shortened model hints from verbatim evidence before persistence.
 - A real DeepSeek answer request against the fixture completed through the Gateway SSE path with the required `meta`, `recommendations`, `graph`, and `done` events. The recorded prompt was bounded to LightRAG community/evidence/tool components; no whole-book or whole-graph context was sent.
 - Authenticated insight smoke against the indexed canonical work returned HTTP `200` for graph, clues, timeline, reading map, spoiler-safe capsule, similar-book DNA, reader link, reading plan, shelf groups, and preferences endpoints at reading chapter `0`.

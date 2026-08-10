@@ -10,6 +10,7 @@
 | 《剑来》真实语料 Benchmark | 使用已索引的 `canonicalBookId=358679512818388992`，覆盖章节回顾、人物图谱、伏笔、访谈、分岔地图、推荐和剧透拦截 | 默认否；真实路由时消耗 | `scripts/validate-agent-jianlai-benchmark.ps1` |
 | 在线运行 Benchmark | 验证 Gateway/SSE、真实 PostgreSQL、Milvus、Neo4j、ES、Reranker 的延迟、错误率和故障降级 | 默认否；真实路由时会消耗 | 综合脚本的 `-RunLive` 和专项脚本 |
 | 答案质量 Benchmark | 在授权 fixture 或《剑来》已授权测试题上评估事实正确性、引用 Precision/Recall、剧透拦截、图谱 F1、推荐可追溯性和中文表达 | 是 | 管理端 `answer-suite` + 人工/LLM 评审 |
+| 前 100 章抽取与检索迭代 | 统计真实图谱结构、别名污染、核心关系召回、伏笔、跨章事件、Recall@5、MRR 和越界词 | 抽取重建会消耗；只评估不消耗对话模型 | `scripts/evaluate-jianlai-rag-quality.ps1` |
 
 ## 二、指标和计算方法
 
@@ -17,6 +18,7 @@
 - **引用质量**：`citationPrecision = 有效引用数 / 引用总数`，`citationRecall = 覆盖 gold 证据的引用数 / gold 证据数`。有效引用必须是当前作品、已索引章节且不超过阅读边界。
 - **剧透拦截率**：越界问题中拒答或只提供边界内内容的比例；任何越界章节引用均失败。
 - **图谱质量**：人物/关系的实体和边 Precision/Recall/F1；另外单独记录同名实体误合并率和 36 条局部边预算违规率。
+- **人物校准质量**：记录人物连通率、`KNOWS/INTERACTS_WITH` 泛化人物边占比、正式称呼归并召回、禁止关系数和有向关系错误；禁止关系必须按方向匹配，不能把正确的 `老师 -> 学生` 误判成反向错误。
 - **伏笔、访谈、分岔地图**：分别检查状态、角色已知信息、事件因果是否有证据支持，并记录 unsupported-claim rate。
 - **推荐质量**：推荐作品 canonical 可解析率、来源可追溯率、去重率；离线排序可继续加入 Recall@K、NDCG@K。
 - **安全**：Prompt Injection、整本/整章提取、跨用户工具和写工具拒绝率，目标均为 100%。
@@ -63,6 +65,7 @@ pwsh ./scripts/validate-agent-benchmark.ps1 -RunLive `
 - 《剑来》专项集：12 道中文测试题，覆盖第 0、10、30、50、80、100、200、300 章等多个阅读边界；评测集只保存问题、边界和评分标准，不复制小说正文。
 - 真实 DeepSeek 5 案例证据门禁：`5/5 PASSED`（这证明链路和边界，不等同于大规模答案质量）。
 - 《剑来》：`1279/1279` 章节 READY、`20472` 切片；PostgreSQL 图节点 `26893`、图边 `399953`。
+- 旧的 `26893/399953` 是历史规则图规模，只作为历史记录，不代表当前模型证据图。清理后按新抽取器完成前 100 章五轮迭代，最终为 `94` 节点、`31` 边、`19` 条伏笔和 `1` 个跨章事件；核心关系召回 `80%`、真实查询 Recall@5 `100%`、MRR `0.6067`、越界词命中 `0`。详情见 `docs/剑来前100章RAG五轮迭代报告.md`。
 - 本地 Reranker 50 次稳定性、Milvus/Neo4j 故障降级、MCP 只读工具和 SSE 完整结束已有脚本验证。
 
 ## 六、解读报告
@@ -80,8 +83,13 @@ RAG 相关测试不只检查最终答案，还覆盖以下链路：
 - `PromptContextBudgetTest`：LightRAG 图、社区卡片、原文证据和工具结果的分段 Token 预算。
 
 本轮检索实现还增加了三项可验证的门禁：Milvus 在 Top-K 前通过过滤表达式同时限制
-`canonicalBookId` 和 `chapterIndex <= currentChapter`；PostgreSQL 的最多 600 条候选按
-章节倒序、主键正序稳定排序，避免分页/执行计划变化造成评测漂移；`RetrievalResult` 暴露候选总数、最终选中数和各数据源候选数，因而可以定位“召回不足”与“重排丢失”分别发生在哪里。
+`canonicalBookId` 和 `chapterIndex <= currentChapter`；PostgreSQL fallback 最多读取 5000 条候选，使长篇小说早期章节不会因“最近 600 条”尾部截断而完全失去召回资格；`RetrievalResult` 暴露候选总数、最终选中数和各数据源候选数，因而可以定位“召回不足”与“重排丢失”分别发生在哪里。
+
+前 100 章专项 gold 位于 `backend/reader-agent/src/test/resources/agent-jianlai-100-gold.json`。用户章号 1--100 对应内部 `chapterIndex` 0--99；检索评测明确使用 `maxChapterIndex=99`，不能把第 101 章误纳入防剧透边界。运行方式：
+
+```powershell
+pwsh -NoProfile -File scripts/evaluate-jianlai-rag-quality.ps1 -Round round-5-final -EvaluateRetrieval
+```
 
 《剑来》的公开知识基准由 `docs/剑来公开知识基准.md` 固定维护，机器可读 gold 位于
 `backend/reader-agent/src/test/resources/agent-jianlai-knowledge-gold.json`。它只保存公开事实三元组、剧透等级和评测问题，不保存小说正文；`JianLaiKnowledgeGoldDatasetTest` 会校验主键、事实/案例唯一性、引用完整性和正文缺失。网页来源不可访问或只有摘要时必须标记为 `UNVERIFIED`，不能把搜索摘要当作已核验事实。
