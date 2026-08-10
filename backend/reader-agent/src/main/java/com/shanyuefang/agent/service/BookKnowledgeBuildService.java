@@ -14,7 +14,12 @@ public interface BookKnowledgeBuildService {
     BookKnowledgeBuildTask start(long userId, long canonicalBookId, StartBookKnowledgeBuildDTO dto);
     List<BookKnowledgeBuildTask> myTasks(long userId, int limit);
     void deleteTask(long userId, long taskId);
+    void updateSharing(long userId, long canonicalBookId, boolean isPublic);
+    void deleteOwnedGraph(long userId, long canonicalBookId);
+    void ensureReadable(long userId, long canonicalBookId);
     Map<Long, Map<String, Object>> statuses(Collection<Long> canonicalBookIds);
     Map<String, Object> status(long canonicalBookId);
     void markCleared(long canonicalBookId);
+    void synchronizeCompletedRange(long canonicalBookId, int startChapter, int endChapter, boolean replaceExisting);
+    void synchronizeAllIndexedChapters(long canonicalBookId, boolean replaceExisting);
 }

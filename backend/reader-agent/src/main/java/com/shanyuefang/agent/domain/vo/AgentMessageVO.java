@@ -11,5 +11,6 @@ public class AgentMessageVO {
     private String role;
     private String content;
     private List<CitationVO> citations;
+    private List<BookReferenceVO> bookReferences;
     private LocalDateTime createdAt;
 }

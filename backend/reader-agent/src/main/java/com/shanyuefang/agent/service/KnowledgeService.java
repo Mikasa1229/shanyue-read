@@ -38,6 +38,15 @@ public interface KnowledgeService {
     void buildGraphRange(long canonicalBookId, int startChapter, int endChapter,
                          StructuredGraphExtractor.ModelConfig modelConfig,
                          java.util.function.IntConsumer chapterProgress);
+    /** Atomically replaces graph claims while retaining durable documents and chunks. */
+    void replaceGraphRange(long canonicalBookId, int startChapter, int endChapter,
+                           StructuredGraphExtractor.ModelConfig modelConfig,
+                           java.util.function.IntConsumer chapterProgress);
+    /** Recomputes story events and clues without resending chapter text for entity extraction. */
+    void rebuildDerivedInsights(long canonicalBookId, int startChapter, int endChapter,
+                                StructuredGraphExtractor.ModelConfig modelConfig);
+    void rebuildCharacterKnowledge(long canonicalBookId, int startChapter, int endChapter,
+                                   StructuredGraphExtractor.ModelConfig modelConfig);
     void clearGraph(long canonicalBookId);
 
     /** Repairs optional evidence projections without re-extracting or rewriting graph claims. */

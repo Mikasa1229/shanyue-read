@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0",
+  "canonicalBookId": 358679512818388992,
+  "chapterRange": {"start": 1, "end": 100},
+  "description": "仅用于《剑来》前100章抽取与检索质量评估，不包含后期百科事实。",
+  "canonicalEntities": [
+    {"name": "陈平安", "type": "CHARACTER", "aliases": ["草鞋少年"]},
+    {"name": "刘羡阳", "type": "CHARACTER", "aliases": []},
+    {"name": "宋集薪", "type": "CHARACTER", "aliases": []},
+    {"name": "顾璨", "type": "CHARACTER", "aliases": []},
+    {"name": "宁姚", "type": "CHARACTER", "aliases": ["黑衣少女"]},
+    {"name": "齐静春", "type": "CHARACTER", "aliases": ["齐先生"]},
+    {"name": "泥瓶巷", "type": "LOCATION", "aliases": []},
+    {"name": "杏花巷", "type": "LOCATION", "aliases": []},
+    {"name": "小镇", "type": "LOCATION", "aliases": []}
+  ],
+  "requiredRelations": [
+    {"source": "陈平安", "target": "刘羡阳", "acceptedTypes": ["KNOWS", "SUPPORTS", "TRAVELS_WITH", "INTERACTS_WITH"]},
+    {"source": "陈平安", "target": "宋集薪", "acceptedTypes": ["KNOWS", "OPPOSES", "INTERACTS_WITH"]},
+    {"source": "陈平安", "target": "宁姚", "acceptedTypes": ["KNOWS", "SUPPORTS", "TRAVELS_WITH", "INTERACTS_WITH"]},
+    {"source": "陈平安", "target": "泥瓶巷", "acceptedTypes": ["LIVES_IN", "VISITS"]},
+    {"source": "宋集薪", "target": "泥瓶巷", "acceptedTypes": ["LIVES_IN", "VISITS"]}
+  ],
+  "forbiddenRelations": [
+    {"source": "陈平安", "target": "顾璨", "types": ["FAMILY_OF", "MENTORS"]},
+    {"source": "陈平安", "target": "刘羡阳", "types": ["FAMILY_OF", "MENTORS"]},
+    {"source": "陈平安", "target": "姚老头", "types": ["MENTORS"]}
+  ],
+  "retrievalCases": [
+    {"id": "early-home", "query": "陈平安早年住在哪里？", "expectedTerms": ["陈平安", "泥瓶巷"], "maxChapterIndex": 99},
+    {"id": "liu-relationship", "query": "刘羡阳和陈平安在前期有什么交集？", "expectedTerms": ["刘羡阳", "陈平安"], "maxChapterIndex": 99},
+    {"id": "ning-first-thread", "query": "宁姚在小镇早期与陈平安发生了什么？", "expectedTerms": ["宁姚", "陈平安"], "maxChapterIndex": 99},
+    {"id": "qi-alias", "query": "齐先生是谁？", "expectedTerms": ["齐先生", "齐静春"], "maxChapterIndex": 99},
+    {"id": "spoiler-boundary", "query": "只根据前100章说明陈平安此时的经历，不要透露后续身份。", "expectedTerms": ["陈平安"], "forbiddenTerms": ["隐官", "落魄山宗主", "裴钱"], "maxChapterIndex": 99}
+  ]
+}

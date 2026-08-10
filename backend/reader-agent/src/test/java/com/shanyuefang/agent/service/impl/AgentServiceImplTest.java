@@ -1,6 +1,8 @@
 package com.shanyuefang.agent.service.impl;
 
 import com.shanyuefang.agent.mapper.UserModelConfigMapper;
+import com.shanyuefang.agent.domain.entity.AgentMessage;
+import com.shanyuefang.agent.domain.vo.BookReferenceVO;
 import com.shanyuefang.common.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 
@@ -10,6 +12,10 @@ import static org.mockito.Mockito.when;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ArrayList;
+import java.util.List;
 
 class AgentServiceImplTest {
     @Test
@@ -51,6 +57,57 @@ class AgentServiceImplTest {
         when(mapper.deleteOwnedConfig(7L, 11L)).thenReturn(0);
 
         assertThrows(BusinessException.class, () -> serviceWith(mapper).deleteModelConfig(7L, 11L));
+    }
+
+    @Test
+    void removesOnlyTheNewestCopyOfTheCurrentUserMessage() {
+        List<AgentMessage> history = new ArrayList<>(List.of(
+                message("USER", "推荐一本短篇"), message("ASSISTANT", "旧回答"), message("USER", "推荐一本短篇")));
+
+        AgentServiceImpl.removeCurrentUserMessage(history, "推荐一本短篇");
+
+        assertEquals(2, history.size());
+        assertEquals("推荐一本短篇", history.get(0).getContent());
+        assertEquals("旧回答", history.get(1).getContent());
+    }
+
+    @Test
+    void turnsLatestNegativePreferenceIntoAnExplicitHardConstraint() {
+        String summary = AgentServiceImpl.currentConstraintSummary("不要恋爱的小说，推荐一点有名的网文");
+
+        assertTrue(summary.contains("硬性排除条件"));
+        assertTrue(summary.contains("恋爱"));
+        assertTrue(summary.contains("覆盖历史"));
+    }
+
+    @Test
+    void exposesOnlyCatalogCandidatesActuallyMentionedInTheAnswer() {
+        List<BookReferenceVO> candidates = List.of(
+                new BookReferenceVO(1L, "剑来", "烽火戏诸侯", "", 2L, "book-url", ""),
+                new BookReferenceVO(3L, "雪中悍刀行", "烽火戏诸侯", "", 2L, "other-url", ""));
+
+        List<BookReferenceVO> references = AgentServiceImpl.referencedBooks("我推荐《剑来》，平台已有可用书源。", candidates);
+
+        assertEquals(1, references.size());
+        assertEquals("剑来", references.get(0).getTitle());
+    }
+
+    @Test
+    void preservesVerifiedReferencesWhenModelDoesNotRepeatExactTitle() {
+        List<BookReferenceVO> candidates = List.of(
+                new BookReferenceVO(1L, "诡秘之主", "爱潜水的乌贼", "", 2L, "book-url", ""));
+
+        List<BookReferenceVO> references = AgentServiceImpl.referencedBooks("这一本可以直接打开阅读。", candidates);
+
+        assertEquals(1, references.size());
+        assertEquals("诡秘之主", references.get(0).getTitle());
+    }
+
+    private AgentMessage message(String role, String content) {
+        AgentMessage message = new AgentMessage();
+        message.setRole(role);
+        message.setContent(content);
+        return message;
     }
 
     private AgentServiceImpl serviceWith(UserModelConfigMapper mapper) {

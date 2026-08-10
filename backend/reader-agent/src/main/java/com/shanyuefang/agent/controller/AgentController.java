@@ -224,6 +224,7 @@ public class AgentController {
     public R<KnowledgeGraphVO> graph(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
                                      @RequestParam(defaultValue = "0") int currentChapter,
                                      @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        bookKnowledgeBuildService.ensureReadable(userId, canonicalBookId);
         return R.ok(knowledgeService.graph(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed)));
     }
 
@@ -254,6 +255,19 @@ public class AgentController {
         return R.ok();
     }
 
+    @PutMapping("/books/{canonicalBookId}/knowledge-sharing")
+    public R<Void> updateKnowledgeSharing(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
+                                          @RequestParam boolean isPublic) {
+        bookKnowledgeBuildService.updateSharing(userId, canonicalBookId, isPublic);
+        return R.ok();
+    }
+
+    @DeleteMapping("/books/{canonicalBookId}/knowledge-graph")
+    public R<Void> deleteOwnedKnowledgeGraph(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId) {
+        bookKnowledgeBuildService.deleteOwnedGraph(userId, canonicalBookId);
+        return R.ok();
+    }
+
     @GetMapping("/books/knowledge-status")
     public R<Map<Long, Map<String, Object>>> knowledgeStatuses(@RequestParam List<Long> canonicalBookIds) {
         return R.ok(bookKnowledgeBuildService.statuses(canonicalBookIds));
@@ -268,6 +282,7 @@ public class AgentController {
     public R<List<ClueVO>> clues(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
                                  @RequestParam(defaultValue = "0") int currentChapter,
                                  @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        bookKnowledgeBuildService.ensureReadable(userId, canonicalBookId);
         return R.ok(knowledgeService.clues(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed)));
     }
 
@@ -275,6 +290,7 @@ public class AgentController {
     public R<List<String>> timeline(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
                                     @RequestParam(defaultValue = "0") int currentChapter,
                                     @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        bookKnowledgeBuildService.ensureReadable(userId, canonicalBookId);
         return R.ok(knowledgeService.timeline(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed)));
     }
 
@@ -282,6 +298,7 @@ public class AgentController {
     public R<ReadingMapVO> readingMap(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
                                       @RequestParam(defaultValue = "0") int currentChapter,
                                       @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        bookKnowledgeBuildService.ensureReadable(userId, canonicalBookId);
         return R.ok(knowledgeService.readingMap(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed)));
     }
 
@@ -289,6 +306,7 @@ public class AgentController {
     public R<PlotCapsuleVO> capsule(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
                                     @RequestParam(defaultValue = "0") int currentChapter,
                                     @RequestParam(defaultValue = "false") boolean spoilersConfirmed) {
+        bookKnowledgeBuildService.ensureReadable(userId, canonicalBookId);
         int boundary = spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed);
         List<String> allTimeline = knowledgeService.timeline(canonicalBookId, boundary);
         // Show the reader's latest story context rather than the first indexed cards.
@@ -303,6 +321,7 @@ public class AgentController {
                                  @RequestParam(defaultValue = "0") int currentChapter,
                                  @RequestParam(defaultValue = "false") boolean spoilersConfirmed,
                                  @RequestParam(defaultValue = "6") int limit) {
+        bookKnowledgeBuildService.ensureReadable(userId, canonicalBookId);
         return R.ok(knowledgeService.similarBooks(canonicalBookId, spoilerBoundaryService.clamp(userId, canonicalBookId, currentChapter, spoilersConfirmed), limit));
     }
 

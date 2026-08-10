@@ -35,4 +35,67 @@ class StructuredGraphExtractorTest {
 
         assertEquals(0, output.entities().size());
     }
+
+    @Test
+    void acceptsAProviderAliasReturnedAsOneString() throws Exception {
+        java.lang.reflect.Method method = StructuredGraphExtractor.class.getDeclaredMethod("normalizeAliases", Object.class);
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<String> aliases = (List<String>) method.invoke(new StructuredGraphExtractor(null, null), "少年");
+
+        assertEquals(List.of("少年"), aliases);
+    }
+
+    @Test
+    void acceptsCanonicalRelationEndpointWhenEvidenceUsesVerifiedAlias() {
+        String chapter = "黑衣少女宁静地看着陈平安，随后与陈平安同行。";
+        StructuredGraphExtractor.Extraction output = StructuredGraphExtractor.validateEvidence(
+                new StructuredGraphExtractor.Extraction(List.of(
+                        new StructuredGraphExtractor.Entity("宁姚", "CHARACTER", "", List.of("黑衣少女"), "黑衣少女宁静地看着陈平安", 0.9D),
+                        new StructuredGraphExtractor.Entity("陈平安", "CHARACTER", "", List.of(), "黑衣少女宁静地看着陈平安", 0.9D)),
+                        List.of(new StructuredGraphExtractor.Relation("宁姚", "", "陈平安", "", "TRAVELS_WITH",
+                                "黑衣少女宁静地看着陈平安，随后与陈平安同行", 0.9D))), chapter);
+
+        assertEquals(2, output.entities().size());
+        assertEquals(1, output.relations().size());
+    }
+
+    @Test
+    void normalizesOnlyKnownProviderNodeTypeAliases() throws Exception {
+        java.lang.reflect.Method method = StructuredGraphExtractor.class.getDeclaredMethod("normalizeNodeType", String.class);
+        method.setAccessible(true);
+        StructuredGraphExtractor extractor = new StructuredGraphExtractor(null, null);
+
+        assertEquals("CHARACTER", method.invoke(extractor, "PERSON"));
+        assertEquals("LOCATION", method.invoke(extractor, "place"));
+        assertEquals(null, method.invoke(extractor, "OBJECT"));
+    }
+
+    @Test
+    void acceptsSummarizedAtomicEventNameWithVerbatimEvidence() {
+        String chapter = "陈平安拒绝收下锦衣少年给出的袋子，两人因此发生争执。";
+        StructuredGraphExtractor.Extraction output = StructuredGraphExtractor.validateEvidence(
+                new StructuredGraphExtractor.Extraction(List.of(new StructuredGraphExtractor.Entity(
+                        "陈平安拒绝酬谢并引发争执", "EVENT", "", List.of(),
+                        "陈平安拒绝收下锦衣少年给出的袋子，两人因此发生争执", 0.88D)), List.of()), chapter);
+
+        assertEquals(1, output.entities().size());
+    }
+
+    @Test
+    void characterKnowledgeCarriesEvidenceForIdentityAndSpecificRelations() {
+        StructuredGraphExtractor.ChapterFact reveal = new StructuredGraphExtractor.ChapterFact(1L, 15,
+                "黑衣少女表明自己是宁姚，随后宁姚教陈平安辨认药方。");
+        StructuredGraphExtractor.CharacterKnowledgeExtraction extraction =
+                new StructuredGraphExtractor.CharacterKnowledgeExtraction(
+                        List.of(new StructuredGraphExtractor.IdentityResolution(
+                                "宁姚", "黑衣少女", List.of(reveal), 0.96D)),
+                        List.of(new StructuredGraphExtractor.CharacterRelation(
+                                "宁姚", "陈平安", "MENTORS", List.of(reveal), 0.91D)));
+
+        assertEquals("宁姚", extraction.identities().get(0).canonicalName());
+        assertEquals("黑衣少女", extraction.identities().get(0).mention());
+        assertEquals("MENTORS", extraction.relations().get(0).type());
+        assertEquals(15, extraction.relations().get(0).evidence().get(0).chapterIndex());
+    }
 }

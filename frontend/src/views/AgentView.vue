@@ -3,6 +3,8 @@
     <div class="container">
       <p v-if="loadNotice" class="agent-load-notice">{{ loadNotice }}</p>
 
+      <div v-if="actionNotice" class="agent-action-notice" :class="`is-${actionNotice.type}`" role="status">{{ actionNotice.message }}</div>
+      <div v-if="actionNotice" class="agent-action-notice" :class="`is-${actionNotice.type}`" role="status">{{ actionNotice.message }}</div>
       <nav class="agent-tabs">
         <button v-for="tab in tabs" :key="tab.id" :class="{ active: activeTab === tab.id }" @click="selectTab(tab.id)">{{ tab.label }}</button>
       </nav>
@@ -162,8 +164,8 @@
         <div class="task-list">
           <p v-if="!buildTasks.length" class="task-empty">还没有图谱构建任务。进入书籍洞察后，选择章节范围即可创建第一个任务。</p>
             <article v-for="task in buildTasks" :key="task.id" class="task-row">
-              <div class="task-row-main"><span class="task-status" :class="task.status.toLowerCase()">{{ task.status === 'COMPLETED' ? '已完成' : task.status === 'FAILED' ? '失败' : task.status === 'RUNNING' ? '构建中' : '等待中' }}</span><strong>作品 #{{ task.canonicalBookId }}</strong><small>第 {{ task.startChapter || 1 }} 章至第 {{ task.endChapter || task.totalChapters || 1 }} 章 · {{ task.modelMode === 'BYOK' ? '个人模型' : `预计 ${task.estimatedCredits || 0} 积分` }}</small></div>
-              <div class="task-row-progress"><div class="task-progress-label"><b>{{ task.completedChapters || 0 }} / {{ task.totalChapters || 0 }} 章</b><small>{{ Math.min(100, Math.round((task.completedChapters || 0) / Math.max(1, task.totalChapters || 1) * 100)) }}%</small></div><div><i :style="{ width: `${Math.min(100, Math.round((task.completedChapters || 0) / Math.max(1, task.totalChapters || 1) * 100))}%` }" /></div><small>{{ task.message || task.errorMessage || '等待任务状态更新' }}</small></div>
+              <div class="task-row-main"><span class="task-status" :class="task.status.toLowerCase()">{{ task.status === 'COMPLETED' ? '已完成' : task.status === 'FAILED' ? '失败' : task.status === 'RUNNING' ? '构建中' : '等待中' }}</span><strong>《{{ taskBookTitle(task) }}》</strong><small>作品编号 {{ task.canonicalBookId }} · 第 {{ task.startChapter || 1 }} 章至第 {{ task.endChapter || task.totalChapters || 1 }} 章 · {{ task.modelMode === 'BYOK' ? '个人模型' : `预计 ${task.estimatedCredits || 0} 积分` }}</small></div>
+              <div class="task-row-progress"><div class="task-progress-label"><b>{{ task.completedChapters || 0 }} / {{ task.totalChapters || 0 }} 章</b><small>{{ taskProgressPercent(task) }}%</small></div><div class="task-progress-track" :class="task.status.toLowerCase()"><i :style="{ width: `${taskProgressPercent(task)}%` }" /></div><small>{{ task.message || task.errorMessage || '等待任务状态更新' }}</small></div>
               <button v-if="canDeleteBuildTask(task)" type="button" class="task-delete" @click="deleteBuildTask(task)">删除记录</button>
             </article>
         </div>
@@ -187,16 +189,44 @@
         <div v-if="insightBookId" class="insight-workspace">
           <aside class="insight-nav" aria-label="洞察功能">
             <span>功能导航</span>
-            <button v-for="item in [{ id: 'capsule', label: '剧情胶囊', note: '已读回顾' }, { id: 'graph', label: '人物关系', note: '关系图谱' }, { id: 'clues', label: '伏笔雷达', note: '线索状态' }, { id: 'map', label: '阅读地图', note: '事件脉络' }, { id: 'dna', label: '相似书 DNA', note: '作品气质' }, { id: 'shelf', label: '书架管家', note: '阅读安排' }]" :key="item.id" :class="{ active: insightMode === item.id }" type="button" @click="insightMode = item.id"><b>{{ item.label }}</b><small>{{ item.note }}</small></button>
+            <button v-for="item in [{ id: 'capsule', label: '剧情胶囊', note: '已读回顾' }, { id: 'graph', label: '人物关系', note: '关系图谱' }, { id: 'clues', label: '线索板', note: '明确未解' }, { id: 'map', label: '阅读地图', note: '事件脉络' }, { id: 'dna', label: '相似书 DNA', note: '作品气质' }, { id: 'shelf', label: '书架管家', note: '阅读安排' }]" :key="item.id" :class="{ active: insightMode === item.id }" type="button" @click="insightMode = item.id"><b>{{ item.label }}</b><small>{{ item.note }}</small></button>
           </aside>
           <section class="insight-stage">
             <header class="insight-stage-head"><div><span class="agent-eyebrow">{{ insightModeLabel }}</span><h3>{{ insightModeTitle }}</h3></div><div class="insight-stage-actions"><div v-if="insightMode === 'shelf'" class="insight-subtabs"><button :class="{ active: shelfPanel === 'recommendations' }" type="button" @click="shelfPanel = 'recommendations'">推荐</button><button :class="{ active: shelfPanel === 'plan' }" type="button" @click="shelfPanel = 'plan'">计划</button><button :class="{ active: shelfPanel === 'groups' }" type="button" @click="shelfPanel = 'groups'">分组</button></div><button v-if="knowledgeBuild?.status !== 'READY'" type="button" class="build-index-button" @click="openKnowledgeBuildDialog">{{ knowledgeBuild?.status === 'RUNNING' || knowledgeBuild?.status === 'QUEUED' ? '查看构建任务' : '构建 AI 知识图谱' }}</button></div></header>
             <div v-if="insightError" class="card insight-error" role="alert"><strong>这次洞察没有完成</strong><p>{{ insightError }}</p><button class="btn btn-ghost btn-sm" type="button" @click="loadInsights">重新分析</button></div>
             <div v-else-if="insightLoaded" class="insight-grid">
           <article v-show="insightMode === 'capsule'" class="insight-card card"><span>00</span><h2>无剧透剧情回忆胶囊</h2><p v-if="!capsule?.timeline?.length">暂时没有可用的已读剧情摘要。</p><ul v-else><li v-for="item in capsule.timeline.slice(0, 4)" :key="item">{{ item }} <button class="evidence-jump" @click="openInsightChapter(timelineChapter(item))">查看原文</button></li></ul><small>{{ capsule?.safetyNote }}</small></article>
-          <article v-show="insightMode === 'graph'" class="insight-card card graph-card"><span>01</span><h2>人物关系图谱</h2><p v-if="!graph.nodes?.length">当前还没有足够的已读内容来建立关系图谱。</p><template v-else><div class="graph-tools"><button v-for="type in graphTypes" :key="type" :class="{ active: graphTypeFilter === type }" @click="graphTypeFilter = type">{{ graphTypeLabel(type) }}</button></div><svg class="relationship-map" viewBox="0 0 360 230" role="img" aria-label="基于已读内容的人物关系图谱"><line v-for="edge in visibleGraphEdges" :key="`${edge.source}-${edge.target}-${edge.relation}`" :class="edge.confidence < 0.7 ? 'tentative' : ''" :x1="graphPoint(graphNodeIndex(edge.source)).x" :y1="graphPoint(graphNodeIndex(edge.source)).y" :x2="graphPoint(graphNodeIndex(edge.target)).x" :y2="graphPoint(graphNodeIndex(edge.target)).y" @click="selectGraphEvidence(edge, 'EDGE')" /><g v-for="(node, index) in visibleGraphNodes" :key="node.id" :transform="`translate(${graphPoint(index).x} ${graphPoint(index).y})`" @click="selectGraphEvidence(node, 'NODE')"><circle :class="node.type === 'CHARACTER' ? 'character' : 'other'" r="20" /><text y="4">{{ node.name.slice(0, 4) }}</text></g></svg><div v-if="selectedGraphEvidence" class="graph-evidence"><b>{{ selectedGraphEvidence.label }}</b><span>第 {{ selectedGraphEvidence.chapter + 1 }} 章 · 可信度 {{ Math.round((selectedGraphEvidence.confidence || 0) * 100) }}%</span><p>{{ selectedGraphEvidence.evidence || '暂时没有可展示的原文依据。' }}</p><button class="evidence-jump" @click="openInsightChapter(selectedGraphEvidence.chapter)">查看原文</button></div><ul><li v-for="node in visibleGraphNodes.slice(0, 6)" :key="node.id"><span>{{ node.name }} · {{ graphTypeLabel(node.type) }} · 第 {{ node.firstChapter + 1 }} 章</span><button class="evidence-jump" @click="openInsightChapter(node.firstChapter)">查看依据</button><button v-if="node.type === 'CHARACTER'" class="character-interview" @click="startCharacterInterview(node)">角色访谈</button></li></ul></template><small>{{ graph.edges?.length || 0 }} 条关系仅来自已读章节；虚线表示可信度较低。</small></article>
-          <article v-show="insightMode === 'clues'" class="insight-card card"><span>02</span><h2>伏笔雷达</h2><p v-if="!clues.length">这一阅读范围内暂时没有发现明显线索。</p><ul v-else><li v-for="clue in clues.slice(0, 5)" :key="`${clue.chapterIndex}-${clue.excerpt}`">第 {{ clue.chapterIndex + 1 }} 章 · {{ clue.excerpt }} <em class="clue-status">{{ clueStatusLabel(clue.status) }}</em><button class="evidence-jump" @click="openInsightChapter(clue.chapterIndex)">查看依据</button></li></ul><small>只分析已读章节，后续剧情的揭示会在你读到后才出现。</small></article>
-          <article v-show="insightMode === 'map'" class="insight-card card reading-map-card"><span>03</span><h2>阅读分岔地图</h2><p v-if="!readingMap.events?.length">继续阅读并建立索引后，这里会生成故事事件地图。</p><template v-else><div class="graph-tools"><button v-for="branch in readingMapBranches" :key="branch" :class="{ active: readingMapBranch === branch }" @click="readingMapBranch = branch">{{ branchLabel(branch) }}</button></div><ol class="reading-map-events"><li v-for="event in visibleReadingMapEvents" :key="event.id"><strong>第 {{ event.chapterIndex + 1 }} 章 · {{ event.name }}</strong><em class="clue-status">{{ branchLabel(event.branch) }}</em><p>{{ event.evidence || '暂时没有可展示的事件依据。' }}</p><small>可信度 {{ Math.round((event.confidence || 0) * 100) }}% · {{ eventLinkCount(event.id) }} 条关联</small><button class="evidence-jump" @click="openInsightChapter(event.chapterIndex)">查看依据</button></li></ol></template><small>{{ visibleReadingMapLinks.length }} 条因果关联，仅展示已读范围。</small></article>
+          <article v-show="insightMode === 'graph'" class="insight-card card graph-card">
+            <div class="graph-card-title"><span>01</span><div><h2>人物关系星球</h2><p>把关系放到同一颗星球上看：拖动即可从不同视角观察人物、地点与事件。</p></div></div>
+            <p v-if="!graph.nodes?.length">当前还没有足够的已读内容来建立关系图谱。</p>
+            <template v-else>
+              <div class="globe-toolbar">
+                <div class="graph-tools" aria-label="图谱类型筛选"><button v-for="type in graphTypes" :key="type" :class="{ active: graphTypeFilter === type }" @click="graphTypeFilter = type">{{ graphTypeLabel(type) }}</button></div>
+                <div class="globe-toolbar-status"><b>{{ visibleGraphNodes.length }}</b> 个节点 · <b>{{ visibleGraphEdges.length }}</b> 条已验证关系 <button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="globe-expand" @click="openRelationshipCanvas">全屏查看</button></div>
+              </div>
+              <div class="relationship-globe-shell">
+                <canvas ref="relationshipGlobe" class="relationship-globe" role="img" tabindex="0" aria-label="可旋转的人物关系星球。拖动旋转，点击人物或连线查看依据。" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas>
+                <div class="globe-hud globe-hud-top"><span>LightRAG 关系星球</span><i></i><span>拖动旋转 · 点击查看依据</span></div>
+                <div class="globe-hud globe-hud-bottom"><span><i class="legend-dot character"></i>人物</span><span><i class="legend-dot location"></i>地点/组织</span><span><i class="legend-dot event"></i>事件/线索</span></div>
+              </div>
+              <div class="graph-inspector">
+                <div v-if="selectedGraphEvidence" class="graph-evidence"><span>当前选中</span><b>{{ selectedGraphEvidence.label }}</b><small>第 {{ selectedGraphEvidence.chapter + 1 }} 章 · 可信度 {{ Math.round((selectedGraphEvidence.confidence || 0) * 100) }}%</small><p>{{ selectedGraphEvidence.evidence || '暂时没有可展示的原文依据。' }}</p><button class="evidence-jump" @click="showEvidenceSource(selectedGraphEvidence)">查看原文依据</button></div>
+                <div v-else class="graph-evidence graph-evidence-empty"><span>关系阅读提示</span><b>先旋转，再进入一条关系</b><p>前景节点更清晰；点击人物、地点或关系连线，可查看这条图谱的原文依据。</p></div>
+                <div class="graph-node-list" aria-label="当前展示的核心节点"><button v-for="node in visibleGraphNodes.slice(0, 5)" :key="node.id" type="button" @click="selectGraphEvidence(node, 'NODE')"><i :class="node.type"></i><span>{{ node.name }}</span><small>{{ graphTypeLabel(node.type) }}</small></button></div>
+              </div>
+            </template>
+            <small class="graph-footnote">{{ graph.edges?.length || 0 }} 条关系仅来自已读章节；较淡的连线表示可信度较低。</small>
+          </article>
+          <article v-show="insightMode === 'clues'" class="insight-card card clue-board-card"><span>02</span><h2>未解线索</h2><p v-if="!clues.length">已读范围内没有达到“明确未解”阈值的线索，因此不把普通物品或陌生名词误报为伏笔。</p><ul v-else><li v-for="clue in clues.slice(0, 5)" :key="`${clue.chapterIndex}-${clue.excerpt}`">第 {{ clue.chapterIndex + 1 }} 章 · {{ clue.excerpt }} <em class="clue-status">{{ clueStatusLabel(clue.status) }}</em><button class="evidence-jump" @click="showEvidenceSource({ label: '线索原文', chapter: clue.chapterIndex, evidence: clue.excerpt, confidence: 1 })">查看原文依据</button></li></ul><small>这里只显示原文中有明确未解信号的线索；后续揭示仅会在读到对应章节后出现。</small></article>
+          <article v-show="insightMode === 'map'" class="insight-card card reading-map-card">
+            <div class="map-card-title"><span>03</span><div><h2>故事事件地图</h2><p>不是重复剧情摘要：这里按事件顺序展示主线推进，并标明它与下一段故事的关联方式。</p></div></div>
+            <p v-if="!readingMap.events?.length">继续阅读并建立索引后，这里会生成可追溯的故事事件地图。</p>
+            <template v-else>
+              <div class="map-toolbar"><div class="graph-tools"><button v-for="branch in readingMapBranches" :key="branch" :class="{ active: readingMapBranch === branch }" @click="readingMapBranch = branch">{{ branchLabel(branch) }}</button></div><small><b>{{ visibleReadingMapLinks.length }}</b> 条事件链路</small></div>
+              <ol class="reading-map-events story-thread"><li v-for="(event, index) in visibleReadingMapEvents" :key="event.id"><div class="event-marker"><b>{{ String(event.chapterIndex + 1).padStart(2, '0') }}</b><i /></div><div class="event-card"><div><em>{{ branchLabel(event.branch) }}</em><strong>{{ event.name }}</strong></div><p>{{ event.evidence || '暂时没有可展示的事件依据。' }}</p><footer><small>可信度 {{ Math.round((event.confidence || 0) * 100) }}%</small><span v-if="mapNextLink(event.id)">{{ mapNextLink(event.id).relation }}</span><button class="evidence-jump" @click="showEvidenceSource({ label: event.name, chapter: event.chapterIndex, evidence: event.evidence, confidence: event.confidence })">查看原文依据</button></footer></div><div v-if="index < visibleReadingMapEvents.length - 1" class="event-connector"><span>{{ mapConnectorLabel(event.id, visibleReadingMapEvents[index + 1]?.id) }}</span></div></li></ol>
+            </template>
+            <small class="map-footnote">“角色串联”表示相邻事件共享已验证人物，不会被误写成因果；只有明确抽取到的因果关系才会标注为“导致”“推动”等。</small>
+          </article>
           <article v-show="insightMode === 'dna'" class="insight-card card"><span>04</span><h2>相似书籍 DNA</h2><p v-if="!similarBooks.length">目前没有足够的已读作品可供比较。</p><ul v-else><li v-for="book in similarBooks" :key="book.canonicalBookId"><strong>{{ book.title || `作品 #${book.canonicalBookId}` }}</strong><span v-if="book.author"> · {{ book.author }}</span> · 相似度 {{ Math.round(book.similarity * 100) }}%<br />{{ book.explanation }} <button class="btn btn-ghost btn-sm" @click="openRecommendedBook(book)">打开作品</button></li></ul><small>依据已索引的文本特征比较，不凭空添加标签。</small></article>
           <article v-show="insightMode === 'shelf' && shelfPanel === 'recommendations'" class="insight-card card"><span>05</span><h2>动态书架管家</h2><p v-if="!shelfRecommendations.length">你的书架还在等待第一次阅读反馈。</p><ul v-else><li v-for="item in shelfRecommendations" :key="item.title"><strong>{{ item.title }}</strong><br />{{ item.reason }}<span v-if="item.canonicalBookId" class="recommendation-actions"><button @click="saveRecommendationFeedback(item, 'OPEN')">查看</button><button @click="saveRecommendationFeedback(item, 'LIKE')">有帮助</button><button @click="confirmAddToShelf(item)">加入书架</button><button @click="saveRecommendationFeedback(item, 'DISMISS')">暂不推荐</button></span></li></ul><small>加入书架前一定会征得你的确认。</small></article>
           <article v-show="insightMode === 'shelf' && shelfPanel === 'plan'" class="insight-card card reading-plan-card"><span>06</span><h2>阅读计划</h2><p>{{ readingPlan?.summary || '正在根据你的阅读记录生成计划…' }}</p><ul v-if="readingPlan?.items?.length"><li v-for="item in readingPlan.items" :key="item.canonicalBookId"><strong>{{ item.title }}</strong><br />今天建议阅读 {{ item.suggestedChaptersToday }} 章 · 当前读到第 {{ item.currentChapter + 1 }} 章<span v-if="item.totalChapters"> / 共 {{ item.totalChapters }} 章</span><br /><small>{{ item.reason }}</small></li></ul><small>计划按规则生成并遵守防剧透原则，不会提前读取或把书架内容发送给模型。</small></article>
@@ -234,6 +264,20 @@
     </div>
   </Teleport>
   <Teleport to="body">
+    <section v-if="showRelationshipCanvas" class="relationship-canvas-dialog" role="dialog" aria-modal="true" aria-label="人物关系星球全屏画布" @keydown.esc="closeRelationshipCanvas">
+      <header class="relationship-canvas-head"><div><span>LightRAG / 关系视图</span><h2>{{ selectedInsightBook?.bookName || '当前作品' }}的人物关系星球</h2><p>拖动旋转，滚轮或触控板可缩放视角；每条连线均标注关系类型，点击可查看可追溯的章节原文。</p></div><div><span>{{ visibleGraphNodes.length }} 个节点</span><span>{{ visibleGraphEdges.length }} 条关系</span><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="relationship-canvas-close" @click="closeRelationshipCanvas">退出全屏</button></div></header>
+      <div class="relationship-canvas-stage"><canvas ref="fullRelationshipGlobe" class="relationship-globe" tabindex="0" role="img" aria-label="可旋转的人物关系星球全屏画布" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas><div class="canvas-corner-note">关系均来自已读章节 · 点击可核验</div></div>
+      <footer class="relationship-canvas-foot"><div class="globe-hud-bottom"><span><i class="legend-dot character"></i>人物</span><span><i class="legend-dot location"></i>地点 / 组织</span><span><i class="legend-dot event"></i>事件 / 线索</span></div><div v-if="selectedGraphEvidence" class="canvas-selection"><span>已选中</span><b>{{ selectedGraphEvidence.label }}</b><small>第 {{ selectedGraphEvidence.chapter + 1 }} 章</small><button type="button" @click="showEvidenceSource(selectedGraphEvidence)">查看原文依据</button></div><p v-else>选中一条关系，查看它为什么会出现在图谱中。</p></footer>
+    </section>
+  </Teleport>
+  <Teleport to="body">
+    <div v-if="evidenceSource" class="evidence-source-backdrop" role="presentation" @click.self="evidenceSource = null">
+      <section class="evidence-source-dialog" role="dialog" aria-modal="true" aria-labelledby="evidence-source-title">
+        <span>图谱依据 / 已读范围</span><h2 id="evidence-source-title">{{ evidenceSource.label }}</h2><small>第 {{ evidenceSource.chapter + 1 }} 章 · 可信度 {{ Math.round((evidenceSource.confidence || 0) * 100) }}%</small><blockquote>{{ evidenceSource.evidence || '这条图谱记录没有保存可展示的原文摘录。' }}</blockquote><p>这里展示的是构建图谱时保存的原文摘录；“打开阅读器”会定位到对应章节，便于你在完整上下文中核验。</p><div><button type="button" class="btn btn-ghost" @click="evidenceSource = null">关闭</button><button type="button" class="btn btn-primary" @click="openEvidenceChapter">打开阅读器核验</button></div>
+      </section>
+    </div>
+  </Teleport>
+  <Teleport to="body">
     <div v-if="showKnowledgeBuildDialog" class="knowledge-build-backdrop" @click.self="showKnowledgeBuildDialog = false">
       <section class="knowledge-build-dialog" role="dialog" aria-modal="true" aria-labelledby="knowledge-build-title">
         <span class="dialog-kicker">AI 知识图谱构建</span>
@@ -252,8 +296,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import cytoscape from 'cytoscape'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import { apiAddToShelf } from '@/api/bookshelf'
@@ -262,6 +305,8 @@ import { apiGetMyLevel } from '@/api/user'
   import { apiCreateAgentSession, apiDeleteAgentModel, apiDeleteAgentSession, apiDeleteBookKnowledgeTask, apiEraseAgentPersonalData, apiExportAgentSession, apiGetAgentCredits, apiGetAgentGraph, apiGetAgentClues, apiGetAgentInfrastructure, apiGetAgentMessages, apiGetAgentPreferences, apiGetAgentTimeline, apiGetAgentReadingMap, apiGetAgentReadingPlan, apiGetAgentReaderLink, apiGetAgentShelfGroups, apiGetPlotCapsule, apiGetQuickRecommendations, apiGetSimilarBooks, apiListAgentModels, apiRenameAgentSession, apiSaveAgentModel, apiSaveAgentPreferences, apiSaveAgentShelfGroup, apiSaveRecommendationFeedback, apiSetAgentModelEnabled, apiTestAgentModel, apiListAgentSessions, apiSearchAgentSessions, apiPrepareBookKnowledgeBuild, apiStartBookKnowledgeBuild, apiGetBookKnowledgeStatus, apiGetBookKnowledgeTasks, apiUpdateAgentMessage, streamAgentMessage } from '@/api/agent'
 
 const toast = useToast()
+const actionNotice = ref(null)
+function showActionNotice(type, message) { actionNotice.value = { type, message }; window.setTimeout(() => { actionNotice.value = null }, 3500) }
 const router = useRouter()
 const route = useRoute()
 const activeTab = ref('overview')
@@ -305,8 +350,17 @@ const starterPrompts = ['帮我回忆最近的剧情', '分析当前人物关系
 const graphTypeFilter = ref('ALL')
 const readingMapBranch = ref('ALL')
 const selectedGraphEvidence = ref(null)
-const cytoscapeGraph = ref(null)
-let cy = null
+const relationshipGlobe = ref(null)
+const fullRelationshipGlobe = ref(null)
+const showRelationshipCanvas = ref(false)
+const evidenceSource = ref(null)
+const globeRotation = { pitch: -0.18, yaw: -0.72 }
+let globeZoom = 1
+let globeDrag = null
+let globeProjectedNodes = []
+let globeProjectedEdges = []
+let activeGlobeCanvas = null
+let globeRenderFrame = null
 const preferences = ref({ preferredGenres: [], avoidedThemes: [], spoilerLevel: 'STRICT', personalizationEnabled: true, retainConversations: true })
 const preferenceGenres = ref('')
 const avoidedThemes = ref('')
@@ -336,7 +390,7 @@ const safeInsightChapter = computed(() => Math.max(1, Number(selectedInsightBook
 const insightModeMeta = {
   capsule: { label: '剧情胶囊', title: '无剧透剧情回忆' },
   graph: { label: '人物关系', title: '人物关系图谱' },
-  clues: { label: '伏笔雷达', title: '线索与伏笔状态' },
+  clues: { label: '线索板', title: '明确未解的线索' },
   map: { label: '阅读地图', title: '故事事件脉络' },
   dna: { label: '相似书 DNA', title: '相似作品与阅读偏好' },
   shelf: { label: '书架管家', title: '书架安排与阅读计划' }
@@ -344,11 +398,67 @@ const insightModeMeta = {
 const insightModeLabel = computed(() => insightModeMeta[insightMode.value]?.label || '书籍洞察')
 const insightModeTitle = computed(() => insightModeMeta[insightMode.value]?.title || '书籍洞察')
 const chatReferenceBook = computed(() => usableShelfBooks.value.find(book => String(book.canonicalBookId) === String(chatReferenceBookId.value)) || null)
-const visibleGraphNodes = computed(() => (graph.value.nodes || []).filter(node => graphTypeFilter.value === 'ALL' || node.type === graphTypeFilter.value).slice(0, 12))
-const visibleGraphEdges = computed(() => {
-  const nodeIds = new Set(visibleGraphNodes.value.map(node => node.id))
-  return (graph.value.edges || []).filter(edge => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+const visibleGraph = computed(() => {
+  const nodes = (graph.value.nodes || []).filter(node => node?.id != null)
+  const nodeById = new Map(nodes.map(node => [String(node.id), node]))
+  const allEdges = (graph.value.edges || []).filter(edge => nodeById.has(String(edge.source)) && nodeById.has(String(edge.target)))
+  const isAllTypes = graphTypeFilter.value === 'ALL'
+  const primaryIds = new Set(nodes
+    .filter(node => isAllTypes || node.type === graphTypeFilter.value)
+    .map(node => String(node.id)))
+  // A type filter keeps its matching nodes and their one-hop context, so cross-type relations remain visible.
+  const eligibleEdges = isAllTypes
+    ? allEdges
+    : allEdges.filter(edge => primaryIds.has(String(edge.source)) || primaryIds.has(String(edge.target)))
+  const degree = new Map(nodes.map(node => [String(node.id), 0]))
+  eligibleEdges.forEach(edge => {
+    degree.set(String(edge.source), (degree.get(String(edge.source)) || 0) + 1)
+    degree.set(String(edge.target), (degree.get(String(edge.target)) || 0) + 1)
+  })
+  const candidateIds = new Set(isAllTypes ? nodes.map(node => String(node.id)) : primaryIds)
+  eligibleEdges.forEach(edge => {
+    candidateIds.add(String(edge.source))
+    candidateIds.add(String(edge.target))
+  })
+  const compareNodes = (left, right) => {
+    const degreeDifference = (degree.get(String(right.id)) || 0) - (degree.get(String(left.id)) || 0)
+    if (degreeDifference) return degreeDifference
+    const chapterDifference = Number(right.lastChapter ?? right.firstChapter ?? -1) - Number(left.lastChapter ?? left.firstChapter ?? -1)
+    if (chapterDifference) return chapterDifference
+    return Number(right.confidence || 0) - Number(left.confidence || 0)
+  }
+  const selectedIds = new Set()
+  // Select complete high-value relations first; this prevents the old "top 12 nodes, zero edges" result.
+  const rankedEdges = [...eligibleEdges].sort((left, right) => {
+    const leftDegree = (degree.get(String(left.source)) || 0) + (degree.get(String(left.target)) || 0)
+    const rightDegree = (degree.get(String(right.source)) || 0) + (degree.get(String(right.target)) || 0)
+    return rightDegree - leftDegree || Number(right.confidence || 0) - Number(left.confidence || 0)
+  })
+  for (const edge of rankedEdges) {
+    const endpoints = [String(edge.source), String(edge.target)]
+    const additions = endpoints.filter(id => !selectedIds.has(id))
+    if (selectedIds.size + additions.length > 12) continue
+    additions.forEach(id => selectedIds.add(id))
+  }
+  const rankedCandidates = [...candidateIds]
+    .map(id => nodeById.get(id))
+    .filter(Boolean)
+    .sort(compareNodes)
+  for (const node of rankedCandidates) {
+    if (selectedIds.size >= 12) break
+    selectedIds.add(String(node.id))
+  }
+  const selectedNodes = nodes
+    .filter(node => selectedIds.has(String(node.id)))
+    .sort(compareNodes)
+  const selectedNodeIds = new Set(selectedNodes.map(node => String(node.id)))
+  return {
+    nodes: selectedNodes,
+    edges: eligibleEdges.filter(edge => selectedNodeIds.has(String(edge.source)) && selectedNodeIds.has(String(edge.target)))
+  }
 })
+const visibleGraphNodes = computed(() => visibleGraph.value.nodes)
+const visibleGraphEdges = computed(() => visibleGraph.value.edges)
 const readingMapBranches = computed(() => ['ALL', ...new Set((readingMap.value.events || []).map(event => event.branch).filter(Boolean))])
 const visibleReadingMapEvents = computed(() => (readingMap.value.events || []).filter(event => readingMapBranch.value === 'ALL' || event.branch === readingMapBranch.value))
 const visibleReadingMapLinks = computed(() => {
@@ -380,23 +490,339 @@ function selectTab(tab) {
   activeTab.value = tab
   router.replace({ query: { ...route.query, tab } })
 }
-function renderCytoscapeGraph () {
-  if (!cytoscapeGraph.value) {
-    const svg = document.querySelector('.relationship-map')
-    if (!svg?.parentElement) return
-    cytoscapeGraph.value = document.createElement('div')
-    cytoscapeGraph.value.className = 'cytoscape-graph'
-    cytoscapeGraph.value.style.cssText = 'width:100%;height:230px;margin-top:8px;border:1px solid var(--paper-3);border-radius:var(--radius-sm);background:var(--paper-1);'
-    svg.parentElement.insertBefore(cytoscapeGraph.value, svg)
-    svg.style.display = 'none'
-  }
-  const elements = [...visibleGraphNodes.value.map(node => ({ data: { id: String(node.id), label: node.name, node } })), ...visibleGraphEdges.value.map((edge, index) => ({ data: { id: `${edge.source}-${edge.target}-${index}`, source: String(edge.source), target: String(edge.target), label: edge.relation, edge } }))]
-  if (cy) cy.destroy()
-  cy = cytoscape({ container: cytoscapeGraph.value, elements, layout: { name: 'cose', animate: false, padding: 16 }, style: [{ selector: 'node', style: { label: 'data(label)', 'background-color': '#b78836', color: '#33271c', 'font-size': 10, 'text-valign': 'center', 'text-max-width': 58 } }, { selector: 'edge', style: { width: 1.5, 'line-color': '#8a7965', 'target-arrow-color': '#8a7965', 'target-arrow-shape': 'triangle', label: 'data(label)', 'font-size': 8, color: '#6d5c49' } }] })
-  cy.on('tap', 'node', event => selectGraphEvidence(event.target.data('node'), 'NODE'))
-  cy.on('tap', 'edge', event => selectGraphEvidence(event.target.data('edge'), 'EDGE'))
+const globeNodeColors = {
+  CHARACTER: '#ffc65a',
+  LOCATION: '#7edbd0',
+  ORGANIZATION: '#9cb5ff',
+  EVENT: '#f58e70',
+  CLUE: '#d9a5ff'
 }
-watch([visibleGraphNodes, visibleGraphEdges], () => nextTick(renderCytoscapeGraph), { deep: true })
+
+function requestRelationshipGlobeRender () {
+  if (globeRenderFrame) return
+  globeRenderFrame = window.requestAnimationFrame(() => {
+    globeRenderFrame = null
+    renderRelationshipGlobe()
+  })
+}
+
+function openRelationshipCanvas () {
+  showRelationshipCanvas.value = true
+  nextTick(requestRelationshipGlobeRender)
+}
+
+function closeRelationshipCanvas () {
+  showRelationshipCanvas.value = false
+  nextTick(requestRelationshipGlobeRender)
+}
+
+function showEvidenceSource (item) {
+  evidenceSource.value = {
+    label: item?.label || item?.relation || item?.name || '图谱依据',
+    chapter: Math.max(0, Number(item?.chapter ?? item?.firstChapter ?? 0)),
+    confidence: Number(item?.confidence || 0),
+    evidence: item?.evidence || ''
+  }
+}
+
+function openEvidenceChapter () {
+  const chapter = evidenceSource.value?.chapter
+  evidenceSource.value = null
+  openInsightChapter(chapter)
+}
+
+function graphRelationLabel (relation) {
+  return ({
+    PARTICIPATES_IN: '参与事件',
+    INTERACTS_WITH: '发生互动',
+    KNOWS: '彼此相识',
+    OPPOSES: '存在对立',
+    ASSOCIATED_WITH: '存在关联',
+    CLUE_FOR: '关联线索',
+    CAUSES: '推动发生',
+    LEADS_TO: '引出后续'
+  })[relation] || relation || '相关'
+}
+
+function quadraticPoint (from, control, to, t = 0.5) {
+  const inverse = 1 - t
+  return {
+    x: inverse * inverse * from.x + 2 * inverse * t * control.x + t * t * to.x,
+    y: inverse * inverse * from.y + 2 * inverse * t * control.y + t * t * to.y
+  }
+}
+
+function drawGlobeRelationLabel (context, item, alpha, radius) {
+  // A line is only useful when its relation predicate remains visible in the canvas.
+  if (item.depth < -0.22) return
+  const label = graphRelationLabel(item.edge.relation)
+  const point = quadraticPoint(item.source, item.control, item.target, 0.5)
+  const fontSize = Math.max(10, Math.min(13, radius / 20))
+  context.save()
+  context.globalAlpha = Math.min(1, alpha + 0.2)
+  context.font = `800 ${fontSize}px sans-serif`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  const width = context.measureText(label).width + 12
+  const height = fontSize + 8
+  context.fillStyle = 'rgba(4, 24, 33, .9)'
+  context.strokeStyle = 'rgba(218, 249, 226, .62)'
+  context.lineWidth = 1
+  context.beginPath()
+  context.roundRect(point.x - width / 2, point.y - height / 2, width, height, height / 2)
+  context.fill()
+  context.stroke()
+  context.fillStyle = '#fffdf2'
+  context.fillText(label, point.x, point.y + .5)
+  context.restore()
+}
+
+function spherePoint (index, total) {
+  if (total <= 1) return { x: 0, y: 0, z: 1 }
+  const vertical = 1 - (index / (total - 1)) * 2
+  const horizontal = Math.sqrt(Math.max(0, 1 - vertical * vertical))
+  const angle = index * Math.PI * (3 - Math.sqrt(5))
+  return { x: Math.cos(angle) * horizontal, y: vertical, z: Math.sin(angle) * horizontal }
+}
+
+function rotateGlobePoint (point) {
+  const yawCos = Math.cos(globeRotation.yaw)
+  const yawSin = Math.sin(globeRotation.yaw)
+  const pitchCos = Math.cos(globeRotation.pitch)
+  const pitchSin = Math.sin(globeRotation.pitch)
+  const yawX = point.x * yawCos + point.z * yawSin
+  const yawZ = point.z * yawCos - point.x * yawSin
+  return { x: yawX, y: point.y * pitchCos - yawZ * pitchSin, z: point.y * pitchSin + yawZ * pitchCos }
+}
+
+function projectGlobePoint (point, centerX, centerY, radius) {
+  const rotated = rotateGlobePoint(point)
+  const scale = radius / (1.24 - rotated.z * 0.31)
+  return { x: centerX + rotated.x * scale, y: centerY - rotated.y * scale, z: rotated.z, scale }
+}
+
+function normalizeGlobeVector (point) {
+  const length = Math.hypot(point.x, point.y, point.z) || 1
+  return { x: point.x / length, y: point.y / length, z: point.z / length }
+}
+
+function drawGlobeGrid (context, centerX, centerY, radius) {
+  context.save()
+  context.beginPath()
+  context.arc(centerX, centerY, radius, 0, Math.PI * 2)
+  context.clip()
+  context.lineWidth = 0.7
+  const drawCurve = (points, alpha) => {
+    context.beginPath()
+    points.forEach((point, index) => {
+      const projected = projectGlobePoint(point, centerX, centerY, radius)
+      if (index === 0) context.moveTo(projected.x, projected.y)
+      else context.lineTo(projected.x, projected.y)
+    })
+    context.strokeStyle = `rgba(198, 236, 221, ${alpha})`
+    context.stroke()
+  }
+  ;[-60, -30, 0, 30, 60].forEach(latitude => {
+    const radians = latitude * Math.PI / 180
+    const points = Array.from({ length: 65 }, (_, index) => {
+      const longitude = index / 64 * Math.PI * 2
+      return { x: Math.cos(radians) * Math.cos(longitude), y: Math.sin(radians), z: Math.cos(radians) * Math.sin(longitude) }
+    })
+    drawCurve(points, latitude === 0 ? 0.24 : 0.13)
+  })
+  ;[-120, -60, 0, 60, 120].forEach(longitude => {
+    const radians = longitude * Math.PI / 180
+    const points = Array.from({ length: 65 }, (_, index) => {
+      const latitude = -Math.PI / 2 + index / 64 * Math.PI
+      return { x: Math.cos(latitude) * Math.cos(radians), y: Math.sin(latitude), z: Math.cos(latitude) * Math.sin(radians) }
+    })
+    drawCurve(points, 0.13)
+  })
+  context.restore()
+}
+
+function drawGlobeArrow (context, from, to, color, alpha) {
+  const angle = Math.atan2(to.y - from.y, to.x - from.x)
+  const size = 5
+  context.save()
+  context.fillStyle = color.replace(')', `, ${alpha})`).replace('rgb', 'rgba')
+  context.translate(to.x, to.y)
+  context.rotate(angle)
+  context.beginPath()
+  context.moveTo(0, 0)
+  context.lineTo(-size, -size * 0.6)
+  context.lineTo(-size, size * 0.6)
+  context.closePath()
+  context.fill()
+  context.restore()
+}
+
+function renderRelationshipGlobe () {
+  const canvas = showRelationshipCanvas.value ? fullRelationshipGlobe.value : relationshipGlobe.value
+  if (!canvas || !visibleGraphNodes.value.length) return
+  activeGlobeCanvas = canvas
+  const bounds = canvas.getBoundingClientRect()
+  if (!bounds.width || !bounds.height) return
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+  const width = Math.floor(bounds.width)
+  const height = Math.floor(bounds.height)
+  if (canvas.width !== width * pixelRatio || canvas.height !== height * pixelRatio) {
+    canvas.width = width * pixelRatio
+    canvas.height = height * pixelRatio
+  }
+  const context = canvas.getContext('2d')
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+  context.clearRect(0, 0, width, height)
+  const centerX = width / 2
+  const centerY = height / 2
+  const radius = Math.min(width * 0.39, height * 0.43) * globeZoom
+  const atmosphere = context.createRadialGradient(centerX - radius * 0.28, centerY - radius * 0.35, radius * 0.08, centerX, centerY, radius * 1.42)
+  atmosphere.addColorStop(0, '#315d6a')
+  atmosphere.addColorStop(0.5, '#143c48')
+  atmosphere.addColorStop(0.79, '#092b38')
+  atmosphere.addColorStop(1, 'rgba(7, 23, 34, 0)')
+  context.fillStyle = atmosphere
+  context.fillRect(0, 0, width, height)
+  context.beginPath()
+  context.arc(centerX, centerY, radius, 0, Math.PI * 2)
+  context.fillStyle = '#123947'
+  context.fill()
+  context.lineWidth = 2
+  context.strokeStyle = 'rgba(202, 241, 221, .34)'
+  context.stroke()
+  drawGlobeGrid(context, centerX, centerY, radius)
+
+  const projectedNodes = visibleGraphNodes.value.map((node, index) => {
+    const point = spherePoint(index, visibleGraphNodes.value.length)
+    return { node, world: point, ...projectGlobePoint(point, centerX, centerY, radius) }
+  })
+  const nodeById = new Map(projectedNodes.map(item => [String(item.node.id), item]))
+  const projectedEdges = visibleGraphEdges.value
+    .map(edge => {
+      const source = nodeById.get(String(edge.source))
+      const target = nodeById.get(String(edge.target))
+      if (!source || !target) return null
+      const controlWorld = normalizeGlobeVector({ x: source.world.x + target.world.x, y: source.world.y + target.world.y, z: source.world.z + target.world.z })
+      const control = projectGlobePoint(controlWorld, centerX, centerY, radius * 1.08)
+      return { edge, source, target, control, depth: (source.z + target.z + control.z) / 3 }
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.depth - right.depth)
+  projectedEdges.forEach(item => {
+    const alpha = Math.max(0.16, Math.min(0.86, 0.42 + item.depth * 0.32))
+    const isSelected = selectedGraphEvidence.value?.label === item.edge.relation && selectedGraphEvidence.value?.evidence === item.edge.evidence
+    context.save()
+    context.beginPath()
+    context.moveTo(item.source.x, item.source.y)
+    context.quadraticCurveTo(item.control.x, item.control.y, item.target.x, item.target.y)
+    context.strokeStyle = isSelected ? `rgba(255, 213, 116, ${Math.min(.98, alpha + .22)})` : `rgba(174, 232, 211, ${alpha})`
+    context.lineWidth = isSelected ? 2.8 : 1.2 + Math.max(0, item.depth) * 0.7
+    if (Number(item.edge.confidence || 0) < 0.7) context.setLineDash([5, 5])
+    context.stroke()
+    context.setLineDash([])
+    const arrowPoint = quadraticPoint(item.source, item.control, item.target, .78)
+    drawGlobeArrow(context, item.control, arrowPoint, 'rgb(174, 232, 211)', alpha)
+    drawGlobeRelationLabel(context, item, alpha, radius)
+    context.restore()
+  })
+  projectedNodes.sort((left, right) => left.z - right.z).forEach(item => {
+    const color = globeNodeColors[item.node.type] || '#d6e7d1'
+    const frontFactor = 0.58 + (item.z + 1) * 0.22
+    const nodeRadius = 5 + Math.max(0, item.z) * 3.3
+    context.save()
+    context.globalAlpha = frontFactor
+    context.beginPath()
+    context.arc(item.x, item.y, nodeRadius + 5, 0, Math.PI * 2)
+    context.fillStyle = color.replace(')', ', .14)').replace('rgb', 'rgba')
+    context.fill()
+    context.beginPath()
+    context.arc(item.x, item.y, nodeRadius, 0, Math.PI * 2)
+    context.fillStyle = color
+    context.fill()
+    context.strokeStyle = 'rgba(255, 253, 247, .8)'
+    context.lineWidth = 1
+    context.stroke()
+    if (item.z > -0.25) {
+      context.globalAlpha = Math.min(1, frontFactor + .28)
+      context.fillStyle = '#fffdf2'
+      context.font = `700 ${Math.max(10, Math.min(13, radius / 18))}px serif`
+      context.textAlign = item.x > centerX ? 'left' : 'right'
+      context.textBaseline = 'middle'
+      context.fillText(String(item.node.name || '').slice(0, 7), item.x + (item.x > centerX ? nodeRadius + 7 : -nodeRadius - 7), item.y)
+    }
+    context.restore()
+  })
+  globeProjectedNodes = projectedNodes
+  globeProjectedEdges = projectedEdges
+}
+
+function distanceToSegment (point, start, end) {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const lengthSquared = dx * dx + dy * dy || 1
+  const position = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+  return Math.hypot(point.x - (start.x + dx * position), point.y - (start.y + dy * position))
+}
+
+function selectGlobeAt (event) {
+  const bounds = activeGlobeCanvas?.getBoundingClientRect()
+  if (!bounds) return
+  const point = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+  const nodeMatch = [...globeProjectedNodes]
+    .sort((left, right) => right.z - left.z)
+    .find(item => Math.hypot(item.x - point.x, item.y - point.y) <= 18)
+  if (nodeMatch) {
+    selectGraphEvidence(nodeMatch.node, 'NODE')
+    requestRelationshipGlobeRender()
+    return
+  }
+  const edgeMatch = globeProjectedEdges
+    .map(item => ({ item, distance: Math.min(distanceToSegment(point, item.source, item.control), distanceToSegment(point, item.control, item.target)) }))
+    .sort((left, right) => left.distance - right.distance)[0]
+  if (edgeMatch?.distance <= 10) {
+    selectGraphEvidence(edgeMatch.item.edge, 'EDGE')
+    requestRelationshipGlobeRender()
+  }
+}
+
+function onGlobePointerDown (event) {
+  event.currentTarget.setPointerCapture?.(event.pointerId)
+  globeDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false }
+}
+
+function onGlobePointerMove (event) {
+  if (!globeDrag || globeDrag.pointerId !== event.pointerId) return
+  const deltaX = event.clientX - globeDrag.x
+  const deltaY = event.clientY - globeDrag.y
+  if (Math.abs(deltaX) + Math.abs(deltaY) > 2) globeDrag.moved = true
+  globeRotation.yaw += deltaX * 0.009
+  globeRotation.pitch = Math.max(-1.18, Math.min(1.18, globeRotation.pitch + deltaY * 0.008))
+  globeDrag.x = event.clientX
+  globeDrag.y = event.clientY
+  requestRelationshipGlobeRender()
+}
+
+function onGlobePointerUp (event) {
+  if (!globeDrag || globeDrag.pointerId !== event.pointerId) return
+  event.currentTarget.releasePointerCapture?.(event.pointerId)
+  const moved = globeDrag.moved
+  globeDrag = null
+  if (!moved) selectGlobeAt(event)
+}
+
+function onGlobeWheel (event) {
+  globeZoom = Math.max(0.62, Math.min(1.65, globeZoom - event.deltaY * 0.0012))
+  requestRelationshipGlobeRender()
+}
+
+function resetRelationshipGlobe () {
+  globeRotation.pitch = -0.18
+  globeRotation.yaw = -0.72
+  globeZoom = 1
+  requestRelationshipGlobeRender()
+}
+
+watch([visibleGraphNodes, visibleGraphEdges, insightMode, showRelationshipCanvas], () => nextTick(requestRelationshipGlobeRender), { deep: true })
 
 async function load() {
   pageLoading.value = true
@@ -489,7 +915,7 @@ function queueBuildEstimate() {
   buildEstimateTimer = setTimeout(() => loadKnowledgeBuildPreparation(), 260)
 }
 
-  async function loadBuildTasks () {
+async function loadBuildTasks () {
   try {
     buildTasks.value = await apiGetBookKnowledgeTasks()
     const active = buildTasks.value.some(task => ['QUEUED', 'RUNNING'].includes(task.status))
@@ -519,6 +945,17 @@ function queueBuildEstimate() {
   buildForm.value.startChapter = knowledgeBuild.value.startChapter || 1
   buildForm.value.endChapter = knowledgeBuild.value.endChapter || knowledgeBuild.value.totalChapters || 1
   showKnowledgeBuildDialog.value = true
+}
+
+function taskBookTitle (task) {
+  return task?.bookTitle || '未知作品'
+}
+
+function taskProgressPercent (task) {
+  if (task?.status === 'COMPLETED') return 100
+  const total = Math.max(1, Number(task?.totalChapters || 0))
+  const completed = Math.max(0, Number(task?.completedChapters || 0))
+  return Math.min(100, Math.round(completed / total * 100))
 }
 
 async function startKnowledgeBuild () {
@@ -646,7 +1083,7 @@ async function send(requestContext = {}, contentOverride = '') {
       ? { mode: 'BYOK', modelConfigId: Number(selectedModelConfigId.value) }
       : { mode: 'PLATFORM' }
     const readingContext = insightBookId.value && insightChapter.value >= 1
-      ? { canonicalBookId: Number(insightBookId.value), currentChapter: Number(insightChapter.value) - 1, currentBookTitle: selectedInsightBook.value?.bookName || chatReferenceBook.value?.bookName }
+      ? { canonicalBookId: String(insightBookId.value), currentChapter: Number(insightChapter.value) - 1, currentBookTitle: selectedInsightBook.value?.bookName || chatReferenceBook.value?.bookName }
       : {}
     await streamAgentMessage(activeSession.value.id, { content, ...modelRequest, ...readingContext, ...requestContext }, {
       onDelta: (delta) => { answer += delta; messages.value[messages.value.length - 1].content = answer },
@@ -680,12 +1117,17 @@ async function saveMessageEdit(message) {
   } catch (error) { toast.error(error.message || '编辑消息失败') }
 }
 async function saveModel() {
-  try { const saved = await apiSaveAgentModel(modelForm.value); modelForm.value.apiKey = ''; models.value = await apiListAgentModels(); selectedModelConfigId.value = String(saved.id); toast.success('模型 Key 已加密保存，并已用于后续对话') } catch (error) { toast.error(error.message) }
+  try { const saved = await apiSaveAgentModel(modelForm.value); modelForm.value.apiKey = ''; models.value = await apiListAgentModels(); selectedModelConfigId.value = String(saved.id); toast.success('模型 Key 已加密保存，并已用于后续对话'); showActionNotice('success', '模型已加密保存'); showActionNotice('success', '模型已加密保存') } catch (error) { toast.error(error.message) }
 }
 async function removeModel(id) {
-  await apiDeleteAgentModel(id)
-  models.value = models.value.filter((item) => item.id !== id)
-  if (selectedModelConfigId.value === String(id)) selectedModelConfigId.value = ''
+  try {
+    await apiDeleteAgentModel(id)
+    models.value = models.value.filter((item) => item.id !== id)
+    if (selectedModelConfigId.value === String(id)) selectedModelConfigId.value = ''
+    toast.success('模型已删除')
+  } catch (error) {
+    toast.error(error.message || '删除模型失败')
+  }
 }
 async function testModel(id) {
   testingModelId.value = id
@@ -704,7 +1146,7 @@ async function savePreferences() {
   try {
     preferences.value = await apiSaveAgentPreferences({ ...preferences.value, preferredGenres: splitPreferences(preferenceGenres.value), avoidedThemes: splitPreferences(avoidedThemes.value) })
     if (!preferences.value.retainConversations) { sessions.value = []; activeSession.value = null; messages.value = [] }
-    toast.success('阅读偏好已保存')
+    toast.success('阅读偏好已保存'); showActionNotice('success', '设置已保存'); showActionNotice('success', '设置已保存')
   } catch (error) { toast.error(error.message) }
 }
 async function erasePersonalData() {
@@ -751,39 +1193,38 @@ function timelineChapter (item) {
 }
 async function openInsightChapter (chapterIndex) {
   try {
-    const detail = await apiGetAgentReaderLink(Number(insightBookId.value))
+    const canonicalBookId = String(insightBookId.value)
+    const detail = await apiGetAgentReaderLink(canonicalBookId)
     if (!detail?.sourceId || !detail?.sourceBookUrl) { toast.error('这条依据暂时没有可用书源。'); return }
-    router.push({ name: 'Reader', query: { sourceId: detail.sourceId, bookUrl: detail.sourceBookUrl, bookName: detail.title, author: detail.author, coverUrl: detail.coverUrl, intro: detail.summary, canonicalBookId: Number(insightBookId.value), chapterIndex: Math.max(0, Number(chapterIndex) || 0) } })
+    router.push({ name: 'Reader', query: { sourceId: detail.sourceId, bookUrl: detail.sourceBookUrl, bookName: detail.title, author: detail.author, coverUrl: detail.coverUrl, intro: detail.summary, canonicalBookId, chapterIndex: Math.max(0, Number(chapterIndex) || 0) } })
   } catch (error) { toast.error(error.message) }
 }
-function graphNodeIndex(nodeId) { return visibleGraphNodes.value.findIndex(node => node.id === nodeId) }
 function selectGraphEvidence (item, kind) {
   selectedGraphEvidence.value = { label: kind === 'NODE' ? `${item.name} / ${graphTypeLabel(item.type)}` : item.relation, chapter: item.firstChapter || 0, confidence: item.confidence, evidence: item.evidence }
 }
-function graphPoint(index) {
-  const total = Math.max(visibleGraphNodes.value.length, 1)
-  const safeIndex = index < 0 ? 0 : index
-  const angle = (Math.PI * 2 * safeIndex / total) - Math.PI / 2
-  return { x: 180 + Math.cos(angle) * 125, y: 115 + Math.sin(angle) * 76 }
-}
 function eventLinkCount(eventId) { return visibleReadingMapLinks.value.filter(link => link.source === eventId || link.target === eventId).length }
+function mapNextLink (eventId) { return visibleReadingMapLinks.value.find(link => String(link.source) === String(eventId)) || null }
+function mapConnectorLabel (sourceId, targetId) {
+  const direct = visibleReadingMapLinks.value.find(link => String(link.source) === String(sourceId) && String(link.target) === String(targetId))
+  return direct?.relation || '故事推进'
+}
 async function startCharacterInterview(node) {
   if (!insightBookId.value || insightChapter.value < 1) return
   if (!activeSession.value) await newSession()
   selectTab('chats')
   draft.value = `请以${node.name}的第一人称进行角色访谈。只使用我已经读过的章节，不要透露后续剧情，也不要编造事实。先说说此刻对你最重要的事情。`
-  await send({ canonicalBookId: Number(insightBookId.value), currentChapter: Number(insightChapter.value) - 1, interviewCharacter: node.name })
+  await send({ canonicalBookId: String(insightBookId.value), currentChapter: Number(insightChapter.value) - 1, interviewCharacter: node.name })
 }
 async function saveRecommendationFeedback(item, action) {
   try {
-    await apiSaveRecommendationFeedback({ canonicalBookId: Number(item.canonicalBookId), action })
+    await apiSaveRecommendationFeedback({ canonicalBookId: String(item.canonicalBookId), action })
     shelfRecommendations.value = await apiGetQuickRecommendations()
     toast.success(action === 'LIKE' ? '推荐偏好已记录' : '已暂不展示这条推荐')
   } catch (error) { toast.error(error.message) }
 }
 async function saveShelfGroup(item, groupCode) {
   try {
-    await apiSaveAgentShelfGroup({ canonicalBookId: Number(item.canonicalBookId), groupCode })
+    await apiSaveAgentShelfGroup({ canonicalBookId: String(item.canonicalBookId), groupCode })
     shelfGroups.value = await apiGetAgentShelfGroups()
     toast.success(groupCode === 'AUTO' ? '已恢复自动分组' : '书架分组已更新')
   } catch (error) { toast.error(error.message) }
@@ -796,12 +1237,13 @@ async function loadInsights() {
     showSpoilerConfirm.value = true
     return
   }
-  if (!knowledgeBuild.value || knowledgeBuild.value.status !== 'READY') {
-    await loadKnowledgeBuildPreparation()
-    if (knowledgeBuild.value?.requiresBuild !== false) {
-      showKnowledgeBuildDialog.value = true
-      return
-    }
+  // READY only means that some chapters were indexed. Re-check the requested range every time.
+  buildForm.value.startChapter = 1
+  buildForm.value.endChapter = insightChapter.value
+  await loadKnowledgeBuildPreparation()
+  if (knowledgeBuild.value?.requiresBuild !== false) {
+    showKnowledgeBuildDialog.value = true
+    return
   }
   insightLoading.value = true
   insightError.value = ''
@@ -853,7 +1295,18 @@ function confirmSpoilerAnalysis () {
   pendingSpoilerChapter.value = null
   loadInsights()
 }
-onMounted(() => { load(); loadBuildTasks() })
+onMounted(() => {
+  load()
+  loadBuildTasks()
+  window.addEventListener('resize', requestRelationshipGlobeRender)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', requestRelationshipGlobeRender)
+  if (globeRenderFrame) window.cancelAnimationFrame(globeRenderFrame)
+  clearTimeout(taskPollTimer)
+  clearTimeout(buildEstimateTimer)
+})
 </script>
 
 <style scoped>
@@ -1147,4 +1600,66 @@ onMounted(() => { load(); loadBuildTasks() })
 .task-center-panel { grid-template-rows:auto minmax(0,1fr); gap:18px; }.task-center-head { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; max-width:none!important; padding:0!important; }.task-center-head h2 { margin-bottom:6px; }.task-center-head p { max-width:610px; margin:0; }.task-refresh { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto; border:1px solid rgba(16,44,50,.13); border-radius:8px; padding:7px 9px; color:var(--agent-ink-soft); background:#fffdf7; cursor:pointer; font:inherit; font-size:.68rem; font-weight:800; }.task-refresh:hover { border-color:var(--agent-ink); color:var(--agent-ink); }.task-refresh span { font-size:1rem; line-height:1; }
 .task-list { display:grid; align-content:start; gap:10px; min-height:0; overflow:auto; padding-right:5px; }.task-row { display:grid; grid-template-columns:minmax(230px,.8fr) minmax(320px,1.2fr) auto; gap:26px; padding:18px 20px; }.task-row-main { min-width:0; }.task-row-main strong { overflow:hidden; max-width:100%; text-overflow:ellipsis; white-space:nowrap; }.task-row-main small { margin-top:6px; }.task-row-progress { min-width:0; }.task-progress-label { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:7px; }.task-progress-label b,.task-progress-label small { margin:0; }.task-row-progress > small { margin-top:7px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.task-delete { align-self:center; border:1px solid rgba(163,69,53,.28); border-radius:8px; padding:7px 9px; color:#a34535; background:#fffaf7; cursor:pointer; font:inherit; font-size:.68rem; font-weight:700; }.task-delete:hover { border-color:#a34535; background:rgba(212,97,69,.1); }.task-empty { min-height:180px; display:grid; place-items:center; margin:0; text-align:center; }
 @media (max-width:760px) { .task-center-head { align-items:flex-start; }.task-row { grid-template-columns:1fr; gap:13px; }.task-delete { justify-self:start; }.task-list { overflow:visible; }.build-range { grid-template-columns:1fr; gap:7px; }.build-range > span { display:none; } }
+</style>
+
+<style scoped>
+.task-row-progress .task-progress-track { position:relative; box-sizing:border-box; height:12px; margin-top:7px; overflow:hidden; border:1px solid rgba(16,44,50,.2); border-radius:999px; background:repeating-linear-gradient(90deg,rgba(16,44,50,.09) 0 12px,rgba(16,44,50,.04) 12px 24px); }
+.task-row-progress .task-progress-track i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#d46145,#ee8d5a); box-shadow:inset 0 0 0 1px rgba(255,255,255,.25); transition:width .45s ease; }
+.task-row-progress .task-progress-track.completed i { background:linear-gradient(90deg,#5e9166,#9bc46c); }
+.task-row-progress .task-progress-track.failed { border-color:rgba(163,69,53,.35); background:repeating-linear-gradient(135deg,rgba(163,69,53,.12) 0 8px,rgba(163,69,53,.04) 8px 16px); }
+.agent-action-notice { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; font-size: .8rem; font-weight: 700; } .agent-action-notice.is-success { color: #235c35; border: 1px solid #8fca9c; background: #e7f6e9; } .agent-action-notice.is-error { color: #8b2f24; border: 1px solid #e5a197; background: #fff0ed; } .spoiler-dialog-actions .btn-ghost { border: 2px solid #fffaf0 !important; color: #fffaf0 !important; background: #2b5b60 !important; box-shadow: 0 2px 0 rgba(0,0,0,.2); } .spoiler-dialog-actions .btn-ghost:hover { background: #3b7378 !important; }
+.agent-action-notice { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; font-size: .8rem; font-weight: 700; } .agent-action-notice.is-success { color: #235c35; border: 1px solid #8fca9c; background: #e7f6e9; } .agent-action-notice.is-error { color: #8b2f24; border: 1px solid #e5a197; background: #fff0ed; } .spoiler-dialog-actions .btn-ghost { border: 2px solid #fffaf0 !important; color: #fffaf0 !important; background: #2b5b60 !important; box-shadow: 0 2px 0 rgba(0,0,0,.2); } .spoiler-dialog-actions .btn-ghost:hover { background: #3b7378 !important; }
+
+/* The graph is deliberately the primary reading surface: an interactive, depth-sorted relation globe. */
+.insight-stage .graph-card { display:flex; flex-direction:column; min-height:0!important; height:100%; overflow:hidden; }
+.graph-card-title { display:flex; align-items:flex-start; gap:14px; flex:0 0 auto; }
+.graph-card-title > span { min-width:34px; margin:4px 0 0!important; color:var(--agent-coral)!important; font-family:var(--font-serif); font-size:2.4rem!important; line-height:.78; }
+.graph-card-title h2 { margin:0 0 8px!important; }
+.graph-card-title p { max-width:680px; margin:0!important; color:var(--agent-ink-soft)!important; font-size:.78rem; line-height:1.55!important; }
+.globe-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; flex:0 0 auto; margin:17px 0 10px; }
+.globe-toolbar .graph-tools { margin:0; }
+.globe-toolbar-status { display:flex; align-items:center; gap:5px; color:rgba(255,250,240,.66); font-size:.68rem; }
+.globe-toolbar-status b { color:var(--agent-lime); font-family:var(--font-serif); font-size:1rem; }
+.globe-toolbar-status button { margin-left:7px; border:1px solid rgba(255,250,240,.24); border-radius:99px; padding:5px 8px; color:#fffaf0; background:rgba(255,253,247,.08); cursor:pointer; font:inherit; font-size:.64rem; font-weight:800; }
+.globe-toolbar-status button:hover { border-color:var(--agent-lime); color:var(--agent-lime); }
+.relationship-globe-shell { position:relative; flex:1 1 370px; min-height:360px; overflow:hidden; border:1px solid rgba(184,214,125,.34); border-radius:20px; background:radial-gradient(circle at 50% 45%,#173f4d 0,#102f3b 46%,#09232f 100%); box-shadow:inset 0 0 70px rgba(0,0,0,.26),0 16px 34px rgba(16,44,50,.14); }
+.relationship-globe-shell::before { content:''; position:absolute; inset:0; pointer-events:none; opacity:.45; background-image:radial-gradient(rgba(230,255,238,.6) 1px,transparent 1.4px),radial-gradient(rgba(230,255,238,.35) 1px,transparent 1.4px); background-position:18px 26px,86px 62px; background-size:132px 132px,196px 196px; }
+.relationship-globe { display:block; position:relative; z-index:1; width:100%; height:100%; touch-action:none; cursor:grab; outline:0; }
+.relationship-globe:active { cursor:grabbing; }
+.relationship-globe:focus-visible { box-shadow:inset 0 0 0 3px var(--agent-lime); }
+.globe-hud { position:absolute; z-index:2; display:flex; align-items:center; gap:8px; pointer-events:none; color:rgba(255,250,240,.56); font-size:.58rem; font-weight:800; letter-spacing:.1em; }
+.globe-hud-top { top:14px; left:16px; }.globe-hud-top i { width:22px; height:1px; background:var(--agent-lime); opacity:.7; }
+.globe-hud-bottom { right:15px; bottom:13px; gap:11px; letter-spacing:0; }.globe-hud-bottom span { display:inline-flex; align-items:center; gap:5px; }
+.legend-dot { width:7px; height:7px; border-radius:50%; background:#ffc65a; box-shadow:0 0 0 3px rgba(255,198,90,.15); }.legend-dot.location { background:#7edbd0; box-shadow:0 0 0 3px rgba(126,219,208,.15); }.legend-dot.event { background:#f58e70; box-shadow:0 0 0 3px rgba(245,142,112,.15); }
+.graph-inspector { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,.85fr); gap:11px; flex:0 0 auto; margin-top:11px; }
+.graph-evidence,.graph-evidence.graph-evidence-empty { min-height:105px; margin:0!important; border:1px solid rgba(16,44,50,.12); border-left:3px solid var(--agent-coral); border-radius:11px; padding:12px 14px; background:rgba(255,253,247,.82); }
+.graph-evidence > span { display:block; margin:0 0 5px; color:var(--agent-coral); font-size:.61rem; font-weight:900; letter-spacing:.1em; }.graph-evidence b { color:var(--agent-ink); font-family:var(--font-serif); font-size:1.03rem; }.graph-evidence small { display:block; margin-top:4px; color:var(--agent-ink-soft); font-size:.65rem; }.graph-evidence p { margin:7px 0 0!important; color:var(--agent-ink-soft)!important; font-size:.69rem; line-height:1.5!important; }.graph-evidence .evidence-jump { margin-left:0; }
+.graph-node-list { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:6px; min-width:0; }.graph-node-list button { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:2px 6px; min-width:0; border:1px solid rgba(16,44,50,.11); border-radius:10px; padding:8px; color:var(--agent-ink); background:rgba(255,253,247,.78); text-align:left; cursor:pointer; font:inherit; }.graph-node-list button:hover { border-color:var(--agent-coral); background:#fffdf7; }.graph-node-list i { grid-row:1 / span 2; width:7px; height:7px; border-radius:50%; background:#d6e7d1; }.graph-node-list i.CHARACTER { background:#ffc65a; }.graph-node-list i.LOCATION { background:#7edbd0; }.graph-node-list i.ORGANIZATION { background:#9cb5ff; }.graph-node-list i.EVENT { background:#f58e70; }.graph-node-list i.CLUE { background:#d9a5ff; }.graph-node-list span { overflow:hidden; font-size:.67rem; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }.graph-node-list small { overflow:hidden; color:var(--agent-ink-soft); font-size:.57rem; text-overflow:ellipsis; white-space:nowrap; }.graph-footnote { flex:0 0 auto; margin-top:9px; }
+/* Full-screen graph inspection keeps dense works usable without shrinking their relation topology. */
+.relationship-canvas-dialog { position:fixed; inset:0; z-index:5500; display:grid; grid-template-rows:auto minmax(0,1fr) auto; color:#fffaf0; background:#081f2a; }
+.relationship-canvas-head { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; padding:24px 34px 18px; border-bottom:1px solid rgba(255,253,247,.12); background:linear-gradient(100deg,#0d2f3b,#123d49); }.relationship-canvas-head > div:first-child { max-width:760px; }.relationship-canvas-head > div:first-child > span { color:var(--agent-lime); font-size:.62rem; font-weight:900; letter-spacing:.14em; }.relationship-canvas-head h2 { margin:7px 0; font-family:var(--font-serif); font-size:clamp(1.8rem,3.2vw,3.1rem); line-height:.94; letter-spacing:-.06em; }.relationship-canvas-head p { margin:0; color:rgba(255,250,240,.68); font-size:.76rem; line-height:1.6; }.relationship-canvas-head > div:last-child { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:7px; max-width:410px; }.relationship-canvas-head > div:last-child > span { border:1px solid rgba(255,253,247,.16); border-radius:99px; padding:6px 8px; color:rgba(255,250,240,.7); font-size:.63rem; }.relationship-canvas-head button { border:1px solid rgba(255,253,247,.22); border-radius:9px; padding:8px 10px; color:#fffaf0; background:rgba(255,253,247,.06); cursor:pointer; font:inherit; font-size:.68rem; font-weight:800; }.relationship-canvas-head button:hover { border-color:var(--agent-lime); color:var(--agent-lime); }.relationship-canvas-head .relationship-canvas-close { color:#102c32; border-color:var(--agent-lime); background:var(--agent-lime); }
+.relationship-canvas-stage { position:relative; min-height:0; overflow:hidden; background:radial-gradient(circle at 50% 43%,#194958 0,#0c2d3a 45%,#061b26 100%); }.relationship-canvas-stage .relationship-globe { width:100%; height:100%; }.canvas-corner-note { position:absolute; left:28px; bottom:23px; color:rgba(255,250,240,.46); font-size:.63rem; font-weight:800; letter-spacing:.08em; pointer-events:none; }
+.relationship-canvas-foot { display:flex; align-items:center; justify-content:space-between; gap:18px; min-height:54px; padding:12px 34px; border-top:1px solid rgba(255,253,247,.1); color:rgba(255,250,240,.62); background:#0b2630; }.relationship-canvas-foot .globe-hud-bottom { position:static; }.relationship-canvas-foot > p { margin:0; font-size:.72rem; }.canvas-selection { display:flex; align-items:center; gap:9px; min-width:0; }.canvas-selection span { color:var(--agent-lime); font-size:.62rem; font-weight:800; }.canvas-selection b { overflow:hidden; max-width:280px; color:#fffaf0; font-size:.77rem; text-overflow:ellipsis; white-space:nowrap; }.canvas-selection small { color:rgba(255,250,240,.6); font-size:.64rem; }.canvas-selection button { border:0; border-bottom:1px solid var(--agent-lime); padding:2px 0; color:var(--agent-lime); background:transparent; cursor:pointer; font:inherit; font-size:.66rem; font-weight:800; }
+.evidence-source-backdrop { position:fixed; inset:0; z-index:5600; display:grid; place-items:center; padding:20px; background:rgba(7,25,33,.76); backdrop-filter:blur(8px); }.evidence-source-dialog { width:min(100%,640px); border:1px solid rgba(255,253,247,.21); border-radius:20px; padding:27px; color:#fffaf0; background:linear-gradient(145deg,#173e42,#102c32); box-shadow:0 32px 92px rgba(0,0,0,.35); }.evidence-source-dialog > span { color:var(--agent-lime); font-size:.64rem; font-weight:900; letter-spacing:.13em; }.evidence-source-dialog h2 { margin:9px 0 7px; font-family:var(--font-serif); font-size:clamp(1.7rem,3vw,2.5rem); line-height:1; letter-spacing:-.05em; }.evidence-source-dialog > small { color:rgba(255,250,240,.65); }.evidence-source-dialog blockquote { margin:19px 0 13px; border-left:3px solid var(--agent-coral); padding:12px 15px; color:#fffaf0; background:rgba(255,253,247,.09); font-family:var(--font-serif); font-size:1rem; line-height:1.8; }.evidence-source-dialog > p { color:rgba(255,250,240,.69); font-size:.74rem; line-height:1.65; }.evidence-source-dialog > div { display:flex; justify-content:flex-end; gap:9px; margin-top:20px; }.evidence-source-dialog .btn { border-radius:9px; }.evidence-source-dialog .btn-primary { border:0; color:#102c32; background:var(--agent-lime); }
+.map-card-title { display:flex; align-items:flex-start; gap:14px; }.map-card-title > span { min-width:34px; margin:4px 0 0!important; color:var(--agent-coral)!important; font-family:var(--font-serif); font-size:2.4rem!important; line-height:.78; }.map-card-title h2 { margin:0 0 8px!important; }.map-card-title p { max-width:700px; margin:0!important; color:var(--agent-ink-soft)!important; font-size:.78rem; line-height:1.55!important; }.map-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:17px 0 10px; }.map-toolbar .graph-tools { margin:0; }.map-toolbar small { color:var(--agent-ink-soft); }.map-toolbar small b { color:var(--agent-coral); font-family:var(--font-serif); font-size:1rem; }
+.reading-map-card .reading-map-events.story-thread { display:grid; grid-template-columns:1fr; gap:0; max-height:none; margin:0; padding:4px 0 0; overflow:auto; list-style:none; }.story-thread li { position:relative; display:grid!important; grid-template-columns:46px minmax(0,1fr); gap:0 12px; margin:0!important; padding:0!important; border:0!important; border-radius:0!important; background:transparent!important; }.event-marker { position:relative; z-index:1; display:grid; place-items:start center; padding-top:14px; }.event-marker::after { content:''; position:absolute; top:42px; bottom:-13px; width:1px; background:rgba(16,44,50,.15); }.story-thread li:last-child .event-marker::after { display:none; }.event-marker b { display:grid; width:29px; height:29px; place-items:center; border:1px solid rgba(212,97,69,.42); border-radius:50%; color:var(--agent-coral); background:#fffdf7; font-size:.62rem; }.event-card { margin-bottom:12px; border:1px solid rgba(16,44,50,.11); border-radius:12px; padding:13px 14px; background:rgba(255,253,247,.78); }.event-card > div { display:flex; align-items:center; gap:8px; }.event-card em { border-radius:99px; padding:3px 6px; color:#54796d; background:rgba(184,214,125,.22); font-size:.58rem; font-style:normal; font-weight:800; }.event-card strong { min-width:0; color:var(--agent-ink); font-family:var(--font-serif); font-size:.94rem; }.event-card p { margin:8px 0!important; font-size:.72rem!important; line-height:1.55!important; }.event-card footer { display:flex; align-items:center; gap:9px; }.event-card footer small { color:var(--agent-ink-soft); }.event-card footer > span { border-left:2px solid var(--agent-lime); padding-left:6px; color:#54796d; font-size:.62rem; font-weight:800; }.event-card .evidence-jump { margin:0 0 0 auto; }.event-connector { grid-column:2; position:relative; z-index:1; min-height:17px; padding:0 0 3px; color:#54796d; font-size:.6rem; font-weight:800; }.event-connector span { display:inline-block; padding:2px 6px; border-radius:5px; background:rgba(184,214,125,.18); }.map-footnote { margin-top:8px; }
+@media (min-width:1080px) { .insight-stage .graph-card { min-height:0!important; }.relationship-globe-shell { min-height:0; }.insight-stage .graph-card .relationship-globe { height:100%!important; margin:0!important; border:0!important; border-radius:0!important; background:transparent!important; } }
+@media (max-width:900px) { .relationship-globe-shell { flex-basis:430px; }.graph-inspector { grid-template-columns:1fr; }.graph-node-list { grid-template-columns:repeat(5,minmax(100px,1fr)); overflow-x:auto; padding-bottom:3px; }.graph-node-list button { min-width:100px; } }
+@media (max-width:600px) { .graph-card-title > span { font-size:1.9rem!important; }.graph-card-title p { font-size:.7rem; }.globe-toolbar-status { width:100%; justify-content:space-between; }.relationship-globe-shell { flex-basis:390px; min-height:390px; border-radius:15px; }.globe-hud-top { top:11px; left:12px; }.globe-hud-top span:last-child { display:none; }.globe-hud-bottom { right:11px; bottom:10px; gap:7px; font-size:.53rem; }.graph-inspector { margin-top:9px; }.graph-evidence,.graph-evidence.graph-evidence-empty { min-height:0; }.graph-node-list { display:none; } }
+</style>
+
+<style scoped>
+/* Keep every overlay legible against the deliberately dark relation canvas. */
+.globe-toolbar-status { color:rgba(255,253,247,.92); text-shadow:0 1px 2px rgba(0,0,0,.55); }
+.globe-hud { border:1px solid rgba(255,253,247,.18); border-radius:7px; padding:5px 7px; color:rgba(255,253,247,.95); background:rgba(4,24,33,.7); box-shadow:0 2px 9px rgba(0,0,0,.18); text-shadow:0 1px 2px rgba(0,0,0,.75); }
+.relationship-canvas-head { border-bottom-color:rgba(255,253,247,.18); background:linear-gradient(100deg,#0b2935,#154653); }
+.relationship-canvas-head > div:first-child > span { color:#dbf19c; }
+.relationship-canvas-head p { color:rgba(255,253,247,.88); }
+.relationship-canvas-head > div:last-child > span { border-color:rgba(255,253,247,.28); color:rgba(255,253,247,.92); background:rgba(4,24,33,.34); }
+.relationship-canvas-head button { border-color:rgba(255,253,247,.34); color:#fffdf2; background:rgba(255,253,247,.1); }
+.canvas-corner-note { border-radius:6px; padding:5px 7px; color:rgba(255,253,247,.92); background:rgba(4,24,33,.74); }
+.relationship-canvas-foot { border-top-color:rgba(255,253,247,.16); color:rgba(255,253,247,.9); background:#0a2530; }
+.canvas-selection span,.canvas-selection button { color:#dbf19c; }
+.canvas-selection b { color:#fffdf2; }
+.canvas-selection small { color:rgba(255,253,247,.84); }
 </style>

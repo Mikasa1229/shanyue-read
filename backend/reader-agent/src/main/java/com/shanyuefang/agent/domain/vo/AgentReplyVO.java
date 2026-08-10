@@ -13,4 +13,5 @@ public class AgentReplyVO {
     private String mode;
     private boolean degraded;
     private List<CitationVO> citations;
+    private List<BookReferenceVO> bookReferences;
 }

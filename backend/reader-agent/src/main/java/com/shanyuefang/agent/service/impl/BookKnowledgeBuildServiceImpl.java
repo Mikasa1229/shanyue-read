@@ -40,6 +40,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -48,6 +50,8 @@ import java.util.stream.Collectors;
 public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService {
     private static final String PLATFORM = "PLATFORM";
     private static final String BYOK = "BYOK";
+    /** Avoid resolving the same work name on every two-second task-list refresh. */
+    private final ConcurrentMap<Long, String> bookTitles = new ConcurrentHashMap<>();
     private final BookKnowledgeBuildTaskMapper taskMapper;
     private final BookKnowledgeChapterCoverageMapper coverageMapper;
     private final BookKnowledgeSpaceMapper spaceMapper;
@@ -69,17 +73,19 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
     @Override
     public Map<String, Object> prepare(long userId, long canonicalBookId, Integer startChapter, Integer endChapter) {
         BookKnowledgeSpace existing = spaceMapper.selectById(canonicalBookId);
-        ChapterRange range = uncoveredRange(canonicalBookId, resolveRange(canonicalBookId, startChapter, endChapter));
-        Estimate estimate = estimate(canonicalBookId, range);
+        ChapterRange requestedRange = resolveRange(canonicalBookId, startChapter, endChapter);
+        ChapterRange uncoveredRange = uncoveredRange(canonicalBookId, requestedRange);
+        Estimate estimate = estimate(canonicalBookId, uncoveredRange);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("canonicalBookId", canonicalBookId);
         result.put("status", existing == null ? "NOT_BUILT" : existing.getStatus());
         result.put("isPublic", existing == null || Boolean.TRUE.equals(existing.getIsPublic()));
-        result.put("totalChapters", range.availableChapters());
-        result.put("startChapter", range.startChapter());
-        result.put("endChapter", range.endChapter());
+        result.put("isOwner", existing != null && Long.valueOf(userId).equals(existing.getOwnerUserId()));
+        result.put("totalChapters", requestedRange.availableChapters());
+        result.put("startChapter", requestedRange.startChapter());
+        result.put("endChapter", requestedRange.endChapter());
         result.put("selectedChapters", estimate.chapters());
-        result.put("coveredChapters", coveredChapterCount(canonicalBookId, range));
+        result.put("coveredChapters", coveredChapterCount(canonicalBookId, requestedRange));
         result.put("rangeCovered", estimate.chapters() == 0);
         result.put("estimatedInputTokens", estimate.inputTokens());
         result.put("estimatedOutputTokens", estimate.outputTokens());
@@ -97,6 +103,9 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         Estimate estimate = estimate(canonicalBookId, range);
         if (estimate.chapters() == 0) throw new BusinessException(ResultCode.PARAM_ERROR, "所选章节均已完成知识图谱构建，无需重复消耗积分。");
         BookKnowledgeSpace space = spaceMapper.selectById(canonicalBookId);
+        if (space != null && space.getOwnerUserId() != null && !Long.valueOf(userId).equals(space.getOwnerUserId())) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "该知识图谱由其他用户创建，你可以使用公开图谱但不能覆盖它");
+        }
         if (space != null && ("QUEUED".equals(space.getStatus()) || "RUNNING".equals(space.getStatus()))) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "这本书的知识图谱正在构建，请在任务中心查看进度。");
         }
@@ -123,8 +132,28 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
     }
 
     @Override public List<BookKnowledgeBuildTask> myTasks(long userId, int limit) {
-        return taskMapper.selectList(Wrappers.<BookKnowledgeBuildTask>lambdaQuery().eq(BookKnowledgeBuildTask::getRequesterUserId, userId)
+        List<BookKnowledgeBuildTask> tasks = taskMapper.selectList(Wrappers.<BookKnowledgeBuildTask>lambdaQuery()
+                .eq(BookKnowledgeBuildTask::getRequesterUserId, userId)
                 .orderByDesc(BookKnowledgeBuildTask::getUpdatedAt).last("LIMIT " + Math.max(1, Math.min(limit, 100))));
+        tasks.forEach(task -> task.setBookTitle(resolveBookTitle(task.getCanonicalBookId())));
+        return tasks;
+    }
+
+    private String resolveBookTitle(Long canonicalBookId) {
+        if (canonicalBookId == null) return null;
+        String cachedTitle = bookTitles.get(canonicalBookId);
+        if (cachedTitle != null) return cachedTitle;
+        try {
+            R<Map<String, Object>> response = canonicalBookClient.detail(properties.getInternalToken(), canonicalBookId);
+            Object title = response == null || response.getData() == null ? null : response.getData().get("title");
+            if (title == null || !StringUtils.hasText(String.valueOf(title))) return "未知作品";
+            String resolvedTitle = String.valueOf(title);
+            bookTitles.putIfAbsent(canonicalBookId, resolvedTitle);
+            return resolvedTitle;
+        } catch (Exception ignored) {
+            // A temporary novel-service failure must not make the task center unavailable.
+            return "未知作品";
+        }
     }
 
     @Override
@@ -139,6 +168,47 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         if (taskMapper.deleteOwnedTask(userId, taskId) != 1) {
             throw new BusinessException(ResultCode.NOT_FOUND, "该构建任务已被删除");
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateSharing(long userId, long canonicalBookId, boolean isPublic) {
+        BookKnowledgeSpace space = requireOwnedSpace(userId, canonicalBookId);
+        if ("QUEUED".equals(space.getStatus()) || "RUNNING".equals(space.getStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT, "图谱构建中，完成后才能修改共享范围");
+        }
+        space.setIsPublic(isPublic); space.setUpdatedAt(LocalDateTime.now()); spaceMapper.updateById(space);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteOwnedGraph(long userId, long canonicalBookId) {
+        BookKnowledgeSpace space = requireOwnedSpace(userId, canonicalBookId);
+        if ("QUEUED".equals(space.getStatus()) || "RUNNING".equals(space.getStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT, "图谱构建中，不能删除");
+        }
+        knowledgeService.clearGraph(canonicalBookId);
+        coverageMapper.delete(Wrappers.<BookKnowledgeChapterCoverage>lambdaQuery()
+                .eq(BookKnowledgeChapterCoverage::getCanonicalBookId, canonicalBookId));
+        space.setStatus("NOT_BUILT"); space.setCompletedChapters(0); space.setFailureMessage(null);
+        space.setUpdatedAt(LocalDateTime.now()); spaceMapper.updateById(space);
+    }
+
+    @Override
+    public void ensureReadable(long userId, long canonicalBookId) {
+        BookKnowledgeSpace space = spaceMapper.selectById(canonicalBookId);
+        if (space != null && !Boolean.TRUE.equals(space.getIsPublic())
+                && !Long.valueOf(userId).equals(space.getOwnerUserId())) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "这本书的知识图谱仅创建者可见");
+        }
+    }
+
+    private BookKnowledgeSpace requireOwnedSpace(long userId, long canonicalBookId) {
+        BookKnowledgeSpace space = spaceMapper.selectById(canonicalBookId);
+        if (space == null || !Long.valueOf(userId).equals(space.getOwnerUserId())) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "只有创建者可以管理这本书的知识图谱");
+        }
+        return space;
     }
 
     @Override public Map<Long, Map<String, Object>> statuses(Collection<Long> ids) {
@@ -159,6 +229,63 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         if (spaceMapper.selectById(canonicalBookId) == null) spaceMapper.insert(space); else spaceMapper.updateById(space);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void synchronizeCompletedRange(long canonicalBookId, int startChapter, int endChapter, boolean replaceExisting) {
+        if (startChapter < 1 || endChapter < startChapter) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "知识图谱章节覆盖范围无效");
+        }
+        if (replaceExisting) {
+            coverageMapper.delete(Wrappers.<BookKnowledgeChapterCoverage>lambdaQuery()
+                    .eq(BookKnowledgeChapterCoverage::getCanonicalBookId, canonicalBookId));
+        }
+        List<Integer> indexedChapters = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
+                        .eq(KnowledgeChunk::getCanonicalBookId, canonicalBookId)
+                        .between(KnowledgeChunk::getChapterIndex, startChapter - 1, endChapter - 1))
+                .stream().map(KnowledgeChunk::getChapterIndex).filter(java.util.Objects::nonNull).distinct().toList();
+        if (indexedChapters.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "所选范围没有可同步的章节正文索引");
+        }
+        recordCoverage(canonicalBookId, indexedChapters);
+        publishSynchronizedSpace(canonicalBookId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void synchronizeAllIndexedChapters(long canonicalBookId, boolean replaceExisting) {
+        List<Integer> indexedChapters = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
+                        .eq(KnowledgeChunk::getCanonicalBookId, canonicalBookId))
+                .stream().map(KnowledgeChunk::getChapterIndex).filter(java.util.Objects::nonNull).distinct().toList();
+        if (indexedChapters.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "这本书没有可同步的章节正文索引");
+        }
+        if (replaceExisting) {
+            coverageMapper.delete(Wrappers.<BookKnowledgeChapterCoverage>lambdaQuery()
+                    .eq(BookKnowledgeChapterCoverage::getCanonicalBookId, canonicalBookId));
+        }
+        recordCoverage(canonicalBookId, indexedChapters);
+        publishSynchronizedSpace(canonicalBookId);
+    }
+
+    private void publishSynchronizedSpace(long canonicalBookId) {
+        int covered = totalCoveredChapterCount(canonicalBookId);
+        BookKnowledgeSpace space = spaceMapper.selectById(canonicalBookId);
+        boolean insert = space == null;
+        if (insert) {
+            space = new BookKnowledgeSpace();
+            space.setCanonicalBookId(canonicalBookId);
+            space.setIsPublic(true);
+            space.setModelMode(PLATFORM);
+            space.setCreatedAt(LocalDateTime.now());
+        }
+        space.setStatus("READY");
+        space.setTotalChapters(covered);
+        space.setCompletedChapters(covered);
+        space.setFailureMessage(null);
+        space.setUpdatedAt(LocalDateTime.now());
+        if (insert) spaceMapper.insert(space); else spaceMapper.updateById(space);
+    }
+
     private void run(long taskId) {
         BookKnowledgeBuildTask task = taskMapper.selectById(taskId); if (task == null) return;
         try {
@@ -168,11 +295,11 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
             AtomicInteger completed = new AtomicInteger();
             knowledgeService.buildGraphRange(task.getCanonicalBookId(), task.getStartChapter(), task.getEndChapter(), config,
                     count -> updateProgress(task, completed.incrementAndGet()));
-            recordCoverage(task);
+            synchronizeCompletedRange(task.getCanonicalBookId(), task.getStartChapter(), task.getEndChapter(), false);
             long graphClaims = nodeMapper.selectCount(Wrappers.<com.shanyuefang.agent.domain.entity.KnowledgeGraphNode>lambdaQuery()
                     .eq(com.shanyuefang.agent.domain.entity.KnowledgeGraphNode::getCanonicalBookId, task.getCanonicalBookId()));
             if (graphClaims == 0) throw new IllegalStateException("模型未返回可验证的实体或关系，未发布空知识图谱");
-            task.setStatus("COMPLETED"); task.setCompletedChapters(task.getTotalChapters()); task.setMessage("知识图谱已构建完成"); task.setCompletedAt(LocalDateTime.now()); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "READY", task.getTotalChapters(), null);
+            task.setStatus("COMPLETED"); task.setCompletedChapters(task.getTotalChapters()); task.setMessage("知识图谱已构建完成"); task.setCompletedAt(LocalDateTime.now()); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task);
             if (PLATFORM.equals(task.getModelMode())) settle(task);
             if (Boolean.TRUE.equals(task.getIsPublic())) publishShare(task);
         } catch (Exception exception) {
@@ -186,12 +313,17 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
     private void updateProgress(BookKnowledgeBuildTask task, int completed) {
         task.setCompletedChapters(completed); task.setMessage("已完成 " + completed + " / " + task.getTotalChapters() + " 章的大模型关系抽取"); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "RUNNING", completed, null);
     }
-    private void recordCoverage(BookKnowledgeBuildTask task) {
-        for (int chapter = task.getStartChapter(); chapter <= task.getEndChapter(); chapter++) {
+    private void recordCoverage(long canonicalBookId, List<Integer> chapterIndexes) {
+        for (Integer chapterIndex : chapterIndexes) {
             BookKnowledgeChapterCoverage coverage = new BookKnowledgeChapterCoverage();
-            coverage.setCanonicalBookId(task.getCanonicalBookId()); coverage.setChapterIndex(chapter - 1); coverage.setCompletedAt(LocalDateTime.now());
+            coverage.setCanonicalBookId(canonicalBookId); coverage.setChapterIndex(chapterIndex); coverage.setCompletedAt(LocalDateTime.now());
             coverageMapper.insertIfAbsent(coverage);
         }
+    }
+    private int totalCoveredChapterCount(long canonicalBookId) {
+        Long count = coverageMapper.selectCount(Wrappers.<BookKnowledgeChapterCoverage>lambdaQuery()
+                .eq(BookKnowledgeChapterCoverage::getCanonicalBookId, canonicalBookId));
+        return count == null ? 0 : count.intValue();
     }
     private void updateSpace(BookKnowledgeBuildTask task, String status, int completed, String error) {
         BookKnowledgeSpace space = spaceMapper.selectById(task.getCanonicalBookId()); if (space == null) return;
@@ -230,6 +362,7 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         return config;
     }
     private Estimate estimate(long bookId, ChapterRange range) {
+        if (range.endChapter() < range.startChapter()) return new Estimate(0, 0L, 0L, 0);
         List<KnowledgeChunk> chunks = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
                 .eq(KnowledgeChunk::getCanonicalBookId, bookId)
                 .between(KnowledgeChunk::getChapterIndex, range.startChapter() - 1, range.endChapter() - 1));

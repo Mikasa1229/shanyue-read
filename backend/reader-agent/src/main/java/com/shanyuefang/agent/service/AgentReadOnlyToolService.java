@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shanyuefang.agent.domain.dto.ChatMessageDTO;
 import com.shanyuefang.agent.domain.vo.ClueVO;
 import com.shanyuefang.agent.domain.vo.KnowledgeGraphVO;
+import com.shanyuefang.agent.domain.vo.BookReferenceVO;
 import com.shanyuefang.agent.feign.NovelShelfFeignClient;
 import com.shanyuefang.agent.feign.CanonicalBookFeignClient;
 import com.shanyuefang.agent.config.AgentProperties;
@@ -41,12 +42,15 @@ public class AgentReadOnlyToolService {
             tools.add("bookshelf.read");
             context.add(readShelf(userId));
         }
+        List<BookReferenceVO> bookReferences = new ArrayList<>();
         if (dto.getCanonicalBookId() != null && asksForBookDetail(normalized)) {
             tools.add("book.detail.read");
             context.add(readBookDetail(dto.getCanonicalBookId()));
         } else if (asksForBookSearch(normalized)) {
             tools.add("book.search.read");
-            context.add(searchBooks(request));
+            SearchResult searchResult = searchBooks(request);
+            context.add(searchResult.context());
+            bookReferences.addAll(searchResult.bookReferences());
         }
         if (dto.getCanonicalBookId() != null && dto.getCurrentChapter() != null && asksForGraph(normalized)) {
             tools.add("knowledge_graph.read");
@@ -59,7 +63,7 @@ public class AgentReadOnlyToolService {
         }
 
         if (context.isEmpty()) return ToolResult.empty();
-        return new ToolResult(String.join("\n", context), trace(tools, dto));
+        return new ToolResult(String.join("\n", context), trace(tools, dto), bookReferences);
     }
 
     private String readShelf(long userId) {
@@ -97,14 +101,31 @@ public class AgentReadOnlyToolService {
                     + "；" + String.valueOf(book.getOrDefault("summary", "暂无已验证简介。"));
         } catch (Exception ignored) { return "作品详情：暂时不可用。"; }
     }
-    private String searchBooks(String request) {
+    private SearchResult searchBooks(String request) {
         try {
-            R<List<Map<String, Object>>> response = canonicalBookClient.search(properties.getInternalToken(), request.trim(), 6);
+            R<List<Map<String, Object>>> response = canonicalBookClient.search(properties.getInternalToken(), request.trim(), 12);
             List<Map<String, Object>> books = response == null || response.getData() == null ? List.of() : response.getData();
-            return "作品搜索结果：" + books.stream().map(book -> String.valueOf(book.getOrDefault("title", "未命名"))
-                    + " / " + String.valueOf(book.getOrDefault("author", "未知作者"))).reduce((a, b) -> a + "；" + b).orElse("没有找到已索引作品");
-        } catch (Exception ignored) { return "作品搜索：暂时不可用。"; }
+            List<BookReferenceVO> references = books.stream().map(this::toBookReference)
+                    .filter(reference -> reference.getCanonicalBookId() != null && reference.getSourceId() != null
+                            && reference.getSourceBookUrl() != null && !reference.getSourceBookUrl().isBlank())
+                    .limit(8).toList();
+            String context = references.isEmpty() ? "平台书源搜索没有找到可直接阅读的作品。"
+                    : "平台书源已验证候选（只能从下列作品中推荐；不得补充列表外作品）：\n" + references.stream()
+                    .map(book -> "- 《" + book.getTitle() + "》 / " + book.getAuthor()
+                            + (book.getSummary() == null || book.getSummary().isBlank() ? "" : " / " + book.getSummary()))
+                    .reduce((a, b) -> a + "\n" + b).orElse("");
+            return new SearchResult(context, references);
+        } catch (Exception ignored) { return new SearchResult("平台书源搜索暂时不可用。不得凭模型记忆补充作品。", List.of()); }
     }
+
+    private BookReferenceVO toBookReference(Map<String, Object> book) {
+        return new BookReferenceVO(longOrNull(book.get("canonicalBookId")), string(book.get("title")),
+                string(book.get("author")), string(book.get("coverUrl")), longOrNull(book.get("sourceId")),
+                string(book.get("sourceBookUrl")), string(book.get("summary")));
+    }
+
+    private Long longOrNull(Object value) { try { return value == null ? null : Long.valueOf(String.valueOf(value)); } catch (Exception ignored) { return null; } }
+    private String string(Object value) { return value == null ? "" : String.valueOf(value); }
 
     private boolean asksForShelf(String request) {
         return request.contains("bookshelf") || request.contains("my books") || request.contains("书架") || request.contains("在读");
@@ -118,7 +139,15 @@ public class AgentReadOnlyToolService {
         return request.contains("recap") || request.contains("progress") || request.contains("timeline") || request.contains("回顾") || request.contains("进度") || request.contains("剧情");
     }
     private boolean asksForBookDetail(String request) { return request.contains("book detail") || request.contains("about this book") || request.contains("这本书") || request.contains("作品简介"); }
-    private boolean asksForBookSearch(String request) { return request.contains("find book") || request.contains("recommend book") || request.contains("找书") || request.contains("推荐书"); }
+    static boolean asksForBookSearch(String request) {
+        return request.contains("find book") || request.contains("recommend book") || request.contains("recommendation")
+                || request.contains("找书") || request.contains("搜书") || request.contains("搜索")
+                || request.contains("推荐") || request.contains("书源") || request.contains("有什么书")
+                || request.contains("看什么") || request.contains("读什么")
+                || request.contains("换一本") || request.contains("换个") || request.contains("直接推荐")
+                || request.contains("热门") || request.contains("点击") || request.contains("确定是")
+                || request.contains("引用") || request.contains("链接") || request.contains("可读");
+    }
 
     private String trace(List<String> tools, ChatMessageDTO dto) {
         try {
@@ -133,8 +162,9 @@ public class AgentReadOnlyToolService {
         }
     }
 
-    public record ToolResult(String context, String traceJson) {
-        public static ToolResult empty() { return new ToolResult("", null); }
+    public record ToolResult(String context, String traceJson, List<BookReferenceVO> bookReferences) {
+        public static ToolResult empty() { return new ToolResult("", null, List.of()); }
         public boolean used() { return !context.isBlank(); }
     }
+    private record SearchResult(String context, List<BookReferenceVO> bookReferences) { }
 }

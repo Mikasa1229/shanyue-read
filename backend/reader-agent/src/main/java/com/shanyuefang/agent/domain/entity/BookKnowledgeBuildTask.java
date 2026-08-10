@@ -1,6 +1,7 @@
 package com.shanyuefang.agent.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
@@ -12,6 +13,8 @@ import java.time.LocalDateTime;
 public class BookKnowledgeBuildTask {
     @TableId @JsonSerialize(using = ToStringSerializer.class) private Long id;
     @JsonSerialize(using = ToStringSerializer.class) private Long canonicalBookId;
+    /** Populated for task-list responses; the task table only stores the canonical work id. */
+    @TableField(exist = false) private String bookTitle;
     @JsonSerialize(using = ToStringSerializer.class) private Long requesterUserId;
     private String modelMode;
     @JsonSerialize(using = ToStringSerializer.class) private Long modelConfigId;
