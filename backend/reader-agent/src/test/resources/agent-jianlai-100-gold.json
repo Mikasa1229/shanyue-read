@@ -1,36 +1,45 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "2.0",
   "canonicalBookId": 358679512818388992,
   "chapterRange": {"start": 1, "end": 100},
-  "description": "仅用于《剑来》前100章抽取与检索质量评估，不包含后期百科事实。",
+  "description": "仅依据《剑来》前100章的本地正文人工审定。关系金标检查语义、方向和章节证据，不能以人物同场出现代替关系。",
   "canonicalEntities": [
     {"name": "陈平安", "type": "CHARACTER", "aliases": ["草鞋少年"]},
     {"name": "刘羡阳", "type": "CHARACTER", "aliases": []},
     {"name": "宋集薪", "type": "CHARACTER", "aliases": []},
-    {"name": "顾璨", "type": "CHARACTER", "aliases": []},
+    {"name": "顾粲", "type": "CHARACTER", "aliases": []},
     {"name": "宁姚", "type": "CHARACTER", "aliases": ["黑衣少女"]},
     {"name": "齐静春", "type": "CHARACTER", "aliases": ["齐先生"]},
+    {"name": "阮邛", "type": "CHARACTER", "aliases": ["阮师傅"]},
+    {"name": "朱鹿", "type": "CHARACTER", "aliases": []},
     {"name": "泥瓶巷", "type": "LOCATION", "aliases": []},
-    {"name": "杏花巷", "type": "LOCATION", "aliases": []},
-    {"name": "小镇", "type": "LOCATION", "aliases": []}
+    {"name": "骑龙巷", "type": "LOCATION", "aliases": []}
   ],
   "requiredRelations": [
-    {"source": "陈平安", "target": "刘羡阳", "acceptedTypes": ["KNOWS", "SUPPORTS", "TRAVELS_WITH", "INTERACTS_WITH"]},
-    {"source": "陈平安", "target": "宋集薪", "acceptedTypes": ["KNOWS", "OPPOSES", "INTERACTS_WITH"]},
-    {"source": "陈平安", "target": "宁姚", "acceptedTypes": ["KNOWS", "SUPPORTS", "TRAVELS_WITH", "INTERACTS_WITH"]},
-    {"source": "陈平安", "target": "泥瓶巷", "acceptedTypes": ["LIVES_IN", "VISITS"]},
-    {"source": "宋集薪", "target": "泥瓶巷", "acceptedTypes": ["LIVES_IN", "VISITS"]}
+    {"id": "chen-song-neighbors", "source": "陈平安", "target": "宋集薪", "acceptedTypes": ["NEIGHBOR_OF"], "direction": "EITHER", "kind": "NARRATIVE", "evidenceChapters": [0], "minEvidenceTerms": ["陈平安", "宋集薪"]},
+    {"id": "chen-liu-knows", "source": "陈平安", "target": "刘羡阳", "acceptedTypes": ["KNOWS", "COMPANION_OF", "FRIEND_OF"], "direction": "EITHER", "kind": "SOCIAL", "evidenceChapters": [0, 3, 7], "minEvidenceTerms": ["陈平安", "刘羡阳"]},
+    {"id": "liu-chen-helps", "source": "刘羡阳", "target": "陈平安", "acceptedTypes": ["HELPS", "GUIDES"], "direction": "FORWARD", "kind": "NARRATIVE", "evidenceChapters": [3, 18], "minEvidenceTerms": ["刘羡阳", "陈平安"]},
+    {"id": "qi-chen-guides", "source": "齐静春", "target": "陈平安", "acceptedTypes": ["GUIDES"], "direction": "FORWARD", "kind": "NARRATIVE", "evidenceChapters": [21, 22, 23], "minEvidenceTerms": ["齐", "陈平安"]},
+    {"id": "chen-ning-protects", "source": "陈平安", "target": "宁姚", "acceptedTypes": ["PROTECTS", "HELPS", "TRAVELS_WITH"], "direction": "FORWARD", "kind": "NARRATIVE", "evidenceChapters": [14, 45, 54], "minEvidenceTerms": ["陈平安", "宁姚"]},
+    {"id": "ruan-zhu-parent", "source": "阮邛", "target": "阮秀", "acceptedTypes": ["PARENT_OF"], "direction": "FORWARD", "kind": "SOCIAL", "evidenceChapters": [45], "minEvidenceTerms": ["阮邛", "阮秀"]},
+    {"id": "zhu-zhu-parent", "source": "朱河", "target": "朱鹿", "acceptedTypes": ["PARENT_OF"], "direction": "FORWARD", "kind": "SOCIAL", "evidenceChapters": [90], "minEvidenceTerms": ["朱河", "朱鹿"]},
+    {"id": "chen-mud-bottle-home", "source": "陈平安", "target": "泥瓶巷", "acceptedTypes": ["LIVES_IN", "VISITS"], "direction": "FORWARD", "kind": "PLACE", "evidenceChapters": [0, 1], "minEvidenceTerms": ["陈平安", "泥瓶巷"]}
   ],
   "forbiddenRelations": [
-    {"source": "陈平安", "target": "顾璨", "types": ["FAMILY_OF", "MENTORS"]},
-    {"source": "陈平安", "target": "刘羡阳", "types": ["FAMILY_OF", "MENTORS"]},
-    {"source": "陈平安", "target": "姚老头", "types": ["MENTORS"]}
+    {"id": "qi-not-master", "source": "齐静春", "target": "陈平安", "types": ["TEACHER_OF", "MASTER_OF"], "direction": "EITHER"},
+    {"id": "chen-liu-not-family", "source": "陈平安", "target": "刘羡阳", "types": ["PARENT_OF", "SIBLING_OF", "SPOUSE_OF"], "direction": "EITHER"},
+    {"id": "chen-song-not-family", "source": "陈平安", "target": "宋集薪", "types": ["PARENT_OF", "SIBLING_OF", "SPOUSE_OF"], "direction": "EITHER"},
+    {"id": "chen-gu-not-mentor", "source": "陈平安", "target": "顾粲", "types": ["TEACHER_OF", "MASTER_OF"], "direction": "EITHER"}
   ],
   "retrievalCases": [
-    {"id": "early-home", "query": "陈平安早年住在哪里？", "expectedTerms": ["陈平安", "泥瓶巷"], "maxChapterIndex": 99},
-    {"id": "liu-relationship", "query": "刘羡阳和陈平安在前期有什么交集？", "expectedTerms": ["刘羡阳", "陈平安"], "maxChapterIndex": 99},
-    {"id": "ning-first-thread", "query": "宁姚在小镇早期与陈平安发生了什么？", "expectedTerms": ["宁姚", "陈平安"], "maxChapterIndex": 99},
-    {"id": "qi-alias", "query": "齐先生是谁？", "expectedTerms": ["齐先生", "齐静春"], "maxChapterIndex": 99},
-    {"id": "spoiler-boundary", "query": "只根据前100章说明陈平安此时的经历，不要透露后续身份。", "expectedTerms": ["陈平安"], "forbiddenTerms": ["隐官", "落魄山宗主", "裴钱"], "maxChapterIndex": 99}
+    {"id": "early-home", "query": "陈平安早年住在哪里？", "expectedTerms": ["陈平安", "泥瓶巷"], "expectedEvidenceChapters": [0, 1], "maxChapterIndex": 99},
+    {"id": "chen-song-neighbors", "query": "陈平安和宋集薪在小镇是什么关系？", "expectedTerms": ["陈平安", "宋集薪"], "expectedRelationId": "chen-song-neighbors", "expectedEvidenceChapters": [0], "maxChapterIndex": 99},
+    {"id": "liu-helps-chen", "query": "刘羡阳在前期怎样帮助或照应陈平安？", "expectedTerms": ["刘羡阳", "陈平安"], "expectedRelationId": "liu-chen-helps", "expectedEvidenceChapters": [3, 18], "maxChapterIndex": 99},
+    {"id": "qi-guides-chen", "query": "齐先生在前100章如何引导陈平安？", "expectedTerms": ["陈平安"], "expectedRelationId": "qi-chen-guides", "expectedEvidenceChapters": [21, 22, 23], "maxChapterIndex": 99},
+    {"id": "ning-alias", "query": "黑衣少女是谁？她在小镇早期和陈平安发生过什么？", "expectedTerms": ["陈平安"], "expectedEvidenceChapters": [14, 45, 54], "maxChapterIndex": 99},
+    {"id": "ruan-work", "query": "陈平安为什么会去骑龙巷找阮师傅？", "expectedTerms": ["陈平安", "阮"], "expectedEvidenceChapters": [0, 3], "maxChapterIndex": 99},
+    {"id": "ceramic-apprentices", "query": "刘羡阳和陈平安与姚老头的龙窑经历有什么不同？", "expectedTerms": ["陈平安", "刘羡阳"], "expectedEvidenceChapters": [0, 1, 7], "maxChapterIndex": 99},
+    {"id": "gu-chen", "query": "顾粲害怕时为什么会找陈平安？", "expectedTerms": ["顾粲", "陈平安"], "expectedEvidenceChapters": [7], "maxChapterIndex": 99},
+    {"id": "spoiler-boundary", "query": "只根据前100章说明陈平安此时的经历，不要透露后续身份。", "expectedTerms": ["陈平安"], "expectedEvidenceChapters": [0, 1, 3, 7, 21, 22, 45, 54, 99], "forbiddenTerms": ["隐官", "落魄山宗主", "裴钱"], "maxChapterIndex": 99}
   ]
 }

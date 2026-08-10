@@ -20,7 +20,22 @@ class JianLaiHundredChapterGoldDatasetTest {
             JsonNode root = new ObjectMapper().readTree(input);
             assertEquals(1, root.path("chapterRange").path("start").asInt());
             assertEquals(100, root.path("chapterRange").path("end").asInt());
+            assertEquals("2.0", root.path("schemaVersion").asText());
+            assertTrue(root.path("requiredRelations").size() >= 8,
+                    "the relationship benchmark must cover more than family relations");
+            for (JsonNode relation : root.path("requiredRelations")) {
+                assertFalse(relation.path("id").asText().isBlank());
+                assertFalse(relation.path("source").asText().isBlank());
+                assertFalse(relation.path("target").asText().isBlank());
+                assertTrue(relation.path("acceptedTypes").isArray());
+                assertFalse(relation.path("acceptedTypes").isEmpty());
+                assertTrue(relation.path("evidenceChapters").isArray());
+                assertFalse(relation.path("evidenceChapters").isEmpty());
+                assertTrue(relation.path("direction").asText().matches("FORWARD|EITHER"));
+            }
             assertFalse(root.path("retrievalCases").isEmpty());
+            assertTrue(root.path("retrievalCases").size() >= 9,
+                    "retrieval evaluation needs relationship, alias, and spoiler coverage");
             for (JsonNode evaluation : root.path("retrievalCases")) {
                 assertFalse(evaluation.path("id").asText().isBlank());
                 assertFalse(evaluation.path("query").asText().isBlank());
@@ -28,6 +43,8 @@ class JianLaiHundredChapterGoldDatasetTest {
                         "chapterIndex is zero-based; the first 100 chapters end at 99");
                 assertTrue(evaluation.path("expectedTerms").isArray());
                 assertFalse(evaluation.path("expectedTerms").isEmpty());
+                assertTrue(evaluation.path("expectedEvidenceChapters").isArray());
+                assertFalse(evaluation.path("expectedEvidenceChapters").isEmpty());
             }
         }
     }

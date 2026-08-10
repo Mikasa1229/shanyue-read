@@ -75,6 +75,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final int STORY_EVENT_WINDOW_OVERLAP = 3;
     private static final int CHARACTER_KNOWLEDGE_WINDOW_CHAPTERS = 8;
     private static final int CHARACTER_KNOWLEDGE_WINDOW_OVERLAP = 2;
+    private static final String CHARACTER_KNOWLEDGE_VERSION_PREFIX = "character-window-v3:";
     private static final String APPROVED = "APPROVED";
     /** Approximate Chinese-character targets; sentence boundaries take priority over an exact size. */
     private static final int CHUNK_SIZE = 800;
@@ -412,10 +413,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                         .orderByDesc(KnowledgeGraphEdge::getConfidence)
                         .last("LIMIT 240"))
                 .stream().filter(edge -> visibleIds.contains(edge.getSourceNodeId()) && visibleIds.contains(edge.getTargetNodeId()))
-                // Do not expose legacy generic character edges in the reader graph. They
-                // are not a usable relationship predicate and can only be shown when a
-                // future extraction supplies a concrete, evidence-backed relation.
-                .filter(edge -> !Set.of("INTERACTS_WITH", "SUPPORTS", "OPPOSES", "TRAVELS_WITH").contains(edge.getRelation()))
+                // Do not expose only the legacy interaction fallback. Narrative relations
+                // such as HELPS and OPPOSES are retained when backed by source evidence.
+                .filter(edge -> !"INTERACTS_WITH".equals(edge.getRelation()))
                 .map(edge -> new KnowledgeGraphVO.Edge(edge.getSourceNodeId(), edge.getTargetNodeId(), edge.getRelation(),
                         edge.getFirstChapter(), edge.getEvidence(), edge.getConfidence())).toList();
         return new KnowledgeGraphVO(viewNodes, viewEdges);
@@ -856,15 +856,19 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private void calibrateCharacterKnowledge(long bookId, Map<Integer, StringBuilder> chapters,
                                              StructuredGraphExtractor.ModelConfig modelConfig) {
         if (chapters.isEmpty()) return;
-        // 清理早期版本留下的“发生互动”边。它没有稳定语义，继续留在 Neo4j
-        // 投影中会让重新抽取后的具体关系仍被旧边污染。
-        edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery()
-                .eq(KnowledgeGraphEdge::getCanonicalBookId, bookId)
-                .in(KnowledgeGraphEdge::getRelation, List.of("INTERACTS_WITH", "SUPPORTS", "OPPOSES", "TRAVELS_WITH"))
-                .inSql(KnowledgeGraphEdge::getSourceNodeId, "SELECT id FROM t_knowledge_graph_node WHERE node_type = 'CHARACTER'")
-                .inSql(KnowledgeGraphEdge::getTargetNodeId, "SELECT id FROM t_knowledge_graph_node WHERE node_type = 'CHARACTER'"));
         int start = chapters.keySet().stream().mapToInt(Integer::intValue).min().orElse(0);
         int end = chapters.keySet().stream().mapToInt(Integer::intValue).max().orElse(start);
+        // Each calibration run replaces its own derived character relations. This avoids retaining
+        // an edge merely because an earlier model sample passed a rule that later became stricter.
+        // Restrict cleanup to the requested chapter range so a range rebuild never destroys later facts.
+        edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery()
+                .eq(KnowledgeGraphEdge::getCanonicalBookId, bookId)
+                .between(KnowledgeGraphEdge::getFirstChapter, start, end)
+                .in(KnowledgeGraphEdge::getRelation, List.of("INTERACTS_WITH", "SUPPORTS", "OPPOSES", "TRAVELS_WITH",
+                        "KNOWS", "PARENT_OF", "SPOUSE_OF", "SIBLING_OF", "FRIEND_OF", "COMPANION_OF", "TEACHER_OF",
+                        "MASTER_OF", "NEIGHBOR_OF", "GUIDES", "HELPS", "PROTECTS", "CARETAKES", "EMPLOYS"))
+                .inSql(KnowledgeGraphEdge::getSourceNodeId, "SELECT id FROM t_knowledge_graph_node WHERE node_type = 'CHARACTER'")
+                .inSql(KnowledgeGraphEdge::getTargetNodeId, "SELECT id FROM t_knowledge_graph_node WHERE node_type = 'CHARACTER'"));
         calibrateCharacterKnowledgePass(bookId, chapters, modelConfig, start, end);
         // A half-window offset exposes boundary-spanning revelations to a different local context.
         // Both passes remain bounded LightRAG extraction and merge only evidence-verified facts.
@@ -903,11 +907,14 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 String evidence = relation.evidence().stream().limit(3).map(StructuredGraphExtractor.ChapterFact::evidence)
                         .collect(java.util.stream.Collectors.joining("；"));
                 if (isGenericCharacterRelation(relation.type()) && hasSpecificCharacterRelation(bookId, source.getId(), target.getId())) continue;
+                if (Set.of("NEIGHBOR_OF", "FRIEND_OF", "COMPANION_OF", "KNOWS", "OPPOSES", "TRAVELS_WITH").contains(relation.type())) {
+                    deleteReverseDirectionalRelation(bookId, source.getId(), target.getId(), relation.type());
+                }
                 if (Set.of("TEACHER_OF", "MASTER_OF", "PARENT_OF", "SERVES").contains(relation.type())) {
                     deleteReverseDirectionalRelation(bookId, source.getId(), target.getId(), relation.type());
                 }
                 upsertEdge(bookId, first.chapterIndex(), source, target, relation.type(), evidence,
-                        relation.confidence(), "character-window-v2:" + modelConfig.model());
+                        relation.confidence(), CHARACTER_KNOWLEDGE_VERSION_PREFIX + modelConfig.model());
                 if (!isGenericCharacterRelation(relation.type())) deleteGenericCharacterRelations(bookId, source.getId(), target.getId());
             }
             if (windowEnd == end) break;
@@ -930,21 +937,25 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
         List<String> identitySignals = List.of("黑衣少女", "白衣少年", "锦衣少年", "年轻道人", "老道人", "少女", "少年",
                 "姑娘", "公子", "先生", "师父", "师傅", "徒弟", "名叫", "叫作", "自称", "身份", "原来是", "正是");
-        List<String> relationSignals = List.of("教", "传授", "指点", "同行", "结伴", "帮", "救", "护", "赠", "杀", "仇",
-                "追杀", "交手", "父亲", "母亲", "兄弟", "姐妹", "效忠", "侍奉", "主人", "朋友", "认识", "相识");
+        List<String> relationSignals = List.of("教", "传授", "指点", "引导", "同行", "结伴", "帮", "救", "护", "照看", "照拂",
+                "引荐", "雇", "干活", "邻居", "隔壁", "赠", "杀", "仇", "追杀", "交手", "对峙", "父亲", "母亲", "兄弟",
+                "姐妹", "效忠", "侍奉", "主人", "朋友", "认识", "相识");
         int width = 720, step = 560;
         List<CharacterTextWindow> windows = new ArrayList<>();
         for (int offset = 0; offset < normalized.length(); offset += step) {
             int end = Math.min(normalized.length(), offset + width);
             String text = normalized.substring(offset, end);
             int named = (int) knownNames.stream().filter(text::contains).limit(5).count();
+            int characterPairs = named < 2 ? 0 : named * (named - 1) / 2;
             int identity = (int) identitySignals.stream().filter(text::contains).limit(4).count();
             int relation = (int) relationSignals.stream().filter(text::contains).limit(4).count();
-            windows.add(new CharacterTextWindow(text, identity * 8 + Math.min(named, 3) * 3 + relation * 2, offset));
+            windows.add(new CharacterTextWindow(text, identity * 8 + Math.min(named, 3) * 3 + characterPairs * 4 + relation * 2, offset));
             if (end == normalized.length()) break;
         }
+        // Four windows preserve more independent character-pair evidence in long chapters;
+        // the bounded model input still limits a character calibration pass to 48 facts.
         return windows.stream().sorted(Comparator.comparingInt(CharacterTextWindow::score).reversed()
-                        .thenComparingInt(CharacterTextWindow::offset)).limit(3)
+                        .thenComparingInt(CharacterTextWindow::offset)).limit(4)
                 .sorted(Comparator.comparingInt(CharacterTextWindow::offset))
                 .map(window -> new StructuredGraphExtractor.ChapterFact(null, chapter, window.text())).toList();
     }
@@ -1450,7 +1461,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         if (Set.of("VISITS", "LIVES_IN").contains(relation)) return "CHARACTER".equals(sourceType) && "LOCATION".equals(targetType);
         if (Set.of("MEMBER_OF", "SERVES").contains(relation)) return "CHARACTER".equals(sourceType) && "ORGANIZATION".equals(targetType);
         if (Set.of("KNOWS", "PARENT_OF", "SPOUSE_OF", "SIBLING_OF", "FRIEND_OF", "COMPANION_OF",
-                "TEACHER_OF", "MASTER_OF").contains(relation))
+                "TEACHER_OF", "MASTER_OF", "NEIGHBOR_OF", "GUIDES", "HELPS", "PROTECTS", "OPPOSES",
+                "TRAVELS_WITH", "CARETAKES", "EMPLOYS").contains(relation))
             return "CHARACTER".equals(sourceType) && "CHARACTER".equals(targetType);
         return false;
     }

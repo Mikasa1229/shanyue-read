@@ -29,6 +29,10 @@ function Test-AllTerms([string]$Text, $Terms) {
     foreach ($value in $values) { if (-not $Text.Contains([string]$value)) { return $false } }
     return $true
 }
+function Get-EvidenceChapter([string]$Text) {
+    if ($Text -match '^\[Chapter\s+(\d+)\]') { return [int]$matches[1] - 1 }
+    return $null
+}
 
 $chapterStart = $StartChapter - 1
 $chapterEnd = $EndChapter - 1
@@ -64,22 +68,56 @@ $aliasPollution = @($aliasRows | Where-Object {
     $aliasOwner.ContainsKey($_.alias) -and $aliasOwner.ContainsKey($nodeName) -and $aliasOwner[$_.alias] -ne $aliasOwner[$nodeName]
 })
 
+$nameToNodeIds = @{}
+foreach ($node in $nodeRows) {
+    if (-not $nameToNodeIds.ContainsKey($node.name)) { $nameToNodeIds[$node.name] = @() }
+    $nameToNodeIds[$node.name] += $node.id
+}
+foreach ($alias in $aliasRows) {
+    if (-not $nameToNodeIds.ContainsKey($alias.alias)) { $nameToNodeIds[$alias.alias] = @() }
+    $nameToNodeIds[$alias.alias] += $alias.nodeId
+}
+function Get-EntityIds([string]$Name) {
+    $names = @($Name)
+    $canonical = @($gold.canonicalEntities | Where-Object name -eq $Name | Select-Object -First 1)
+    if ($canonical.Count -gt 0) { $names += @($canonical[0].aliases) }
+    $ids = @()
+    foreach ($name in $names) { if ($nameToNodeIds.ContainsKey($name)) { $ids += @($nameToNodeIds[$name]) } }
+    return @($ids | Select-Object -Unique)
+}
+
 $relationHits = @($gold.requiredRelations | ForEach-Object {
     $relationGold = $_
-    $leftNames = @($_.source); $rightNames = @($_.target)
-    $leftGold = $gold.canonicalEntities | Where-Object name -eq $_.source; if ($leftGold) { $leftNames += @($leftGold.aliases) }
-    $rightGold = $gold.canonicalEntities | Where-Object name -eq $_.target; if ($rightGold) { $rightNames += @($rightGold.aliases) }
-    $leftIds = @($nodeRows | Where-Object { $leftNames -contains $_.name } | ForEach-Object id)
-    $rightIds = @($nodeRows | Where-Object { $rightNames -contains $_.name } | ForEach-Object id)
+    $leftIds = Get-EntityIds $relationGold.source
+    $rightIds = Get-EntityIds $relationGold.target
     $acceptedTypes = @($relationGold.acceptedTypes)
-    $hit = @($edgeRows | Where-Object {
-        (($_.source -in $leftIds -and $_.target -in $rightIds) -or ($_.source -in $rightIds -and $_.target -in $leftIds)) -and $_.type -in $acceptedTypes
-    }).Count -gt 0
-    [pscustomobject]@{source=$_.source;target=$_.target;hit=$hit}
+    $direction = if ($relationGold.direction) { [string]$relationGold.direction } else { "EITHER" }
+    $candidateEdges = @($edgeRows | Where-Object {
+        $forward = $_.source -in $leftIds -and $_.target -in $rightIds
+        $reverse = $_.source -in $rightIds -and $_.target -in $leftIds
+        $pairMatches = if ($direction -eq "FORWARD") { $forward } else { $forward -or $reverse }
+        # A listed chapter establishes that the gold relation belongs within the 100-chapter corpus.
+        # Later in-bound evidence is valid too; requiring the first mention exactly made recall depend
+        # on a model's window choice instead of relation semantics and evidence quality.
+        $chapterMatches = $_.chapter -ge $chapterStart -and $_.chapter -le $chapterEnd
+        $pairMatches -and $chapterMatches -and $_.type -in $acceptedTypes
+    })
+    $evidenceMatches = @($candidateEdges | Where-Object {
+        $evidenceTerms = @($relationGold.minEvidenceTerms | Where-Object { $_ })
+        $evidenceTerms.Count -eq 0 -or (Test-AllTerms $_.evidence $evidenceTerms)
+    })
+    [pscustomobject]@{id=$relationGold.id;source=$relationGold.source;target=$relationGold.target;kind=$relationGold.kind;acceptedTypes=$acceptedTypes;direction=$direction;hit=($evidenceMatches.Count -gt 0);candidateTypes=@($candidateEdges.type);evidenceChapters=@($relationGold.evidenceChapters)}
 })
 $characterIds = @($characters | ForEach-Object id)
 $characterEdges = @($edgeRows | Where-Object { $_.source -in $characterIds -and $_.target -in $characterIds })
 $genericCharacterEdges = @($characterEdges | Where-Object { $_.type -in @('KNOWS','INTERACTS_WITH') })
+$unsupportedCharacterEdges = @($characterEdges | Where-Object {
+    $edge = $_
+    $sourceNames = @($namesByNode[$edge.source] | Where-Object { $_ })
+    $targetNames = @($namesByNode[$edge.target] | Where-Object { $_ })
+    -not (@($sourceNames | Where-Object { $edge.evidence.Contains($_) }).Count -gt 0 -and
+            @($targetNames | Where-Object { $edge.evidence.Contains($_) }).Count -gt 0)
+})
 $identityHits = @($gold.canonicalEntities | Where-Object { @($_.aliases).Count -gt 0 } | ForEach-Object {
     $canonical = $_
     $canonicalNodes = @($nodeRows | Where-Object { $_.name -eq $canonical.name })
@@ -88,12 +126,16 @@ $identityHits = @($gold.canonicalEntities | Where-Object { @($_.aliases).Count -
 })
 $forbiddenRelationHits = @($gold.forbiddenRelations | ForEach-Object {
     $rule = $_
-    $leftIds = @($nodeRows | Where-Object name -eq $rule.source | ForEach-Object id)
-    $rightIds = @($nodeRows | Where-Object name -eq $rule.target | ForEach-Object id)
+    $leftIds = Get-EntityIds $rule.source
+    $rightIds = Get-EntityIds $rule.target
+    $direction = if ($rule.direction) { [string]$rule.direction } else { "FORWARD" }
     $matches = @($edgeRows | Where-Object {
-        $_.source -in $leftIds -and $_.target -in $rightIds -and $_.type -in @($rule.types)
+        $forward = $_.source -in $leftIds -and $_.target -in $rightIds
+        $reverse = $_.source -in $rightIds -and $_.target -in $leftIds
+        $pairMatches = if ($direction -eq "FORWARD") { $forward } else { $forward -or $reverse }
+        $pairMatches -and $_.type -in @($rule.types)
     })
-    if ($matches.Count) { [pscustomobject]@{source=$rule.source;target=$rule.target;types=@($matches.type);evidence=@($matches.evidence)} }
+    if ($matches.Count) { [pscustomobject]@{id=$rule.id;source=$rule.source;target=$rule.target;types=@($matches.type);evidence=@($matches.evidence)} }
 })
 $retrievalResults = @()
 if ($EvaluateRetrieval) {
@@ -111,18 +153,22 @@ if ($EvaluateRetrieval) {
             for ($termIndex=0; $termIndex -lt $expectedTerms.Length; $termIndex++) {
                 if ($candidate.IndexOf($expectedTerms[$termIndex], [StringComparison]::Ordinal) -lt 0) { $allTermsFound=$false; break }
             }
-            if ($allTermsFound) { $firstRank=$index+1; break }
+            $expectedChapters = @($case.expectedEvidenceChapters | Where-Object { $_ -ne $null })
+            $chapterMatches = $expectedChapters.Count -eq 0 -or ((Get-EvidenceChapter $candidate) -in $expectedChapters)
+            if ($allTermsFound -and $chapterMatches) { $firstRank=$index+1; break }
         }
         $forbidden = @(); foreach ($term in @($case.forbiddenTerms | Where-Object { $_ })) {
             if (@($evidence | Where-Object { ([string]$_).Contains([string]$term) }).Count -gt 0) { $forbidden += $term }
         }
-        $retrievalResults += [pscustomobject]@{id=$case.id;hit=($firstRank -gt 0);firstRank=$firstRank;reciprocalRank=$(if($firstRank){1.0/$firstRank}else{0});forbiddenTerms=$forbidden}
+        $relationId = [string]$case.expectedRelationId
+        $relationAvailable = if ([string]::IsNullOrWhiteSpace($relationId)) { $true } else { @($relationHits | Where-Object { $_.id -eq $relationId -and $_.hit }).Count -gt 0 }
+        $retrievalResults += [pscustomobject]@{id=$case.id;hit=($firstRank -gt 0);relationAvailable=$relationAvailable;firstRank=$firstRank;reciprocalRank=$(if($firstRank){1.0/$firstRank}else{0});forbiddenTerms=$forbidden}
     }
 }
 
 function Ratio($Numerator, $Denominator) { if ($Denominator -eq 0) { return 0.0 }; return [math]::Round($Numerator / $Denominator, 4) }
 $report = [ordered]@{
-    schemaVersion = "1.0"; round = $Round; generatedAt = (Get-Date).ToString("o")
+    schemaVersion = "2.0"; round = $Round; generatedAt = (Get-Date).ToString("o")
     bookId = $BookId; chapterRange = @{start=$StartChapter;end=$EndChapter}
     counts = @{nodes=$nodeRows.Count;edges=$edgeRows.Count;aliases=$aliasRows.Count;clues=$clues.Count}
     nodeCountByType = @{}; edgeCountByType = @{}
@@ -135,6 +181,9 @@ $report = [ordered]@{
         aliasFragmentGroupCount = $fragmentGroups.Count
         canonicalAliasPollutionCount = $aliasPollution.Count
         requiredRelationRecall = Ratio (@($relationHits | Where-Object hit).Count) $relationHits.Count
+        semanticCharacterRelationRecall = Ratio (@($relationHits | Where-Object { $_.kind -ne "PLACE" -and $_.hit }).Count) @($relationHits | Where-Object { $_.kind -ne "PLACE" }).Count
+        supportedCharacterRelationEvidenceRate = 1.0 - (Ratio $unsupportedCharacterEdges.Count $characterEdges.Count)
+        distinctCharacterRelationTypes = @($characterEdges.type | Select-Object -Unique).Count
         genericCharacterRelationRate = Ratio $genericCharacterEdges.Count $characterEdges.Count
         identityResolutionRecall = Ratio (@($identityHits | Where-Object hit).Count) $identityHits.Count
         forbiddenRelationCount = $forbiddenRelationHits.Count
@@ -148,6 +197,8 @@ $report = [ordered]@{
         aliasFragments = $fragmentGroups
         aliasPollution = @($aliasPollution | Select-Object alias,nodeId,type,chapter)
         missingRequiredRelations = @($relationHits | Where-Object { -not $_.hit })
+        relationResults = $relationHits
+        unsupportedCharacterRelations = @($unsupportedCharacterEdges | Select-Object type,chapter,evidence)
         missingIdentityResolutions = @($identityHits | Where-Object { -not $_.hit })
         forbiddenRelations = $forbiddenRelationHits
         retrieval = $retrievalResults
