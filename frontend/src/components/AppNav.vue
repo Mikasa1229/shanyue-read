@@ -14,7 +14,7 @@
         <router-link to="/book-sources" class="nav-link">书源</router-link>
         <router-link to="/ranking" class="nav-link">排行</router-link>
         <router-link v-if="userStore.isLoggedIn" to="/bookshelf" class="nav-link">书架</router-link>
-        <router-link to="/agent?tab=overview" :class="{ 'nav-link-agent-current': route.name === 'Agent' }" class="nav-link nav-agent-link">助手</router-link>
+        <router-link to="/agent?tab=overview" :class="{ 'nav-link-agent-current': ['Agent', 'KnowledgeGraphManage'].includes(route.name) }" class="nav-link nav-agent-link">助手</router-link>
       </nav>
 
       <!-- Right Actions -->

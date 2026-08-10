@@ -63,6 +63,12 @@ const routes = [
     meta: { auth: true }
   },
   {
+    path: '/agent/knowledge-graphs',
+    name: 'KnowledgeGraphManage',
+    component: () => import('@/views/KnowledgeGraphManageView.vue'),
+    meta: { auth: true }
+  },
+  {
     path: '/admin/agent',
     name: 'AgentAdmin',
     component: () => import('@/views/AgentAdminView.vue'),

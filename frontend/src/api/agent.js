@@ -60,6 +60,8 @@ export const apiPrepareBookKnowledgeBuild = (bookId, range = {}) => http.get(`/a
 export const apiStartBookKnowledgeBuild = (bookId, dto) => http.post(`/agent/books/${bookId}/knowledge-build`, dto)
 export const apiGetBookKnowledgeTasks = (limit = 30) => http.get('/agent/knowledge-build/tasks', { params: { limit } })
 export const apiDeleteBookKnowledgeTask = (taskId) => http.delete(`/agent/knowledge-build/tasks/${taskId}`)
+export const apiUpdateBookKnowledgeSharing = (bookId, isPublic) => http.put(`/agent/books/${bookId}/knowledge-sharing`, null, { params: { isPublic } })
+export const apiDeleteOwnedBookKnowledge = (bookId) => http.delete(`/agent/books/${bookId}/knowledge-graph`)
 export const apiGetBookKnowledgeStatuses = (ids) => http.get('/agent/books/knowledge-status', { params: { canonicalBookIds: Array.isArray(ids) ? ids.join(',') : ids } })
 export const apiGetBookKnowledgeStatus = (bookId) => http.get(`/agent/books/${bookId}/knowledge-status`)
 

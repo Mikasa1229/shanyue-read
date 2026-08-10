@@ -59,7 +59,7 @@
           <section class="dashboard-shortcuts" aria-label="常用功能">
             <button type="button" @click="selectTab('chats')"><span>01</span><b>阅读对话</b><small>引用书架作品，在无剧透边界内继续讨论。</small><em>→</em></button>
             <button type="button" @click="selectTab('insights')"><span>02</span><b>书籍洞察</b><small>回顾剧情、查看人物关系与追踪伏笔。</small><em>→</em></button>
-            <button type="button" @click="selectTab('tasks')"><span>03</span><b>构建任务</b><small>查看知识图谱的构建进度和结果。</small><em>→</em></button>
+            <button type="button" @click="router.push('/agent/knowledge-graphs')"><span>03</span><b>图谱管理</b><small>独立管理共享范围、构建状态与删除操作。</small><em>→</em></button>
           </section>
         </template>
       </section>
@@ -89,6 +89,11 @@
                   <button v-if="message.role === 'USER' && !String(message.id).startsWith('local-')" class="message-edit-button" type="button" title="编辑这条提问并重新生成后续回答" @click="startMessageEdit(message)"><span>✎</span> 编辑并重新生成</button>
                 </template>
                 <small v-if="message.role === 'ASSISTANT' && isInterviewResponse(message.content)" class="interview-contract">角色访谈：原文事实、推断与未知内容已分区。</small>
+                <div v-if="bookReferenceItems(message).length" class="chat-book-references" aria-label="平台书源引用">
+                  <button v-for="book in bookReferenceItems(message)" :key="book.canonicalBookId" type="button" @click="openRecommendedBook(book)">
+                    <img v-if="book.coverUrl" :src="book.coverUrl" :alt="`${book.title}封面`" /><span><small>平台书源已验证</small><strong>《{{ book.title }}》</strong><em>{{ book.author || '作者未知' }} · 点击开始阅读</em></span>
+                  </button>
+                </div>
                 <div v-if="citationItems(message).length" class="citation-list"><button v-for="citation in citationItems(message)" :key="`${citation.canonicalBookId}-${citation.chapterIndex}-${citation.excerpt}`" class="citation-link" @click="openCitation(citation)">引用：第 {{ citation.chapterIndex + 1 }} 章 · {{ citation.excerpt }}</button></div>
               </article>
             </div>
@@ -164,7 +169,7 @@
         <div class="task-list">
           <p v-if="!buildTasks.length" class="task-empty">还没有图谱构建任务。进入书籍洞察后，选择章节范围即可创建第一个任务。</p>
             <article v-for="task in buildTasks" :key="task.id" class="task-row">
-              <div class="task-row-main"><span class="task-status" :class="task.status.toLowerCase()">{{ task.status === 'COMPLETED' ? '已完成' : task.status === 'FAILED' ? '失败' : task.status === 'RUNNING' ? '构建中' : '等待中' }}</span><strong>《{{ taskBookTitle(task) }}》</strong><small>作品编号 {{ task.canonicalBookId }} · 第 {{ task.startChapter || 1 }} 章至第 {{ task.endChapter || task.totalChapters || 1 }} 章 · {{ task.modelMode === 'BYOK' ? '个人模型' : `预计 ${task.estimatedCredits || 0} 积分` }}</small></div>
+              <div class="task-row-main"><span class="task-status" :class="task.status.toLowerCase()">{{ task.status === 'COMPLETED' ? '已完成' : task.status === 'FAILED' ? '失败' : task.status === 'RUNNING' ? '构建中' : '等待中' }}</span><strong>《{{ taskBookTitle(task) }}》</strong><small>构建范围：第 {{ task.startChapter || 1 }} 章至第 {{ task.endChapter || task.totalChapters || 1 }} 章 · {{ task.modelMode === 'BYOK' ? '个人模型' : `预计 ${task.estimatedCredits || 0} 积分` }}</small></div>
               <div class="task-row-progress"><div class="task-progress-label"><b>{{ task.completedChapters || 0 }} / {{ task.totalChapters || 0 }} 章</b><small>{{ taskProgressPercent(task) }}%</small></div><div class="task-progress-track" :class="task.status.toLowerCase()"><i :style="{ width: `${taskProgressPercent(task)}%` }" /></div><small>{{ task.message || task.errorMessage || '等待任务状态更新' }}</small></div>
               <button v-if="canDeleteBuildTask(task)" type="button" class="task-delete" @click="deleteBuildTask(task)">删除记录</button>
             </article>
@@ -178,7 +183,7 @@
         </header>
         <form class="insight-console" @submit.prevent="loadInsights">
           <label class="insight-field"><span>作品</span><select v-model="insightBookId" required @change="selectInsightBook"><option value="">从书架选择一本作品</option><option v-for="book in usableShelfBooks" :key="book.canonicalBookId" :value="String(book.canonicalBookId)">{{ book.bookName }}<template v-if="book.author"> · {{ book.author }}</template></option></select><small v-if="!usableShelfBooks.length">书架中还没有可关联的作品。</small></label>
-          <label class="insight-field"><span>分析边界</span><div class="chapter-stepper"><button type="button" aria-label="减少一章" @click="adjustInsightChapter(-1)">−</button><span>第</span><input v-model.number="insightChapter" required inputmode="numeric" pattern="[0-9]*" @change="normalizeInsightChapter" /><span>章</span><button type="button" aria-label="增加一章" @click="adjustInsightChapter(1)">＋</button></div><small v-if="selectedInsightBook">已读进度：第 {{ safeInsightChapter }} 章</small></label>
+          <label class="insight-field"><span>分析边界</span><small v-if="selectedInsightBook" class="insight-read-progress">已读进度：第 {{ safeInsightChapter }} 章</small><div class="chapter-stepper"><button type="button" aria-label="减少一章" @click="adjustInsightChapter(-1)">−</button><span>第</span><input v-model.number="insightChapter" required inputmode="numeric" pattern="[0-9]*" @change="normalizeInsightChapter" /><span>章</span><button type="button" aria-label="增加一章" @click="adjustInsightChapter(1)">＋</button></div></label>
           <p v-if="selectedInsightBook" class="insight-safety-state" :class="{ warning: insightChapter > safeInsightChapter }"><b>{{ insightChapter > safeInsightChapter ? '可能剧透' : '无剧透模式' }}</b><span>{{ insightChapter > safeInsightChapter ? '继续后将先请你确认。' : '结果严格限定在已读范围内。' }}</span></p>
           <button class="btn btn-gold insight-run" :disabled="insightLoading || !usableShelfBooks.length">{{ insightLoading ? '正在整理…' : usableShelfBooks.length ? '生成洞察' : '请先加入书架' }}</button>
         </form>
@@ -192,7 +197,7 @@
             <button v-for="item in [{ id: 'capsule', label: '剧情胶囊', note: '已读回顾' }, { id: 'graph', label: '人物关系', note: '关系图谱' }, { id: 'clues', label: '线索板', note: '明确未解' }, { id: 'map', label: '阅读地图', note: '事件脉络' }, { id: 'dna', label: '相似书 DNA', note: '作品气质' }, { id: 'shelf', label: '书架管家', note: '阅读安排' }]" :key="item.id" :class="{ active: insightMode === item.id }" type="button" @click="insightMode = item.id"><b>{{ item.label }}</b><small>{{ item.note }}</small></button>
           </aside>
           <section class="insight-stage">
-            <header class="insight-stage-head"><div><span class="agent-eyebrow">{{ insightModeLabel }}</span><h3>{{ insightModeTitle }}</h3></div><div class="insight-stage-actions"><div v-if="insightMode === 'shelf'" class="insight-subtabs"><button :class="{ active: shelfPanel === 'recommendations' }" type="button" @click="shelfPanel = 'recommendations'">推荐</button><button :class="{ active: shelfPanel === 'plan' }" type="button" @click="shelfPanel = 'plan'">计划</button><button :class="{ active: shelfPanel === 'groups' }" type="button" @click="shelfPanel = 'groups'">分组</button></div><button v-if="knowledgeBuild?.status !== 'READY'" type="button" class="build-index-button" @click="openKnowledgeBuildDialog">{{ knowledgeBuild?.status === 'RUNNING' || knowledgeBuild?.status === 'QUEUED' ? '查看构建任务' : '构建 AI 知识图谱' }}</button></div></header>
+            <header class="insight-stage-head"><div><span class="agent-eyebrow">{{ insightModeLabel }}</span><h3>{{ insightModeTitle }}</h3></div><div class="insight-stage-actions"><div v-if="insightMode === 'shelf'" class="insight-subtabs"><button :class="{ active: shelfPanel === 'recommendations' }" type="button" @click="shelfPanel = 'recommendations'">推荐</button><button :class="{ active: shelfPanel === 'plan' }" type="button" @click="shelfPanel = 'plan'">计划</button><button :class="{ active: shelfPanel === 'groups' }" type="button" @click="shelfPanel = 'groups'">分组</button></div><button type="button" class="knowledge-manage-button" @click="router.push('/agent/knowledge-graphs')">管理知识图谱</button><button v-if="knowledgeBuild?.status !== 'READY'" type="button" class="build-index-button" @click="openKnowledgeBuildDialog">{{ knowledgeBuild?.status === 'RUNNING' || knowledgeBuild?.status === 'QUEUED' ? '查看构建任务' : '构建 AI 知识图谱' }}</button></div></header>
             <div v-if="insightError" class="card insight-error" role="alert"><strong>这次洞察没有完成</strong><p>{{ insightError }}</p><button class="btn btn-ghost btn-sm" type="button" @click="loadInsights">重新分析</button></div>
             <div v-else-if="insightLoaded" class="insight-grid">
           <article v-show="insightMode === 'capsule'" class="insight-card card"><span>00</span><h2>无剧透剧情回忆胶囊</h2><p v-if="!capsule?.timeline?.length">暂时没有可用的已读剧情摘要。</p><ul v-else><li v-for="item in capsule.timeline.slice(0, 4)" :key="item">{{ item }} <button class="evidence-jump" @click="openInsightChapter(timelineChapter(item))">查看原文</button></li></ul><small>{{ capsule?.safetyNote }}</small></article>
@@ -206,7 +211,7 @@
               </div>
               <div class="relationship-globe-shell">
                 <canvas ref="relationshipGlobe" class="relationship-globe" role="img" tabindex="0" aria-label="可旋转的人物关系星球。拖动旋转，点击人物或连线查看依据。" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas>
-                <div class="globe-hud globe-hud-top"><span>LightRAG 关系星球</span><i></i><span>拖动旋转 · 点击查看依据</span></div>
+                <div class="globe-hud globe-hud-top"><span>关系星球</span><i></i><span>拖动旋转 · 点击查看依据</span></div>
                 <div class="globe-hud globe-hud-bottom"><span><i class="legend-dot character"></i>人物</span><span><i class="legend-dot location"></i>地点/组织</span><span><i class="legend-dot event"></i>事件/线索</span></div>
               </div>
               <div class="graph-inspector">
@@ -265,7 +270,7 @@
   </Teleport>
   <Teleport to="body">
     <section v-if="showRelationshipCanvas" class="relationship-canvas-dialog" role="dialog" aria-modal="true" aria-label="人物关系星球全屏画布" @keydown.esc="closeRelationshipCanvas">
-      <header class="relationship-canvas-head"><div><span>LightRAG / 关系视图</span><h2>{{ selectedInsightBook?.bookName || '当前作品' }}的人物关系星球</h2><p>拖动旋转，滚轮或触控板可缩放视角；每条连线均标注关系类型，点击可查看可追溯的章节原文。</p></div><div><span>{{ visibleGraphNodes.length }} 个节点</span><span>{{ visibleGraphEdges.length }} 条关系</span><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="relationship-canvas-close" @click="closeRelationshipCanvas">退出全屏</button></div></header>
+      <header class="relationship-canvas-head"><div><span>关系视图</span><h2>{{ selectedInsightBook?.bookName || '当前作品' }}的人物关系星球</h2><p>拖动旋转，滚轮或触控板可缩放视角；每条连线均标注关系类型，点击可查看可追溯的章节原文。</p></div><div><span>{{ visibleGraphNodes.length }} 个节点</span><span>{{ visibleGraphEdges.length }} 条关系</span><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="relationship-canvas-close" @click="closeRelationshipCanvas">退出全屏</button></div></header>
       <div class="relationship-canvas-stage"><canvas ref="fullRelationshipGlobe" class="relationship-globe" tabindex="0" role="img" aria-label="可旋转的人物关系星球全屏画布" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas><div class="canvas-corner-note">关系均来自已读章节 · 点击可核验</div></div>
       <footer class="relationship-canvas-foot"><div class="globe-hud-bottom"><span><i class="legend-dot character"></i>人物</span><span><i class="legend-dot location"></i>地点 / 组织</span><span><i class="legend-dot event"></i>事件 / 线索</span></div><div v-if="selectedGraphEvidence" class="canvas-selection"><span>已选中</span><b>{{ selectedGraphEvidence.label }}</b><small>第 {{ selectedGraphEvidence.chapter + 1 }} 章</small><button type="button" @click="showEvidenceSource(selectedGraphEvidence)">查看原文依据</button></div><p v-else>选中一条关系，查看它为什么会出现在图谱中。</p></footer>
     </section>
@@ -302,7 +307,7 @@ import { useToast } from '@/composables/useToast'
 import { apiAddToShelf } from '@/api/bookshelf'
 import { apiGetMyShelf } from '@/api/bookshelf'
 import { apiGetMyLevel } from '@/api/user'
-  import { apiCreateAgentSession, apiDeleteAgentModel, apiDeleteAgentSession, apiDeleteBookKnowledgeTask, apiEraseAgentPersonalData, apiExportAgentSession, apiGetAgentCredits, apiGetAgentGraph, apiGetAgentClues, apiGetAgentInfrastructure, apiGetAgentMessages, apiGetAgentPreferences, apiGetAgentTimeline, apiGetAgentReadingMap, apiGetAgentReadingPlan, apiGetAgentReaderLink, apiGetAgentShelfGroups, apiGetPlotCapsule, apiGetQuickRecommendations, apiGetSimilarBooks, apiListAgentModels, apiRenameAgentSession, apiSaveAgentModel, apiSaveAgentPreferences, apiSaveAgentShelfGroup, apiSaveRecommendationFeedback, apiSetAgentModelEnabled, apiTestAgentModel, apiListAgentSessions, apiSearchAgentSessions, apiPrepareBookKnowledgeBuild, apiStartBookKnowledgeBuild, apiGetBookKnowledgeStatus, apiGetBookKnowledgeTasks, apiUpdateAgentMessage, streamAgentMessage } from '@/api/agent'
+  import { apiCreateAgentSession, apiDeleteAgentModel, apiDeleteAgentSession, apiDeleteBookKnowledgeTask, apiDeleteOwnedBookKnowledge, apiEraseAgentPersonalData, apiExportAgentSession, apiGetAgentCredits, apiGetAgentGraph, apiGetAgentClues, apiGetAgentInfrastructure, apiGetAgentMessages, apiGetAgentPreferences, apiGetAgentTimeline, apiGetAgentReadingMap, apiGetAgentReadingPlan, apiGetAgentReaderLink, apiGetAgentShelfGroups, apiGetPlotCapsule, apiGetQuickRecommendations, apiGetSimilarBooks, apiListAgentModels, apiRenameAgentSession, apiSaveAgentModel, apiSaveAgentPreferences, apiSaveAgentShelfGroup, apiSaveRecommendationFeedback, apiSetAgentModelEnabled, apiTestAgentModel, apiListAgentSessions, apiSearchAgentSessions, apiPrepareBookKnowledgeBuild, apiStartBookKnowledgeBuild, apiGetBookKnowledgeStatus, apiGetBookKnowledgeTasks, apiUpdateAgentMessage, apiUpdateBookKnowledgeSharing, streamAgentMessage } from '@/api/agent'
 
 const toast = useToast()
 const actionNotice = ref(null)
@@ -406,26 +411,27 @@ const visibleGraph = computed(() => {
   const primaryIds = new Set(nodes
     .filter(node => isAllTypes || node.type === graphTypeFilter.value)
     .map(node => String(node.id)))
-  // A type filter keeps its matching nodes and their one-hop context, so cross-type relations remain visible.
+  // Type filters are intentionally strict: selecting a type must never introduce another node type.
   const eligibleEdges = isAllTypes
     ? allEdges
-    : allEdges.filter(edge => primaryIds.has(String(edge.source)) || primaryIds.has(String(edge.target)))
+    : allEdges.filter(edge => primaryIds.has(String(edge.source)) && primaryIds.has(String(edge.target)))
   const degree = new Map(nodes.map(node => [String(node.id), 0]))
   eligibleEdges.forEach(edge => {
     degree.set(String(edge.source), (degree.get(String(edge.source)) || 0) + 1)
     degree.set(String(edge.target), (degree.get(String(edge.target)) || 0) + 1)
   })
   const candidateIds = new Set(isAllTypes ? nodes.map(node => String(node.id)) : primaryIds)
-  eligibleEdges.forEach(edge => {
-    candidateIds.add(String(edge.source))
-    candidateIds.add(String(edge.target))
-  })
   const compareNodes = (left, right) => {
     const degreeDifference = (degree.get(String(right.id)) || 0) - (degree.get(String(left.id)) || 0)
     if (degreeDifference) return degreeDifference
     const chapterDifference = Number(right.lastChapter ?? right.firstChapter ?? -1) - Number(left.lastChapter ?? left.firstChapter ?? -1)
     if (chapterDifference) return chapterDifference
     return Number(right.confidence || 0) - Number(left.confidence || 0)
+  }
+  // The embedded card stays intentionally compact; the full-screen canvas must honor "全部"
+  // literally so users can explore every node returned by the spoiler-bounded graph API.
+  if (isAllTypes && showRelationshipCanvas.value) {
+    return { nodes: [...nodes].sort(compareNodes), edges: eligibleEdges }
   }
   const selectedIds = new Set()
   // Select complete high-value relations first; this prevents the old "top 12 nodes, zero edges" result.
@@ -541,7 +547,7 @@ function graphRelationLabel (relation) {
     CLUE_FOR: '关联线索',
     CAUSES: '推动发生',
     LEADS_TO: '引出后续'
-  })[relation] || relation || '相关'
+  })[relation] || '关联信息'
 }
 
 function quadraticPoint (from, control, to, t = 0.5) {
@@ -710,7 +716,7 @@ function renderRelationshipGlobe () {
     .sort((left, right) => left.depth - right.depth)
   projectedEdges.forEach(item => {
     const alpha = Math.max(0.16, Math.min(0.86, 0.42 + item.depth * 0.32))
-    const isSelected = selectedGraphEvidence.value?.label === item.edge.relation && selectedGraphEvidence.value?.evidence === item.edge.evidence
+    const isSelected = selectedGraphEvidence.value?.relation === item.edge.relation && selectedGraphEvidence.value?.evidence === item.edge.evidence
     context.save()
     context.beginPath()
     context.moveTo(item.source.x, item.source.y)
@@ -940,6 +946,36 @@ async function loadBuildTasks () {
     }
   }
 
+  async function toggleKnowledgeSharing () {
+    if (!insightBookId.value || !knowledgeBuild.value?.isOwner) return
+    const isPublic = !knowledgeBuild.value.isPublic
+    try {
+      await apiUpdateBookKnowledgeSharing(insightBookId.value, isPublic)
+      knowledgeBuild.value = { ...knowledgeBuild.value, isPublic }
+      toast.success(isPublic ? '图谱已公开，其他读者可在自己的已读范围内使用。' : '图谱已设为仅自己可见。')
+    } catch (error) {
+      toast.error(error.message || '修改图谱共享范围失败')
+    }
+  }
+
+  async function deleteOwnedKnowledgeGraph () {
+    if (!insightBookId.value || !knowledgeBuild.value?.isOwner) return
+    if (!window.confirm('删除后将清除这本书的实体、关系、线索、事件地图和已构建章节记录，且不能恢复。确定删除吗？')) return
+    try {
+      await apiDeleteOwnedBookKnowledge(insightBookId.value)
+      graph.value = { nodes: [], edges: [] }
+      clues.value = []
+      timeline.value = []
+      readingMap.value = { events: [], links: [] }
+      capsule.value = null
+      insightLoaded.value = false
+      await loadKnowledgeBuildPreparation()
+      toast.success('我的知识图谱已删除；你可以重新选择章节构建。')
+    } catch (error) {
+      toast.error(error.message || '删除知识图谱失败')
+    }
+  }
+
   function openKnowledgeBuildDialog () {
   if (!knowledgeBuild.value) return loadKnowledgeBuildPreparation().then(() => { showKnowledgeBuildDialog.value = true })
   buildForm.value.startChapter = knowledgeBuild.value.startChapter || 1
@@ -1088,7 +1124,13 @@ async function send(requestContext = {}, contentOverride = '') {
     await streamAgentMessage(activeSession.value.id, { content, ...modelRequest, ...readingContext, ...requestContext }, {
       onDelta: (delta) => { answer += delta; messages.value[messages.value.length - 1].content = answer },
       onRecommendations: (data) => { if (Array.isArray(data)) shelfRecommendations.value = data },
-      onDone: (reply) => { messages.value[messages.value.length - 1].citations = reply?.citations || [] }
+      onDone: (reply) => {
+        const message = messages.value[messages.value.length - 1]
+        if (reply?.content) message.content = reply.content
+        message.citations = reply?.citations || []
+        message.bookReferences = reply?.bookReferences || []
+      },
+      onError: (data) => { throw new Error(data?.message || '本次回答生成失败，请稍后重试。') }
     })
     credits.value = await apiGetAgentCredits()
   } catch (error) { messages.value[messages.value.length - 1].content = error.message }
@@ -1200,7 +1242,16 @@ async function openInsightChapter (chapterIndex) {
   } catch (error) { toast.error(error.message) }
 }
 function selectGraphEvidence (item, kind) {
-  selectedGraphEvidence.value = { label: kind === 'NODE' ? `${item.name} / ${graphTypeLabel(item.type)}` : item.relation, chapter: item.firstChapter || 0, confidence: item.confidence, evidence: item.evidence }
+  selectedGraphEvidence.value = {
+    label: kind === 'NODE' ? `${item.name} / ${graphTypeLabel(item.type)}` : graphRelationLabel(item.relation),
+    relation: kind === 'EDGE' ? item.relation : null,
+    chapter: item.firstChapter || 0,
+    confidence: item.confidence,
+    evidence: item.evidence
+  }
+}
+function bookReferenceItems(message) {
+  return Array.isArray(message?.bookReferences) ? message.bookReferences : []
 }
 function eventLinkCount(eventId) { return visibleReadingMapLinks.value.filter(link => link.source === eventId || link.target === eventId).length }
 function mapNextLink (eventId) { return visibleReadingMapLinks.value.find(link => String(link.source) === String(eventId)) || null }
@@ -1432,6 +1483,7 @@ onBeforeUnmount(() => {
 .insight-field select,.insight-field input { min-width:0; box-sizing:border-box; border:1px solid rgba(16,44,50,.18); border-radius:9px; padding:10px 11px; color:var(--agent-ink); background:#fffdf7; font:inherit; font-size:.85rem; outline:none; }
 .insight-field select:focus,.insight-field input:focus { border-color:var(--agent-coral); box-shadow:0 0 0 3px rgba(212,97,69,.12); }
 .insight-field small { min-height:14px; color:var(--agent-ink-soft); font-size:.66rem; font-weight:500; letter-spacing:0; }
+.insight-field .insight-read-progress { color:#47612f; font-weight:800; }
 .insight-safety-state { display:grid; gap:4px; min-height:38px; margin:0 0 1px; padding:8px 10px; border-left:3px solid var(--agent-lime); color:var(--agent-ink-soft); background:rgba(184,214,125,.16); font-size:.68rem; line-height:1.35; }
 .insight-safety-state b { color:#486333; font-size:.72rem; }.insight-safety-state.warning { border-color:var(--agent-coral); background:rgba(212,97,69,.1); }.insight-safety-state.warning b { color:#a14434; }
 .insight-run { min-height:42px; white-space:nowrap; }
@@ -1519,6 +1571,7 @@ onBeforeUnmount(() => {
 .insight-stage { min-height:0; overflow:hidden; }
 .insight-stage-head { flex:0 0 auto; }
 .insight-stage-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
+.knowledge-manage-button { border:1px solid rgba(16,44,50,.2); border-radius:8px; padding:7px 9px; color:#315e42; background:#eef4dc; cursor:pointer; font:inherit; font-size:.68rem; font-weight:800; }.knowledge-manage-button:hover { border-color:#547a45; background:#e1edc5; }.knowledge-manage-button.danger { color:#9a3f31; background:#fff2ed; }.knowledge-manage-button.danger:hover { border-color:#b95242; background:#ffe3da; }
 .insight-subtabs { display:flex; gap:3px; padding:3px; border:1px solid rgba(16,44,50,.12); border-radius:9px; background:rgba(255,253,247,.8); }
 .insight-subtabs button { border:0; border-radius:6px; padding:6px 8px; color:var(--agent-ink-soft); background:transparent; cursor:pointer; font:inherit; font-size:.67rem; font-weight:800; }
 .insight-subtabs button.active { color:#fffaf0; background:var(--agent-ink); }
@@ -1603,6 +1656,49 @@ onBeforeUnmount(() => {
 </style>
 
 <style scoped>
+.chat-book-references { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; margin-top:12px; white-space:normal; }
+.chat-book-references button { display:grid; grid-template-columns:42px minmax(0,1fr); gap:9px; align-items:center; min-width:0; border:1px solid rgba(16,44,50,.14); border-radius:12px; padding:9px; color:var(--agent-ink); background:#fffdf7; cursor:pointer; text-align:left; }
+.chat-book-references button:hover { border-color:var(--agent-coral); box-shadow:0 6px 18px rgba(16,44,50,.09); }
+.chat-book-references img { width:42px; height:56px; border-radius:6px; object-fit:cover; background:var(--agent-paper-soft); }
+.chat-book-references span { display:grid; gap:3px; min-width:0; }
+.chat-book-references small { margin:0; color:#547a45; font-size:.55rem; font-weight:900; letter-spacing:.05em; }
+.chat-book-references strong { overflow:hidden; font-family:var(--font-serif); font-size:.82rem; text-overflow:ellipsis; white-space:nowrap; }
+.chat-book-references em { color:var(--agent-ink-soft); font-size:.6rem; font-style:normal; }
+
+/* 统一助手为纸张浅色体系，覆盖历史多轮样式中残留的深色面板。 */
+.agent-center,.agent-center.page,.agent-center.page .container { background:#f7f3ea; }
+.dashboard-credit,.model-intro,.credit-card { color:var(--agent-ink)!important; background:#fffdf8!important; border:1px solid rgba(62,72,69,.14)!important; box-shadow:none!important; }
+.dashboard-credit > span,.dashboard-credit strong,.dashboard-credit small,.dashboard-credit button,.model-intro h2,.model-intro p,.model-intro li,.credit-card span,.credit-card strong,.credit-card small { color:inherit!important; }
+.model-intro::after { color:rgba(168,93,64,.08)!important; }
+.dashboard-primary-action,.chat-tool.primary-tool,.chat-model-menu button.selected,.insight-subtabs button.active { color:var(--agent-ink)!important; background:#efe7da!important; border:1px solid rgba(62,72,69,.14)!important; box-shadow:none!important; }
+.center-message.user { color:var(--agent-ink)!important; background:#eadfce!important; }
+.center-message.assistant,.session-list,.chat-pane,.workspace-notes .card,.agent-tabs,.task-center-panel,.model-form,.saved-models,.preference-form { background:#fffdf8!important; }
+.session-list { color:var(--agent-ink)!important; }
+.session-list-head { color:var(--agent-coral)!important; }
+.session-list .new-session { border-color:rgba(16,44,50,.16)!important; color:var(--agent-coral)!important; }
+.session-search-wrap { color:var(--agent-ink-soft)!important; }
+.session-search { border-color:rgba(16,44,50,.14)!important; color:var(--agent-ink)!important; background:#fffefa!important; }
+.session-search::placeholder { color:var(--agent-ink-soft)!important; }
+.session-list button:not(.new-session) { color:var(--agent-ink-soft)!important; }
+.session-list button.selected { color:var(--agent-ink)!important; background:var(--agent-lime)!important; }
+.session-empty,.session-list-foot { color:var(--agent-ink-soft)!important; }
+.session-list-foot { border-top-color:rgba(16,44,50,.1)!important; }
+.center-message.user { color:var(--agent-ink)!important; background:#eadfce!important; }
+.model-intro,.insight-query,.insight-nav { color:var(--agent-ink)!important; background:#fffdf8!important; }
+.model-intro h2,.insight-query-copy h2 { color:var(--agent-ink)!important; }
+.model-intro p,.model-intro ul,.insight-query-copy p,.insight-query label { color:var(--agent-ink-soft)!important; }
+.model-intro::after,.insight-query::after { color:rgba(16,44,50,.05)!important; }
+.insight-query input,.insight-query select { border-color:rgba(16,44,50,.14)!important; color:var(--agent-ink)!important; background:#fffefa!important; }
+.insight-query .btn { color:#fffaf0!important; background:var(--agent-coral)!important; }
+.insight-nav > span { color:var(--agent-coral)!important; }
+.insight-nav button,.insight-nav button small { color:var(--agent-ink-soft)!important; }
+.insight-nav button:hover { color:var(--agent-ink)!important; background:rgba(16,44,50,.06)!important; }
+.insight-nav button.active { color:var(--agent-ink)!important; background:rgba(184,214,125,.3)!important; border-left-color:var(--agent-coral)!important; }
+.send-button { color:#fffdf8!important; background:#b56346!important; }
+.chat-model-menu,.chat-plugin-panel,.context-card,.shortcut-card { background:#fbf7ef!important; }
+</style>
+
+<style scoped>
 .task-row-progress .task-progress-track { position:relative; box-sizing:border-box; height:12px; margin-top:7px; overflow:hidden; border:1px solid rgba(16,44,50,.2); border-radius:999px; background:repeating-linear-gradient(90deg,rgba(16,44,50,.09) 0 12px,rgba(16,44,50,.04) 12px 24px); }
 .task-row-progress .task-progress-track i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#d46145,#ee8d5a); box-shadow:inset 0 0 0 1px rgba(255,255,255,.25); transition:width .45s ease; }
 .task-row-progress .task-progress-track.completed i { background:linear-gradient(90deg,#5e9166,#9bc46c); }
@@ -1640,7 +1736,7 @@ onBeforeUnmount(() => {
 .relationship-canvas-head { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; padding:24px 34px 18px; border-bottom:1px solid rgba(255,253,247,.12); background:linear-gradient(100deg,#0d2f3b,#123d49); }.relationship-canvas-head > div:first-child { max-width:760px; }.relationship-canvas-head > div:first-child > span { color:var(--agent-lime); font-size:.62rem; font-weight:900; letter-spacing:.14em; }.relationship-canvas-head h2 { margin:7px 0; font-family:var(--font-serif); font-size:clamp(1.8rem,3.2vw,3.1rem); line-height:.94; letter-spacing:-.06em; }.relationship-canvas-head p { margin:0; color:rgba(255,250,240,.68); font-size:.76rem; line-height:1.6; }.relationship-canvas-head > div:last-child { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:7px; max-width:410px; }.relationship-canvas-head > div:last-child > span { border:1px solid rgba(255,253,247,.16); border-radius:99px; padding:6px 8px; color:rgba(255,250,240,.7); font-size:.63rem; }.relationship-canvas-head button { border:1px solid rgba(255,253,247,.22); border-radius:9px; padding:8px 10px; color:#fffaf0; background:rgba(255,253,247,.06); cursor:pointer; font:inherit; font-size:.68rem; font-weight:800; }.relationship-canvas-head button:hover { border-color:var(--agent-lime); color:var(--agent-lime); }.relationship-canvas-head .relationship-canvas-close { color:#102c32; border-color:var(--agent-lime); background:var(--agent-lime); }
 .relationship-canvas-stage { position:relative; min-height:0; overflow:hidden; background:radial-gradient(circle at 50% 43%,#194958 0,#0c2d3a 45%,#061b26 100%); }.relationship-canvas-stage .relationship-globe { width:100%; height:100%; }.canvas-corner-note { position:absolute; left:28px; bottom:23px; color:rgba(255,250,240,.46); font-size:.63rem; font-weight:800; letter-spacing:.08em; pointer-events:none; }
 .relationship-canvas-foot { display:flex; align-items:center; justify-content:space-between; gap:18px; min-height:54px; padding:12px 34px; border-top:1px solid rgba(255,253,247,.1); color:rgba(255,250,240,.62); background:#0b2630; }.relationship-canvas-foot .globe-hud-bottom { position:static; }.relationship-canvas-foot > p { margin:0; font-size:.72rem; }.canvas-selection { display:flex; align-items:center; gap:9px; min-width:0; }.canvas-selection span { color:var(--agent-lime); font-size:.62rem; font-weight:800; }.canvas-selection b { overflow:hidden; max-width:280px; color:#fffaf0; font-size:.77rem; text-overflow:ellipsis; white-space:nowrap; }.canvas-selection small { color:rgba(255,250,240,.6); font-size:.64rem; }.canvas-selection button { border:0; border-bottom:1px solid var(--agent-lime); padding:2px 0; color:var(--agent-lime); background:transparent; cursor:pointer; font:inherit; font-size:.66rem; font-weight:800; }
-.evidence-source-backdrop { position:fixed; inset:0; z-index:5600; display:grid; place-items:center; padding:20px; background:rgba(7,25,33,.76); backdrop-filter:blur(8px); }.evidence-source-dialog { width:min(100%,640px); border:1px solid rgba(255,253,247,.21); border-radius:20px; padding:27px; color:#fffaf0; background:linear-gradient(145deg,#173e42,#102c32); box-shadow:0 32px 92px rgba(0,0,0,.35); }.evidence-source-dialog > span { color:var(--agent-lime); font-size:.64rem; font-weight:900; letter-spacing:.13em; }.evidence-source-dialog h2 { margin:9px 0 7px; font-family:var(--font-serif); font-size:clamp(1.7rem,3vw,2.5rem); line-height:1; letter-spacing:-.05em; }.evidence-source-dialog > small { color:rgba(255,250,240,.65); }.evidence-source-dialog blockquote { margin:19px 0 13px; border-left:3px solid var(--agent-coral); padding:12px 15px; color:#fffaf0; background:rgba(255,253,247,.09); font-family:var(--font-serif); font-size:1rem; line-height:1.8; }.evidence-source-dialog > p { color:rgba(255,250,240,.69); font-size:.74rem; line-height:1.65; }.evidence-source-dialog > div { display:flex; justify-content:flex-end; gap:9px; margin-top:20px; }.evidence-source-dialog .btn { border-radius:9px; }.evidence-source-dialog .btn-primary { border:0; color:#102c32; background:var(--agent-lime); }
+.evidence-source-backdrop { position:fixed; inset:0; z-index:5600; display:grid; place-items:center; padding:20px; background:rgba(7,25,33,.76); backdrop-filter:blur(8px); }.evidence-source-dialog { width:min(100%,640px); border:1px solid #b9cbbd; border-radius:20px; padding:27px; color:#173942; background:#fffdf7; box-shadow:0 32px 92px rgba(0,0,0,.35); }.evidence-source-dialog > span { color:#547a35; font-size:.64rem; font-weight:900; letter-spacing:.13em; }.evidence-source-dialog h2 { margin:9px 0 7px; color:#173942!important; font-family:var(--font-serif); font-size:clamp(1.7rem,3vw,2.5rem); line-height:1; letter-spacing:-.05em; }.evidence-source-dialog > small { color:#47616a; font-size:.75rem; font-weight:700; }.evidence-source-dialog blockquote { margin:19px 0 13px; border-left:4px solid #c66a4b; padding:12px 15px; color:#173942; background:#eaf1e7; font-family:var(--font-serif); font-size:1rem; font-weight:700; line-height:1.8; }.evidence-source-dialog > p { color:#36535d; font-size:.78rem; font-weight:600; line-height:1.65; }.evidence-source-dialog > div { display:flex; justify-content:flex-end; gap:9px; margin-top:20px; }.evidence-source-dialog .btn { min-height:46px; border-radius:9px; padding:0 16px; font-weight:800; }.evidence-source-dialog .btn-ghost { border:1px solid #789099!important; color:#173942!important; background:#f4f0df!important; }.evidence-source-dialog .btn-primary { border:1px solid #466c4b!important; color:#fffdf7!important; background:#466c4b!important; }
 .map-card-title { display:flex; align-items:flex-start; gap:14px; }.map-card-title > span { min-width:34px; margin:4px 0 0!important; color:var(--agent-coral)!important; font-family:var(--font-serif); font-size:2.4rem!important; line-height:.78; }.map-card-title h2 { margin:0 0 8px!important; }.map-card-title p { max-width:700px; margin:0!important; color:var(--agent-ink-soft)!important; font-size:.78rem; line-height:1.55!important; }.map-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:17px 0 10px; }.map-toolbar .graph-tools { margin:0; }.map-toolbar small { color:var(--agent-ink-soft); }.map-toolbar small b { color:var(--agent-coral); font-family:var(--font-serif); font-size:1rem; }
 .reading-map-card .reading-map-events.story-thread { display:grid; grid-template-columns:1fr; gap:0; max-height:none; margin:0; padding:4px 0 0; overflow:auto; list-style:none; }.story-thread li { position:relative; display:grid!important; grid-template-columns:46px minmax(0,1fr); gap:0 12px; margin:0!important; padding:0!important; border:0!important; border-radius:0!important; background:transparent!important; }.event-marker { position:relative; z-index:1; display:grid; place-items:start center; padding-top:14px; }.event-marker::after { content:''; position:absolute; top:42px; bottom:-13px; width:1px; background:rgba(16,44,50,.15); }.story-thread li:last-child .event-marker::after { display:none; }.event-marker b { display:grid; width:29px; height:29px; place-items:center; border:1px solid rgba(212,97,69,.42); border-radius:50%; color:var(--agent-coral); background:#fffdf7; font-size:.62rem; }.event-card { margin-bottom:12px; border:1px solid rgba(16,44,50,.11); border-radius:12px; padding:13px 14px; background:rgba(255,253,247,.78); }.event-card > div { display:flex; align-items:center; gap:8px; }.event-card em { border-radius:99px; padding:3px 6px; color:#54796d; background:rgba(184,214,125,.22); font-size:.58rem; font-style:normal; font-weight:800; }.event-card strong { min-width:0; color:var(--agent-ink); font-family:var(--font-serif); font-size:.94rem; }.event-card p { margin:8px 0!important; font-size:.72rem!important; line-height:1.55!important; }.event-card footer { display:flex; align-items:center; gap:9px; }.event-card footer small { color:var(--agent-ink-soft); }.event-card footer > span { border-left:2px solid var(--agent-lime); padding-left:6px; color:#54796d; font-size:.62rem; font-weight:800; }.event-card .evidence-jump { margin:0 0 0 auto; }.event-connector { grid-column:2; position:relative; z-index:1; min-height:17px; padding:0 0 3px; color:#54796d; font-size:.6rem; font-weight:800; }.event-connector span { display:inline-block; padding:2px 6px; border-radius:5px; background:rgba(184,214,125,.18); }.map-footnote { margin-top:8px; }
 @media (min-width:1080px) { .insight-stage .graph-card { min-height:0!important; }.relationship-globe-shell { min-height:0; }.insight-stage .graph-card .relationship-globe { height:100%!important; margin:0!important; border:0!important; border-radius:0!important; background:transparent!important; } }
@@ -1649,8 +1745,11 @@ onBeforeUnmount(() => {
 </style>
 
 <style scoped>
-/* Keep every overlay legible against the deliberately dark relation canvas. */
-.globe-toolbar-status { color:rgba(255,253,247,.92); text-shadow:0 1px 2px rgba(0,0,0,.55); }
+/* The toolbar sits above the dark canvas on the light card background, so it needs its own contrast surface. */
+.globe-toolbar-status { border:1px solid rgba(16,44,50,.16); border-radius:9px; padding:6px 8px; color:#36505a; background:#fffdf7; box-shadow:0 2px 8px rgba(16,44,50,.08); text-shadow:none; }
+.globe-toolbar-status b { color:#365f38; text-shadow:none; }
+.globe-toolbar-status button { border-color:rgba(16,44,50,.2); color:#24434c; background:#f4f0df; }
+.globe-toolbar-status button:hover { border-color:#547a45; color:#315f37; background:#edf4d7; }
 .globe-hud { border:1px solid rgba(255,253,247,.18); border-radius:7px; padding:5px 7px; color:rgba(255,253,247,.95); background:rgba(4,24,33,.7); box-shadow:0 2px 9px rgba(0,0,0,.18); text-shadow:0 1px 2px rgba(0,0,0,.75); }
 .relationship-canvas-head { border-bottom-color:rgba(255,253,247,.18); background:linear-gradient(100deg,#0b2935,#154653); }
 .relationship-canvas-head > div:first-child > span { color:#dbf19c; }
@@ -1662,4 +1761,11 @@ onBeforeUnmount(() => {
 .canvas-selection span,.canvas-selection button { color:#dbf19c; }
 .canvas-selection b { color:#fffdf2; }
 .canvas-selection small { color:rgba(255,253,247,.84); }
+
+/* The legacy progress rule targeted every direct div and clipped this label to 6px. */
+.task-row-progress .task-progress-label { display:flex; align-items:center; justify-content:space-between; gap:12px; height:auto; min-height:22px; margin:0 0 6px; overflow:visible; border-radius:0; background:transparent; }
+.task-row-progress .task-progress-label b { display:block; margin:0; color:var(--agent-ink); font-size:.84rem; line-height:1.4; }
+.task-row-progress .task-progress-label small { display:block; margin:0; color:#47612f; font-size:.78rem; font-weight:800; line-height:1.4; }
+.task-row-progress .task-progress-track { height:10px; overflow:hidden; border-radius:99px; background:#dfe9d8; }
+.task-row-progress .task-progress-track i { background:linear-gradient(90deg,#5e9166,#9bc46c); }
 </style>

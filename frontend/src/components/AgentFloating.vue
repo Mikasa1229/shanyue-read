@@ -28,6 +28,9 @@
           </div>
           <article v-for="(message, index) in messages" :key="`${message.id || index}-${message.role}`" :class="['agent-message', message.role === 'USER' ? 'is-user' : 'is-agent']">
             <span>{{ message.content }}</span>
+            <div v-if="bookReferenceItems(message).length" class="agent-book-references">
+              <button v-for="book in bookReferenceItems(message)" :key="book.canonicalBookId" type="button" @click="openRecommendation(book)"><small>平台书源已验证</small><strong>《{{ book.title }}》</strong><span>{{ book.author || '作者未知' }} · 点击阅读</span></button>
+            </div>
             <div v-if="citationItems(message).length" class="agent-citations">
               <button v-for="citation in citationItems(message)" :key="`${citation.canonicalBookId}-${citation.chapterIndex}-${citation.excerpt}`" type="button" @click="openCitation(citation)">
                 {{ citationLabel(citation) }}
@@ -310,8 +313,17 @@ async function send() {
       onStatus(data) { status.value = data?.status === 'thinking' ? '正在思考…' : '正在检索…' },
       onRecommendations(data) { recommendations.value = Array.isArray(data) ? data.slice(0, 3) : recommendations.value },
       onGraph(data) { graphPreview.value = data || graphPreview.value },
-      onDone(reply) { messages.value[messages.value.length - 1].citations = reply?.citations || [] },
-      onError() { status.value = '请求暂时失败，请稍后重试。' }
+      onDone(reply) {
+        const message = messages.value[messages.value.length - 1]
+        if (reply?.content) message.content = reply.content
+        message.citations = reply?.citations || []
+        message.bookReferences = reply?.bookReferences || []
+      },
+      onError(data) {
+        const message = data?.message || '请求暂时失败，请稍后重试。'
+        messages.value[messages.value.length - 1].content = message
+        status.value = message
+      }
     })
   } catch (error) {
     messages.value[messages.value.length - 1].content = error.message
@@ -325,6 +337,9 @@ async function send() {
 
 function citationItems(message) {
   return Array.isArray(message.citations) ? message.citations : []
+}
+function bookReferenceItems(message) {
+  return Array.isArray(message?.bookReferences) ? message.bookReferences : []
 }
 
 function citationLabel(citation) {
@@ -368,6 +383,7 @@ async function openCitation(citation) {
 .agent-prompts { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .agent-prompts button { border: 1px solid var(--paper-3); border-radius: var(--radius-full); padding: 6px 10px; background: var(--paper-1); color: var(--ink-2); cursor: pointer; font-size: .75rem; }
 .agent-message { max-width: 88%; padding: 10px 12px; border-radius: var(--radius-md); white-space: pre-wrap; font-size: .875rem; line-height: 1.6; }
+.agent-book-references { display:grid; gap:7px; margin-top:9px; white-space:normal; }.agent-book-references button { display:grid; gap:2px; width:100%; border:1px solid var(--paper-3); border-radius:10px; padding:9px; color:var(--ink-1); background:var(--paper-0); cursor:pointer; text-align:left; }.agent-book-references button:hover { border-color:var(--gold-1); }.agent-book-references small { color:var(--gold-0); font-size:.58rem; font-weight:800; }.agent-book-references strong { font-family:var(--font-serif); font-size:.8rem; }.agent-book-references span { color:var(--ink-3); font-size:.66rem; }
 .agent-citations { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(138,121,101,.28); white-space: normal; }.agent-citations button { border:0; padding:0; background:transparent; color:var(--sage-0); text-align:left; font:inherit; font-size:.68rem; cursor:pointer; }.agent-citations button:hover { text-decoration:underline; }
 .is-user { align-self: flex-end; color: var(--paper-0); background: var(--ink-0); border-bottom-right-radius: 2px; }
 .is-agent { align-self: flex-start; background: var(--paper-2); color: var(--ink-1); border-bottom-left-radius: 2px; }
@@ -376,6 +392,10 @@ async function openCitation(citation) {
 .agent-input { padding: var(--space-3); display: flex; flex-wrap:wrap; gap: var(--space-2); border-top: 1px solid var(--paper-3); }.agent-quick-tools { display:flex; flex:0 0 100%; align-items:center; gap:6px; }.agent-tool { border:1px solid var(--paper-3); border-radius:99px; padding:4px 8px; background:var(--paper-0); color:var(--ink-3); cursor:pointer; font:inherit; font-size:.68rem; }.agent-tool.active { border-color:var(--gold-1); background:var(--gold-3); color:var(--gold-0); }.agent-reference { color:var(--sage-0); font-size:.68rem; }.agent-shelf-picker { display:flex; flex:0 0 100%; align-items:center; gap:6px; padding:6px; border-radius:var(--radius-sm); background:var(--paper-1); }.agent-shelf-picker select { flex:1; min-width:0; padding:5px 7px; border:1px solid var(--paper-3); border-radius:var(--radius-sm); background:var(--paper-0); color:var(--ink-1); font:inherit; font-size:.7rem; }.agent-shelf-picker small { color:var(--ink-4); font-size:.68rem; }
 .agent-input textarea { flex: 1; min-height: 42px; border: 1px solid var(--paper-3); border-radius: var(--radius-md); padding: 8px; resize: none; font: inherit; font-size: .82rem; outline-color: var(--gold-1); }
 .agent-send { border: 0; border-radius: var(--radius-md); padding: 0 12px; color: var(--paper-0); background: var(--ink-0); cursor: pointer; font-size: .78rem; }
+
+.is-user { color:#293735; background:#eadfce; }
+.agent-send,.agent-guest-login { color:#fffdf8; background:#b56346; }
+.agent-guest { background:#fffdf8; }
 .agent-send:disabled { opacity: .5; cursor: not-allowed; }
 .agent-foot { padding: 0 var(--space-4) var(--space-3); text-align: right; font-size: .76rem; }
 .agent-panel-enter-active,.agent-panel-leave-active { transition: opacity var(--transition-base), transform var(--transition-base); }
