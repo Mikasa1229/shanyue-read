@@ -51,11 +51,68 @@ public class InternalCanonicalBookController {
         internalAccess.require(token);
         String value = keyword == null ? "" : keyword.trim();
         if (value.isBlank()) return R.ok(List.of());
-        return R.ok(canonicalBookMapper.selectList(com.baomidou.mybatisplus.core.toolkit.Wrappers.<CanonicalBook>lambdaQuery()
-                        .ne(CanonicalBook::getMergeStatus, "MERGED").and(query -> query.like(CanonicalBook::getTitle, value)
-                                .or().like(CanonicalBook::getAuthor, value)).last("LIMIT " + Math.max(1, Math.min(limit, 12))))
-                .stream().map(book -> Map.<String, Object>of("canonicalBookId", book.getId(), "title", book.getTitle(),
-                        "author", book.getAuthor() == null ? "" : book.getAuthor(), "summary", book.getSummary() == null ? "" : book.getSummary())).toList());
+        int boundedLimit = Math.max(1, Math.min(limit, 12));
+        List<String> terms = searchTerms(value);
+        List<CanonicalBook> catalog = canonicalBookMapper.selectList(com.baomidou.mybatisplus.core.toolkit.Wrappers.<CanonicalBook>lambdaQuery()
+                .ne(CanonicalBook::getMergeStatus, "MERGED").last("LIMIT 500"));
+        List<Map<String, Object>> matched = readableSearchResults(catalog.stream()
+                .map(book -> Map.entry(book, relevance(book, value, terms)))
+                .filter(entry -> entry.getValue() > 0)
+                .sorted(Map.Entry.<CanonicalBook, Integer>comparingByValue().reversed())
+                .map(Map.Entry::getKey), boundedLimit);
+        // Natural-language recommendation constraints rarely match a title literally. In that case
+        // return real readable catalog candidates and let the Agent disclose metadata limitations.
+        if (matched.isEmpty() && isRecommendationRequest(value)) {
+            matched = readableSearchResults(catalog.stream(), boundedLimit);
+        }
+        return R.ok(matched);
+    }
+
+    private List<Map<String, Object>> readableSearchResults(java.util.stream.Stream<CanonicalBook> books, int limit) {
+        return books.limit(80)
+                .map(book -> canonicalBookService.detail(book.getId()))
+                .filter(java.util.Objects::nonNull)
+                .filter(book -> book.getSourceId() != null && book.getSourceBookUrl() != null && !book.getSourceBookUrl().isBlank())
+                .map(book -> {
+                    Map<String, Object> result = new java.util.LinkedHashMap<>();
+                    result.put("canonicalBookId", book.getCanonicalBookId());
+                    result.put("title", book.getTitle());
+                    result.put("author", book.getAuthor() == null ? "" : book.getAuthor());
+                    result.put("coverUrl", book.getCoverUrl() == null ? "" : book.getCoverUrl());
+                    result.put("summary", book.getSummary() == null ? "" : book.getSummary());
+                    result.put("sourceId", book.getSourceId());
+                    result.put("sourceBookUrl", book.getSourceBookUrl());
+                    return result;
+                }).limit(limit).toList();
+    }
+
+    private boolean isRecommendationRequest(String value) {
+        return value.contains("推荐") || value.contains("找书") || value.contains("看什么") || value.contains("读什么")
+                || value.contains("换一本") || value.contains("换个") || value.contains("热门")
+                || value.contains("点击") || value.contains("引用") || value.contains("链接")
+                || value.toLowerCase(java.util.Locale.ROOT).contains("recommend");
+    }
+
+    private List<String> searchTerms(String request) {
+        String normalized = request.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("(请|帮我|一下|一本|几本|一点|比较|好看|有名|小说|网文|作品|书源|里面|能够|可以|搜索|搜到|推荐|想看|我要|要看|完结|短篇|长篇|换一本|换个|直接|热门|点击|引用|链接)", " ");
+        return java.util.Arrays.stream(normalized.split("[^\\p{IsHan}a-z0-9]+"))
+                .map(String::trim).filter(term -> term.length() >= 2).distinct().limit(8).toList();
+    }
+
+    private int relevance(CanonicalBook book, String raw, List<String> terms) {
+        String title = book.getTitle() == null ? "" : book.getTitle().toLowerCase(java.util.Locale.ROOT);
+        String author = book.getAuthor() == null ? "" : book.getAuthor().toLowerCase(java.util.Locale.ROOT);
+        String summary = book.getSummary() == null ? "" : book.getSummary().toLowerCase(java.util.Locale.ROOT);
+        String normalizedRaw = raw.toLowerCase(java.util.Locale.ROOT).trim();
+        int score = title.equals(normalizedRaw) ? 100 : title.contains(normalizedRaw) ? 50 : author.contains(normalizedRaw) ? 35 : 0;
+        for (String term : terms) {
+            if (title.contains(term)) score += 14;
+            if (author.contains(term)) score += 8;
+            if (summary.contains(term)) score += 3;
+        }
+        // A generic recommendation still needs real readable candidates instead of an empty tool result.
+        return score == 0 && terms.isEmpty() ? 1 : score;
     }
 
     @GetMapping("/merge-reviews")

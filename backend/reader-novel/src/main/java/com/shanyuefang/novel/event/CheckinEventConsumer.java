@@ -2,6 +2,7 @@ package com.shanyuefang.novel.event;
 
 import com.rabbitmq.client.Channel;
 import com.shanyuefang.novel.config.RabbitMQConfig;
+import com.shanyuefang.novel.feign.UserFeignClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.Message;
@@ -23,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 public class CheckinEventConsumer {
 
     private final RedisTemplate<String, Object> redisTemplate;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private UserFeignClient userFeignClient;
 
     /** 小说打卡活跃度 ZSET（可用于后续热度计算） */
     private static final String NOVEL_ACTIVITY_ZSET = "ranking:novel_activity";
@@ -58,13 +61,22 @@ public class CheckinEventConsumer {
                         event.getNovelId(), event.getUserId());
             }
 
+            if (userFeignClient != null) {
+                userFeignClient.recordVerifiedAction(event.getUserId(), java.util.Map.of(
+                        "actionType", "CHECKIN", "value", 1
+                ));
+            }
+
             log.info("处理打卡事件: userId={}, date={}, novelId={}",
                     event.getUserId(), event.getCheckinDate(), event.getNovelId());
             channel.basicAck(tag, false);
 
         } catch (Exception e) {
             log.error("处理打卡事件失败: messageId={}", messageId, e);
-            channel.basicNack(tag, false, false);
+            if (messageId != null) redisTemplate.delete(String.format(IDEM_KEY, messageId));
+            // 用户服务或 Redis 的瞬时故障不能直接丢弃事件；删除幂等键后重新入队，
+            // 下次消费可以再次发放每日任务积分。不可恢复的消息由队列的重试策略/死信策略处理。
+            channel.basicNack(tag, false, true);
         }
     }
 }

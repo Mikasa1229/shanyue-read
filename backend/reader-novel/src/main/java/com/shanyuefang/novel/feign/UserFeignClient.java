@@ -34,4 +34,7 @@ public interface UserFeignClient {
 
     @PostMapping("/level/verified-reading")
     R<Object> recordVerifiedReading(@RequestParam("userId") long userId, @RequestParam("seconds") int seconds);
+
+    @PostMapping("/level/action")
+    R<Object> recordVerifiedAction(@RequestParam("userId") long userId, @RequestBody Map<String, Object> request);
 }
