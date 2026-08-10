@@ -59,6 +59,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
@@ -247,6 +248,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         Map<String, RerankerService.Candidate> candidates = new LinkedHashMap<>();
 
         addGraphEvidenceCandidates(candidates, canonicalBookId, currentChapter, question, safeLimit);
+        addEntityPairAnchoredCandidates(candidates, canonicalBookId, currentChapter, question, safeLimit);
+        addEntityAnchoredCandidates(candidates, canonicalBookId, currentChapter, question, safeLimit);
 
         vectorKnowledgeStore.search(question, safeLimit, canonicalBookId, currentChapter).stream()
                 .filter(document -> matchesReadableBook(document, canonicalBookId, currentChapter))
@@ -305,6 +308,74 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                             + edge.getRelation() + "--> " + target.getName() + "。原文依据：" + excerpt(safe(edge.getEvidence()), 500);
                     addCandidate(candidates, evidence, 0.92D, "LIGHTRAG_GRAPH");
                 });
+    }
+
+    /**
+     * Entity names and approved aliases are high-precision retrieval anchors for relationship
+     * questions. They recall original chunks, not generated graph assertions, before reranking.
+     */
+    private void addEntityAnchoredCandidates(Map<String, RerankerService.Candidate> candidates, long bookId,
+                                             int currentChapter, String question, int safeLimit) {
+        for (EntityAnchor anchor : resolveQuestionEntityAnchors(bookId, currentChapter, question)) {
+            for (String name : anchor.mentions()) {
+                chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery().eq(KnowledgeChunk::getCanonicalBookId, bookId)
+                                .le(KnowledgeChunk::getChapterIndex, currentChapter).like(KnowledgeChunk::getContent, name)
+                                .orderByAsc(KnowledgeChunk::getChapterIndex).orderByAsc(KnowledgeChunk::getId).last("LIMIT " + Math.max(4, safeLimit)))
+                        .forEach(chunk -> addCandidate(candidates, chapterExcerpt(chunk.getChapterIndex(), chunk.getContent()),
+                                0.88D, "ENTITY_ANCHORED"));
+            }
+        }
+    }
+
+    /**
+     * A pair named in a question needs passages where both entities (or their reviewed aliases)
+     * actually occur. This is retrieval-only: it never turns co-occurrence into a graph edge.
+     */
+    private void addEntityPairAnchoredCandidates(Map<String, RerankerService.Candidate> candidates, long bookId,
+                                                  int currentChapter, String question, int safeLimit) {
+        List<EntityAnchor> anchors = resolveQuestionEntityAnchors(bookId, currentChapter, question);
+        if (anchors.size() < 2) return;
+        List<KnowledgeChunk> readableChunks = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
+                .eq(KnowledgeChunk::getCanonicalBookId, bookId).le(KnowledgeChunk::getChapterIndex, currentChapter)
+                .orderByAsc(KnowledgeChunk::getChapterIndex).orderByAsc(KnowledgeChunk::getId).last("LIMIT 5000"));
+        for (int left = 0; left < anchors.size(); left++) {
+            for (int right = left + 1; right < anchors.size(); right++) {
+                EntityAnchor first = anchors.get(left), second = anchors.get(right);
+                readableChunks.stream()
+                        .filter(chunk -> mentionsAny(chunk.getContent(), first.mentions())
+                                && mentionsAny(chunk.getContent(), second.mentions()))
+                        .limit(Math.max(4, safeLimit * 2L))
+                        .forEach(chunk -> addCandidate(candidates, chapterExcerpt(chunk.getChapterIndex(), chunk.getContent()),
+                                0.96D, "ENTITY_PAIR_ANCHORED"));
+            }
+        }
+    }
+
+    private List<EntityAnchor> resolveQuestionEntityAnchors(long bookId, int currentChapter, String question) {
+        List<KnowledgeGraphNode> visibleNodes = nodeMapper.selectList(Wrappers.<KnowledgeGraphNode>lambdaQuery()
+                .eq(KnowledgeGraphNode::getCanonicalBookId, bookId).le(KnowledgeGraphNode::getFirstChapter, currentChapter)
+                .eq(KnowledgeGraphNode::getReviewStatus, APPROVED).last("LIMIT 300"));
+        Map<Long, KnowledgeGraphNode> nodesById = visibleNodes.stream()
+                .collect(java.util.stream.Collectors.toMap(KnowledgeGraphNode::getId, node -> node, (left, right) -> left));
+        List<KnowledgeEntityAlias> aliases = aliasMapper.selectList(Wrappers.<KnowledgeEntityAlias>lambdaQuery()
+                .eq(KnowledgeEntityAlias::getCanonicalBookId, bookId).le(KnowledgeEntityAlias::getFirstChapter, currentChapter));
+        Set<Long> seeds = visibleNodes.stream().filter(node -> question.contains(node.getName())).map(KnowledgeGraphNode::getId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        aliases.stream().filter(alias -> StringUtils.hasText(alias.getAlias()) && question.contains(alias.getAlias()))
+                .map(KnowledgeEntityAlias::getNodeId).forEach(seeds::add);
+        return seeds.stream().map(nodeId -> {
+            KnowledgeGraphNode node = nodesById.get(nodeId);
+            if (node == null || !StringUtils.hasText(node.getName())) return null;
+            Set<String> mentions = new LinkedHashSet<>();
+            mentions.add(node.getName());
+            aliases.stream().filter(alias -> nodeId.equals(alias.getNodeId())).map(KnowledgeEntityAlias::getAlias)
+                    .filter(StringUtils::hasText).forEach(mentions::add);
+            return new EntityAnchor(node.getName(), mentions);
+        }).filter(Objects::nonNull).limit(4).toList();
+    }
+
+    private boolean mentionsAny(String content, Set<String> mentions) {
+        return StringUtils.hasText(content) && mentions.stream().anyMatch(content::contains);
     }
 
     private void addCandidate(Map<String, RerankerService.Candidate> candidates, String content, double score, String source) {
@@ -892,10 +963,16 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                     facts.addAll(characterKnowledgeFacts(chapter, content.toString(), context));
                 }
             }
+            List<StructuredGraphExtractor.CharacterPairCandidate> candidates = characterPairCandidates(facts, context);
             StructuredGraphExtractor.CharacterKnowledgeExtraction extraction = structuredGraphExtractor
-                    .extractCharacterKnowledge(facts, context, modelConfig);
+                    .extractCharacterKnowledge(facts, context, modelConfig, candidates);
+            List<StructuredGraphExtractor.CharacterRelation> relations = new ArrayList<>(extraction.relations());
+            // A separate model pass avoids spending the broad window's relation budget on only
+            // conspicuous side characters. It verifies, rather than manufactures, each pair.
+            candidates.stream().limit(2).forEach(pair -> relations.addAll(structuredGraphExtractor
+                    .verifyCharacterPair(pairEvidenceFacts(facts, pair, context), context, modelConfig, pair).relations()));
             extraction.identities().forEach(identity -> mergeRevealedIdentity(bookId, identity, modelConfig));
-            for (StructuredGraphExtractor.CharacterRelation relation : extraction.relations()) {
+            for (StructuredGraphExtractor.CharacterRelation relation : relations) {
                 KnowledgeGraphNode source = resolveKnownEndpoint(bookId, relation.source());
                 KnowledgeGraphNode target = resolveKnownEndpoint(bookId, relation.target());
                 if (source == null || target == null || source.getId().equals(target.getId())
@@ -958,6 +1035,50 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                         .thenComparingInt(CharacterTextWindow::offset)).limit(4)
                 .sorted(Comparator.comparingInt(CharacterTextWindow::offset))
                 .map(window -> new StructuredGraphExtractor.ChapterFact(null, chapter, window.text())).toList();
+    }
+
+    /** Selects co-mentioned known people for model review; it does not claim that a relationship exists. */
+    private List<StructuredGraphExtractor.CharacterPairCandidate> characterPairCandidates(
+            List<StructuredGraphExtractor.ChapterFact> facts, List<StructuredGraphExtractor.EntityContext> context) {
+        if (facts == null || facts.isEmpty() || context == null || context.isEmpty()) return List.of();
+        List<StructuredGraphExtractor.EntityContext> characters = context.stream()
+                .filter(entity -> "CHARACTER".equals(entity.type()) && StringUtils.hasText(entity.name())).toList();
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (StructuredGraphExtractor.ChapterFact fact : facts) {
+            String text = safe(fact.evidence());
+            int relationSignalCount = (int) List.of("帮", "引荐", "指点", "劝", "救", "护", "邻居", "隔壁", "朋友", "同行",
+                    "父", "母", "徒弟", "先生", "师父", "照看", "答应", "借").stream().filter(text::contains).count();
+            List<String> mentioned = characters.stream().filter(entity -> entityMentioned(entity, text))
+                    .map(StructuredGraphExtractor.EntityContext::name).sorted().toList();
+            for (int left = 0; left < mentioned.size(); left++) for (int right = left + 1; right < mentioned.size(); right++) {
+                counts.merge(mentioned.get(left) + "\u0000" + mentioned.get(right), 1 + relationSignalCount * 2, Integer::sum);
+            }
+        }
+        return counts.entrySet().stream().sorted(Map.Entry.<String, Integer>comparingByValue().reversed()
+                        .thenComparing(Map.Entry::getKey)).limit(8).map(entry -> {
+                    String[] names = entry.getKey().split("\u0000", 2);
+                    return new StructuredGraphExtractor.CharacterPairCandidate(names[0], names[1], entry.getValue());
+                }).toList();
+    }
+
+    private List<StructuredGraphExtractor.ChapterFact> pairEvidenceFacts(List<StructuredGraphExtractor.ChapterFact> facts,
+                                                                           StructuredGraphExtractor.CharacterPairCandidate pair,
+                                                                           List<StructuredGraphExtractor.EntityContext> context) {
+        if (facts == null || pair == null) return List.of();
+        return facts.stream().filter(fact -> entityMentioned(pair.left(), context, safe(fact.evidence()))
+                        && entityMentioned(pair.right(), context, safe(fact.evidence())))
+                .limit(8).toList();
+    }
+
+    private boolean entityMentioned(String canonicalName, List<StructuredGraphExtractor.EntityContext> context, String text) {
+        if (text.contains(canonicalName)) return true;
+        return context != null && context.stream().filter(entity -> canonicalName.equals(entity.name()))
+                .anyMatch(entity -> entity.aliases() != null && entity.aliases().stream().filter(StringUtils::hasText).anyMatch(text::contains));
+    }
+
+    private boolean entityMentioned(StructuredGraphExtractor.EntityContext entity, String text) {
+        if (text.contains(entity.name())) return true;
+        return entity.aliases() != null && entity.aliases().stream().filter(StringUtils::hasText).anyMatch(text::contains);
     }
 
     private void mergeRevealedIdentity(long bookId, StructuredGraphExtractor.IdentityResolution identity,
@@ -1726,6 +1847,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
     private String safe(String content) { return content == null ? "" : content; }
     private record RetrievalOutcome(List<RerankerService.Candidate> candidates, List<RerankerService.Candidate> selected) { }
+    private record EntityAnchor(String canonicalName, Set<String> mentions) { }
     private record ScoredChunk(KnowledgeChunk chunk, double score) { }
     private record SimilarCandidate(double score, Set<String> sharedKeywords) { }
     private record CharacterTextWindow(String text, int score, int offset) { }

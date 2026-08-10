@@ -200,6 +200,34 @@ public class StructuredGraphExtractor {
     public CharacterKnowledgeExtraction extractCharacterKnowledge(List<ChapterFact> input,
                                                                   List<EntityContext> knownEntities,
                                                                   ModelConfig modelConfig) {
+        return extractCharacterKnowledge(input, knownEntities, modelConfig, List.of());
+    }
+
+    /**
+     * Candidate pairs are evidence-window selection hints, never rule-created graph facts.
+     * The model must still choose a type and quote a supporting span before a relation survives.
+     */
+    public CharacterKnowledgeExtraction extractCharacterKnowledge(List<ChapterFact> input,
+                                                                  List<EntityContext> knownEntities,
+                                                                  ModelConfig modelConfig,
+                                                                  List<CharacterPairCandidate> candidatePairs) {
+        return extractCharacterKnowledge(input, knownEntities, modelConfig, candidatePairs, false);
+    }
+
+    /** Verifies one co-mentioned pair with the model; a no-relation response is valid and expected. */
+    public CharacterKnowledgeExtraction verifyCharacterPair(List<ChapterFact> input,
+                                                             List<EntityContext> knownEntities,
+                                                             ModelConfig modelConfig,
+                                                             CharacterPairCandidate pair) {
+        if (pair == null) return CharacterKnowledgeExtraction.empty();
+        return extractCharacterKnowledge(input, knownEntities, modelConfig, List.of(pair), true);
+    }
+
+    private CharacterKnowledgeExtraction extractCharacterKnowledge(List<ChapterFact> input,
+                                                                    List<EntityContext> knownEntities,
+                                                                    ModelConfig modelConfig,
+                                                                    List<CharacterPairCandidate> candidatePairs,
+                                                                    boolean restrictToCandidates) {
         if (modelConfig == null || !StringUtils.hasText(modelConfig.apiKey()) || input == null || input.isEmpty()) {
             return CharacterKnowledgeExtraction.empty();
         }
@@ -212,9 +240,16 @@ public class StructuredGraphExtractor {
                     identities 每项只含 canonicalName,mention,factIndex,evidence,confidence。仅当原文能够确认较早的描述性称呼与后来正式姓名属于同一人物时输出，例如前文持续称“黑衣少女”，同一叙事链后来明确称“宁姚”。canonicalName 必须是正式姓名，mention 必须是描述性称呼；两者不可只是同场出现的人名，不可凭性别、动作或语义相似猜测。
                     relations 每项只含 source,target,type,factIndex,evidence,confidence。source 和 target 必须是人物正式姓名或已确认称呼。type 只能为 PARENT_OF、SPOUSE_OF、SIBLING_OF、FRIEND_OF、COMPANION_OF、TEACHER_OF、MASTER_OF、SERVES、KNOWS、NEIGHBOR_OF、GUIDES、HELPS、PROTECTS、OPPOSES、TRAVELS_WITH、CARETAKES、EMPLOYS。
                     同时抽取两层可解释关系：(1) 跨场景仍成立的社会或身份关系；(2) 有直接文本依据的阶段性叙事关系，例如邻里、具体帮助、保护、引导、敌对、实际同行、照看或提供工作。普通对话、仅同场出现、一次无后果的动作不能输出。PARENT_OF 必须是“父母 -> 子女”，TEACHER_OF 是“老师 -> 学生”，MASTER_OF 是“师父 -> 徒弟”，SERVES 是“效忠者 -> 被效忠者”。GUIDES 不能冒充 TEACHER_OF 或 MASTER_OF；若原文没有师徒成立，只能用 GUIDES。NEIGHBOR_OF 和 TRAVELS_WITH 为双向语义，其他关系按动作方向输出。没有直接证据就不输出，宁缺毋滥。
-                    evidence 必须是对应 factIndex 中逐字连续的短原文，最多120字，且直接支持身份等价或关系，不能返回整章。关系 evidence 必须出现两个端点名称或实体目录中的已确认称呼，并包含能说明该关系的动作、称谓或结构性事实。若片段明确说“尚未正式成为徒弟”“没有收徒机会”等否定，绝不可输出 TEACHER_OF 或 MASTER_OF。不得使用窗口外剧情、百科知识或常识。先覆盖不同人物对，再增加同一人物对的多个关系；宁缺毋滥，最多2个身份归并和12条关系。
+                    evidence 必须是对应 factIndex 中逐字连续的短原文，最多120字，且直接支持身份等价或关系，不能返回整章。关系 evidence 必须出现两个端点名称或实体目录中的已确认称呼，并包含能说明该关系的动作、称谓或结构性事实。若片段明确说“尚未正式成为徒弟”“没有收徒机会”等否定，绝不可输出 TEACHER_OF 或 MASTER_OF。下方“优先审查的人物对”只是根据同段共现筛出的候选，你必须独立判断：有证据才输出，没证据就不输出；不要为凑数量臆造。不得使用窗口外剧情、百科知识或常识。先覆盖不同人物对，再增加同一人物对的多个关系；宁缺毋滥，最多2个身份归并和12条关系。
                     """;
-            StringBuilder source = new StringBuilder(entityCatalog(knownEntities)).append("\n章节原文：\n");
+            StringBuilder source = new StringBuilder(entityCatalog(knownEntities));
+            if (candidatePairs != null && !candidatePairs.isEmpty()) {
+                source.append("\n优先审查的人物对（仅是候选，不保证关系成立）：\n");
+                candidatePairs.stream().limit(8).forEach(pair -> source.append(pair.left()).append(" <-> ")
+                        .append(pair.right()).append("（共现片段数 ").append(pair.cooccurrenceCount()).append("）\n"));
+            }
+            if (restrictToCandidates) source.append("本次是单人物对核验：relations 只能输出上述人物对；若没有可验证关系，返回空数组。\n");
+            source.append("\n章节原文：\n");
             for (int index = 0; index < facts.size(); index++) {
                 ChapterFact fact = facts.get(index);
                 source.append('[').append(index + 1).append("] 第").append(fact.chapterIndex() + 1)
@@ -230,7 +265,9 @@ public class StructuredGraphExtractor {
             List<IdentityResolution> identities = response.identities == null ? List.of() : response.identities.stream()
                     .map(value -> sanitizeIdentity(value, facts)).filter(java.util.Objects::nonNull).limit(2).toList();
             List<CharacterRelation> relations = response.relations == null ? List.of() : response.relations.stream()
-                    .map(value -> sanitizeCharacterRelation(value, facts, knownEntities)).filter(java.util.Objects::nonNull).limit(12).toList();
+                    .map(value -> sanitizeCharacterRelation(value, facts, knownEntities)).filter(java.util.Objects::nonNull)
+                    .filter(relation -> !restrictToCandidates || candidatePairs.stream()
+                            .anyMatch(pair -> pair.matches(relation.source(), relation.target()))).limit(restrictToCandidates ? 2 : 12).toList();
             return new CharacterKnowledgeExtraction(identities, relations);
         } catch (Exception exception) {
             log.warn("Character knowledge window extraction failed", exception);
@@ -326,7 +363,7 @@ public class StructuredGraphExtractor {
             case "KNOWS" -> List.of("认识", "相识", "见过", "朋友", "熟悉", "知道", "邻居", "隔壁").stream().anyMatch(value::contains);
             case "NEIGHBOR_OF" -> List.of("邻居", "隔壁", "毗邻", "隔墙").stream().anyMatch(value::contains);
             case "GUIDES" -> List.of("引导", "教导", "教诲", "指点", "讲解", "劝说", "嘱咐").stream().anyMatch(value::contains);
-            case "HELPS" -> List.of("帮", "帮助", "帮忙", "引荐", "陪", "替", "照应").stream().anyMatch(value::contains);
+            case "HELPS" -> List.of("帮", "帮助", "帮忙", "引荐", "提了提", "答应", "陪", "替", "照应").stream().anyMatch(value::contains);
             case "PROTECTS" -> List.of("保护", "救", "护", "庇护", "挡住", "救下").stream().anyMatch(value::contains);
             case "OPPOSES" -> List.of("敌", "仇", "追杀", "交手", "对峙", "冲突", "单挑").stream().anyMatch(value::contains);
             case "TRAVELS_WITH" -> List.of("同行", "结伴", "一同", "一起上路", "跟着").stream().anyMatch(value::contains);
@@ -577,6 +614,11 @@ public class StructuredGraphExtractor {
     }
     public record IdentityResolution(String canonicalName, String mention, List<ChapterFact> evidence, double confidence) { }
     public record CharacterRelation(String source, String target, String type, List<ChapterFact> evidence, double confidence) { }
+    public record CharacterPairCandidate(String left, String right, int cooccurrenceCount) {
+        boolean matches(String source, String target) {
+            return (left.equals(source) && right.equals(target)) || (left.equals(target) && right.equals(source));
+        }
+    }
     public record CharacterKnowledgeExtraction(List<IdentityResolution> identities, List<CharacterRelation> relations) {
         static CharacterKnowledgeExtraction empty() { return new CharacterKnowledgeExtraction(List.of(), List.of()); }
     }
