@@ -1,9 +1,8 @@
-<template>
+﻿<template>
   <main class="agent-center page" :class="{ 'is-workspace': activeTab !== 'overview', 'is-chat-workspace': activeTab === 'chats' }">
     <div class="container">
       <p v-if="loadNotice" class="agent-load-notice">{{ loadNotice }}</p>
 
-      <div v-if="actionNotice" class="agent-action-notice" :class="`is-${actionNotice.type}`" role="status">{{ actionNotice.message }}</div>
       <div v-if="actionNotice" class="agent-action-notice" :class="`is-${actionNotice.type}`" role="status">{{ actionNotice.message }}</div>
       <nav class="agent-tabs">
         <button v-for="tab in tabs" :key="tab.id" :class="{ active: activeTab === tab.id }" @click="selectTab(tab.id)">{{ tab.label }}</button>
@@ -58,7 +57,7 @@
 
           <section class="dashboard-shortcuts" aria-label="常用功能">
             <button type="button" @click="selectTab('chats')"><span>01</span><b>阅读对话</b><small>引用书架作品，在无剧透边界内继续讨论。</small><em>→</em></button>
-            <button type="button" @click="selectTab('insights')"><span>02</span><b>书籍洞察</b><small>回顾剧情、查看人物关系与追踪伏笔。</small><em>→</em></button>
+            <button type="button" @click="selectTab('insights')"><span>02</span><b>书籍洞察</b><small>回顾剧情、探索知识图谱与追踪伏笔。</small><em>→</em></button>
             <button type="button" @click="router.push('/agent/knowledge-graphs')"><span>03</span><b>图谱管理</b><small>独立管理共享范围、构建状态与删除操作。</small><em>→</em></button>
           </section>
         </template>
@@ -66,7 +65,7 @@
 
       <section v-else-if="activeTab === 'chats'" class="agent-workbench">
         <aside class="session-list card">
-          <div class="session-list-head"><span>会话档案</span><button class="new-session" @click="newSession">新建</button></div>
+          <div class="session-list-head"><span>会话档案</span><button class="new-session" @click="newSession()">新建</button></div>
           <label class="session-search-wrap"><span>搜索</span><input v-model="sessionSearch" class="session-search" placeholder="检索你的对话" @input="searchSessions" /></label>
           <div class="session-scroll">
             <p v-if="!sessions.length" class="session-empty">还没有对话。新建一个会话，从正在读的书开始。</p>
@@ -78,16 +77,18 @@
           <template v-if="activeSession">
             <div class="chat-header"><div class="chat-title-block"><span class="agent-eyebrow">阅读对话</span><div class="conversation-title-row"><input v-if="editingSessionTitle" ref="sessionTitleInput" v-model="sessionTitleDraft" class="conversation-title-input" maxlength="80" @keydown.enter.prevent="saveSessionTitle" @keydown.esc.prevent="cancelSessionTitle" @blur="saveSessionTitle" /><strong v-else>{{ activeSession.title || '未命名对话' }}</strong><button class="conversation-title-edit" type="button" :title="editingSessionTitle ? '保存标题' : '重命名对话'" @mousedown.prevent @click="editingSessionTitle ? saveSessionTitle() : startSessionTitleEdit()">{{ editingSessionTitle ? '保存' : '编辑标题' }}</button></div><small>{{ chatReferenceBook ? `围绕《${chatReferenceBook.bookName}》展开` : '尚未绑定书籍，你也可以随时开始闲聊' }}</small></div><div class="chat-actions"><span v-if="insightBookId" class="context-chip">安全边界 · 第 {{ insightChapter }} 章</span><button class="icon-action" title="导出对话" @click="exportConversation">导出</button><button class="icon-action danger" title="删除对话" @click="deleteConversation">删除</button></div></div>
             <div class="chat-history">
-              <div v-if="!messages.length && !sending" class="chat-welcome"><span class="welcome-mark">阅</span><div><span class="agent-eyebrow">小说阅读，不只是提问</span><h2>从你读到的地方继续。</h2><p>把书架、人物关系和已读章节都交给我。每个可核验回答都会带上它来自哪一章。</p><div class="starter-prompts"><button v-for="prompt in starterPrompts" :key="prompt" @click="useStarterPrompt(prompt)">{{ prompt }} <b>→</b></button></div></div></div>
+              <div v-if="!messages.length && !sending" class="chat-welcome"><span class="welcome-mark">阅</span><div><span class="agent-eyebrow">小说阅读，不只是提问</span><h2>从你读到的地方继续。</h2><p>把书架、知识图谱和已读章节都交给我。每个可核验回答都会带上它来自哪一章。</p><div class="starter-prompts"><button v-for="prompt in starterPrompts" :key="prompt" @click="useStarterPrompt(prompt)">{{ prompt }} <b>→</b></button></div></div></div>
               <article v-for="message in messages" :key="message.id" :class="['center-message', message.role === 'USER' ? 'user' : 'assistant']">
                 <template v-if="message.role === 'USER' && editingMessageId === message.id">
                   <textarea v-model="editingMessageContent" class="message-editor" rows="3" @keydown.esc.prevent="cancelMessageEdit" @keydown.ctrl.enter.prevent="saveMessageEdit(message)" />
                   <div class="message-edit-actions"><button type="button" @click="cancelMessageEdit">取消</button><button type="button" :disabled="sending || !editingMessageContent.trim()" @click="saveMessageEdit(message)">保存并重新生成</button></div>
                 </template>
                 <template v-else>
-                  <span>{{ message.content }}</span>
+                  <div v-if="message.role === 'ASSISTANT'" class="message-markdown" v-html="renderMarkdown(message.content)" />
+                  <span v-else>{{ message.content }}</span>
                   <button v-if="message.role === 'USER' && !String(message.id).startsWith('local-')" class="message-edit-button" type="button" title="编辑这条提问并重新生成后续回答" @click="startMessageEdit(message)"><span>✎</span> 编辑并重新生成</button>
                 </template>
+                <button v-if="message.role === 'ASSISTANT' && isShelfPlan(message.content)" type="button" class="shelf-plan-action" :disabled="shelfPlanApplying" @click="applyShelfPlan(message.content)">{{ shelfPlanApplying ? '正在整理书架…' : '按此方案整理书架' }}</button>
                 <small v-if="message.role === 'ASSISTANT' && isInterviewResponse(message.content)" class="interview-contract">角色访谈：原文事实、推断与未知内容已分区。</small>
                 <div v-if="bookReferenceItems(message).length" class="chat-book-references" aria-label="平台书源引用">
                   <button v-for="book in bookReferenceItems(message)" :key="book.canonicalBookId" type="button" @click="openRecommendedBook(book)">
@@ -112,6 +113,7 @@
                 <button type="button" class="plugin-action" @click="useStarterPrompt('帮我找出这本书目前已读范围内的伏笔')">伏笔雷达</button>
                 <button type="button" class="plugin-action" @click="useStarterPrompt('请以当前角色的第一人称接受一次访谈')">角色访谈</button>
                 <button type="button" class="plugin-action" @click="useStarterPrompt('推荐几本和这本书气质相近的作品')">相似作品</button>
+                <button type="button" class="plugin-action" @click="useStarterPrompt('请读取我的书架，按照作品题材和相似度给出子目录整理方案；先展示调整建议，不要删除任何书籍')">整理书架</button>
               </div>
               <textarea v-model="draft" rows="3" placeholder="写下你的问题，或从书架中引用一部作品…" @keydown.enter.exact.prevent="send" />
               <div class="chat-model-select" :class="{ open: showModelPicker }">
@@ -133,6 +135,12 @@
           <article class="shortcut-card card"><span class="note-index">02 / 开始探索</span><h3>从这里开始</h3><button @click="selectTab('insights')"><b>书籍洞察</b><span>图谱、伏笔与时间线</span></button><button @click="useStarterPrompt('推荐一本适合今晚读的书')"><b>今晚读什么</b><span>从书架和偏好出发</span></button></article>
           <div class="privacy-note"><span class="status-dot online" />你的书架、会话和模型密钥均按账户隔离</div>
         </aside>
+      </section>
+
+      <section v-else-if="activeTab === 'organize'" class="organize-panel">
+        <header class="organize-head"><div><span class="agent-eyebrow">书架管家 / 整理</span><h2>把相似的故事放到一起</h2><p>Agent 根据已索引的作品画像建议子目录；你可以保留自动整理，也可以给单本书指定目录。</p></div><button type="button" class="organize-chat" :disabled="sending" @click="startOrganizeConversation"><span>开启整理对话</span><b>↗</b></button></header>
+        <div v-if="!shelfGroups.length" class="card organize-empty">书架中还没有可以整理的作品。</div>
+        <div v-else class="directory-grid"><section v-for="directory in shelfDirectories" :key="directory.name" class="directory-card card"><header><h3>{{ directory.name }}</h3><small>{{ directory.books.length }} 本书</small></header><div class="directory-books"><article v-for="item in directory.books" :key="item.canonicalBookId"><div class="directory-book-copy"><strong>《{{ item.title }}》</strong><small>{{ item.author || '作者未知' }}</small></div><label class="directory-picker"><span class="sr-only">移动《{{ item.title }}》</span><select :value="item.groupName || '待整理作品'" :aria-label="`移动《${item.title}》`" @change="saveShelfDirectory(item, $event.target.value)"><option v-for="name in shelfDirectoryOptions" :key="name" :value="name">{{ name }}</option></select><i aria-hidden="true">⌄</i></label></article></div></section></div>
       </section>
 
       <section v-else-if="activeTab === 'models'" class="model-layout">
@@ -176,7 +184,7 @@
         </div>
       </section>
 
-      <section v-else-if="activeTab === 'insights'" class="insights-panel">
+      <section v-else-if="activeTab === 'insights'" class="insights-panel" :class="{ 'insight-focused': insightLoaded }">
         <header class="insight-page-head">
           <div><span class="agent-eyebrow">阅读工作台 / 洞察</span><h2>把故事看得更清楚</h2><p>选择书架作品和阅读位置；所有结果都标明它们来自哪一段已读内容。</p></div>
           <div v-if="selectedInsightBook" class="insight-book-stamp"><b>《{{ selectedInsightBook.bookName }}》</b><span>书架已读至第 {{ safeInsightChapter }} 章</span></div>
@@ -187,6 +195,11 @@
           <p v-if="selectedInsightBook" class="insight-safety-state" :class="{ warning: insightChapter > safeInsightChapter }"><b>{{ insightChapter > safeInsightChapter ? '可能剧透' : '无剧透模式' }}</b><span>{{ insightChapter > safeInsightChapter ? '继续后将先请你确认。' : '结果严格限定在已读范围内。' }}</span></p>
           <button class="btn btn-gold insight-run" :disabled="insightLoading || !usableShelfBooks.length">{{ insightLoading ? '正在整理…' : usableShelfBooks.length ? '生成洞察' : '请先加入书架' }}</button>
         </form>
+        <div v-if="insightLoaded && selectedInsightBook" class="insight-focused-context">
+          <div><span>当前洞察</span><strong>《{{ selectedInsightBook.bookName }}》</strong></div>
+          <small>已读至第 {{ safeInsightChapter }} 章 · 本次覆盖至第 {{ effectiveInsightChapter || insightChapter }} 章 · {{ insightChapter > safeInsightChapter ? '可能剧透' : '无剧透模式' }}</small>
+          <button type="button" class="btn insight-focused-exit" @click="exitInsightMode">退出洞察</button>
+        </div>
         <p v-if="effectiveInsightChapter !== null" class="insight-boundary-note" :class="{ limited: effectiveInsightChapter !== insightChapter }">
           <template v-if="effectiveInsightChapter !== insightChapter">当前返回内容止于第 {{ effectiveInsightChapter }} 章，未能覆盖你选择的第 {{ insightChapter }} 章。</template>
           <template v-else>本次洞察覆盖至第 {{ effectiveInsightChapter }} 章。</template>
@@ -194,37 +207,47 @@
         <div v-if="insightBookId" class="insight-workspace">
           <aside class="insight-nav" aria-label="洞察功能">
             <span>功能导航</span>
-            <button v-for="item in [{ id: 'capsule', label: '剧情胶囊', note: '已读回顾' }, { id: 'graph', label: '人物关系', note: '关系图谱' }, { id: 'clues', label: '线索板', note: '明确未解' }, { id: 'map', label: '阅读地图', note: '事件脉络' }, { id: 'dna', label: '相似书 DNA', note: '作品气质' }, { id: 'shelf', label: '书架管家', note: '阅读安排' }]" :key="item.id" :class="{ active: insightMode === item.id }" type="button" @click="insightMode = item.id"><b>{{ item.label }}</b><small>{{ item.note }}</small></button>
+            <button v-for="item in [{ id: 'capsule', label: '剧情胶囊', note: '已读回顾' }, { id: 'graph', label: '知识图谱', note: '人物与故事' }, { id: 'clues', label: '线索板', note: '待解与已解' }, { id: 'map', label: '阅读地图', note: '事件脉络' }, { id: 'dna', label: '相似书 DNA', note: '作品气质' }]" :key="item.id" :class="{ active: insightMode === item.id }" type="button" @click="insightMode = item.id"><b>{{ item.label }}</b><small>{{ item.note }}</small></button>
           </aside>
           <section class="insight-stage">
-            <header class="insight-stage-head"><div><span class="agent-eyebrow">{{ insightModeLabel }}</span><h3>{{ insightModeTitle }}</h3></div><div class="insight-stage-actions"><div v-if="insightMode === 'shelf'" class="insight-subtabs"><button :class="{ active: shelfPanel === 'recommendations' }" type="button" @click="shelfPanel = 'recommendations'">推荐</button><button :class="{ active: shelfPanel === 'plan' }" type="button" @click="shelfPanel = 'plan'">计划</button><button :class="{ active: shelfPanel === 'groups' }" type="button" @click="shelfPanel = 'groups'">分组</button></div><button type="button" class="knowledge-manage-button" @click="router.push('/agent/knowledge-graphs')">管理知识图谱</button><button v-if="knowledgeBuild?.status !== 'READY'" type="button" class="build-index-button" @click="openKnowledgeBuildDialog">{{ knowledgeBuild?.status === 'RUNNING' || knowledgeBuild?.status === 'QUEUED' ? '查看构建任务' : '构建 AI 知识图谱' }}</button></div></header>
+            <header class="insight-stage-head"><div><span class="agent-eyebrow">{{ insightModeLabel }}</span><h3>{{ insightModeTitle }}</h3></div><div class="insight-stage-actions"><button v-if="insightLoaded" type="button" class="knowledge-manage-button" @click="exitInsightMode">退出洞察</button><button type="button" class="knowledge-manage-button" @click="router.push('/agent/knowledge-graphs')">管理知识图谱</button><button v-if="knowledgeBuild?.status !== 'READY'" type="button" class="build-index-button" @click="openKnowledgeBuildDialog">{{ knowledgeBuild?.status === 'RUNNING' || knowledgeBuild?.status === 'QUEUED' ? '查看构建任务' : '构建 AI 知识图谱' }}</button></div></header>
             <div v-if="insightError" class="card insight-error" role="alert"><strong>这次洞察没有完成</strong><p>{{ insightError }}</p><button class="btn btn-ghost btn-sm" type="button" @click="loadInsights">重新分析</button></div>
             <div v-else-if="insightLoaded" class="insight-grid">
-          <article v-show="insightMode === 'capsule'" class="insight-card card"><span>00</span><h2>无剧透剧情回忆胶囊</h2><p v-if="!capsule?.timeline?.length">暂时没有可用的已读剧情摘要。</p><ul v-else><li v-for="item in capsule.timeline.slice(0, 4)" :key="item">{{ item }} <button class="evidence-jump" @click="openInsightChapter(timelineChapter(item))">查看原文</button></li></ul><small>{{ capsule?.safetyNote }}</small></article>
+          <article v-show="insightMode === 'capsule'" class="insight-card card capsule-card"><p class="capsule-lead">{{ capsule?.summary || '暂时没有可用的阶段剧情总结。' }}</p><details v-if="capsule?.timeline?.length" class="capsule-evidence"><summary>查看章节脉络与依据</summary><ul><li v-for="item in capsule.timeline.slice(-8)" :key="item"><span class="capsule-summary">{{ item }}</span><button class="evidence-jump" @click="openInsightChapter(timelineChapter(item))">打开章节</button></li></ul></details><small>{{ capsule?.safetyNote }} 回忆正文展示概括，章节依据默认折叠。</small></article>
           <article v-show="insightMode === 'graph'" class="insight-card card graph-card">
-            <div class="graph-card-title"><span>01</span><div><h2>人物关系星球</h2><p>把关系放到同一颗星球上看：拖动即可从不同视角观察人物、地点与事件。</p></div></div>
-            <p v-if="!graph.nodes?.length">当前还没有足够的已读内容来建立关系图谱。</p>
+            <p class="graph-intro">汇集人物、地点、组织、事件与线索。人物之间只标注稳定关系；剧情动作通过事件节点表达，并保留参与、发生地点和事件推进等关联。</p>
+            <p v-if="!graph.nodes?.length">当前还没有足够的已读内容来建立知识图谱。</p>
             <template v-else>
               <div class="globe-toolbar">
                 <div class="graph-tools" aria-label="图谱类型筛选"><button v-for="type in graphTypes" :key="type" :class="{ active: graphTypeFilter === type }" @click="graphTypeFilter = type">{{ graphTypeLabel(type) }}</button></div>
-                <div class="globe-toolbar-status"><b>{{ visibleGraphNodes.length }}</b> 个节点 · <b>{{ visibleGraphEdges.length }}</b> 条已验证关系 <button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="globe-expand" @click="openRelationshipCanvas">全屏查看</button></div>
+                <div class="globe-toolbar-status"><b>{{ visibleGraphNodes.length }}</b> 个节点 · <b>{{ visibleGraphEdges.length }}</b> 条已验证关系 <button v-if="focusedGraphNodeId" type="button" @click="clearGraphFocus">显示全部</button><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="globe-expand" @click="openRelationshipCanvas">全屏查看</button></div>
               </div>
               <div class="relationship-globe-shell">
-                <canvas ref="relationshipGlobe" class="relationship-globe" role="img" tabindex="0" aria-label="可旋转的人物关系星球。拖动旋转，点击人物或连线查看依据。" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas>
-                <div class="globe-hud globe-hud-top"><span>关系星球</span><i></i><span>拖动旋转 · 点击查看依据</span></div>
+                <canvas ref="relationshipGlobe" class="relationship-globe" role="img" tabindex="0" aria-label="可旋转的小说知识图谱。拖动旋转，点击节点或连线查看依据。" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas>
+                <div class="globe-hud globe-hud-top"><span>知识星球</span><i></i><span>拖动旋转 · 点击查看依据</span></div>
                 <div class="globe-hud globe-hud-bottom"><span><i class="legend-dot character"></i>人物</span><span><i class="legend-dot location"></i>地点/组织</span><span><i class="legend-dot event"></i>事件/线索</span></div>
               </div>
               <div class="graph-inspector">
                 <div v-if="selectedGraphEvidence" class="graph-evidence"><span>当前选中</span><b>{{ selectedGraphEvidence.label }}</b><small>第 {{ selectedGraphEvidence.chapter + 1 }} 章 · 可信度 {{ Math.round((selectedGraphEvidence.confidence || 0) * 100) }}%</small><p>{{ selectedGraphEvidence.evidence || '暂时没有可展示的原文依据。' }}</p><button class="evidence-jump" @click="showEvidenceSource(selectedGraphEvidence)">查看原文依据</button></div>
-                <div v-else class="graph-evidence graph-evidence-empty"><span>关系阅读提示</span><b>先旋转，再进入一条关系</b><p>前景节点更清晰；点击人物、地点或关系连线，可查看这条图谱的原文依据。</p></div>
+                <div v-else class="graph-evidence graph-evidence-empty"><span>图谱阅读提示</span><b>先旋转，再进入一个节点</b><p>点击人物、地点、组织、事件、线索或连接线，可聚焦一跳邻域并查看原文依据。</p></div>
                 <div class="graph-node-list" aria-label="当前展示的核心节点"><button v-for="node in visibleGraphNodes.slice(0, 5)" :key="node.id" type="button" @click="selectGraphEvidence(node, 'NODE')"><i :class="node.type"></i><span>{{ node.name }}</span><small>{{ graphTypeLabel(node.type) }}</small></button></div>
               </div>
             </template>
-            <small class="graph-footnote">{{ graph.edges?.length || 0 }} 条关系仅来自已读章节；较淡的连线表示可信度较低。</small>
+            <small class="graph-footnote">{{ graph.edges?.length || 0 }} 条图谱关联仅来自已读章节；较淡的连线表示可信度较低。</small>
           </article>
-          <article v-show="insightMode === 'clues'" class="insight-card card clue-board-card"><span>02</span><h2>未解线索</h2><p v-if="!clues.length">已读范围内没有达到“明确未解”阈值的线索，因此不把普通物品或陌生名词误报为伏笔。</p><ul v-else><li v-for="clue in clues.slice(0, 5)" :key="`${clue.chapterIndex}-${clue.excerpt}`">第 {{ clue.chapterIndex + 1 }} 章 · {{ clue.excerpt }} <em class="clue-status">{{ clueStatusLabel(clue.status) }}</em><button class="evidence-jump" @click="showEvidenceSource({ label: '线索原文', chapter: clue.chapterIndex, evidence: clue.excerpt, confidence: 1 })">查看原文依据</button></li></ul><small>这里只显示原文中有明确未解信号的线索；后续揭示仅会在读到对应章节后出现。</small></article>
+          <article v-show="insightMode === 'clues'" class="insight-card card clue-board-card">
+            <div class="clue-tabs"><button v-for="state in ['OPEN','RESOLVED']" :key="state" :class="{ active: clueStateFilter === state }" type="button" @click="clueStateFilter = state">{{ state === 'OPEN' ? `待解线索 ${openClues.length}` : `已解线索 ${resolvedClues.length}` }}</button></div>
+            <p v-if="!visibleClues.length">{{ clueStateFilter === 'OPEN' ? '当前阅读范围内没有待解线索。' : '当前阅读范围内还没有已经揭晓的线索。' }}</p>
+            <ul v-else>
+              <li v-for="clue in visibleClues" :key="`${clue.chapterIndex}-${clue.excerpt}`" :class="{ 'resolved-clue': clue.status === 'RESOLVED' }">
+                <div class="clue-card-head"><b>{{ clue.signal }}</b><em class="clue-status" :class="{ resolved: clue.status === 'RESOLVED' }">{{ clueStatusLabel(clue.status) }}</em></div>
+                <section class="clue-origin"><span>谜团提出 · 第 {{ clue.chapterIndex + 1 }} 章</span><p>{{ clueMystery(clue) }}</p><button class="evidence-jump" @click="showEvidenceSource({ label: '谜团最初依据', chapter: clue.chapterIndex, evidence: clueOriginEvidence(clue), confidence: 1 })">查看最初依据</button></section>
+                <section v-if="clue.status === 'RESOLVED'" class="clue-resolution"><span>后续揭晓 · 第 {{ (clue.resolvedChapter ?? clue.chapterIndex) + 1 }} 章</span><p>{{ clue.resolutionEvidence || '已确认谜底，但暂时没有可展示的揭晓摘要。' }}</p><button class="evidence-jump" @click="showEvidenceSource({ label: '谜团揭晓依据', chapter: clue.resolvedChapter ?? clue.chapterIndex, evidence: clue.resolutionEvidence || clue.excerpt, confidence: 1 })">查看揭晓依据</button></section>
+              </li>
+            </ul>
+          </article>
           <article v-show="insightMode === 'map'" class="insight-card card reading-map-card">
-            <div class="map-card-title"><span>03</span><div><h2>故事事件地图</h2><p>不是重复剧情摘要：这里按事件顺序展示主线推进，并标明它与下一段故事的关联方式。</p></div></div>
+            <p class="map-intro">按事件顺序展示主线推进，并标明它与下一段故事的关联方式。</p>
             <p v-if="!readingMap.events?.length">继续阅读并建立索引后，这里会生成可追溯的故事事件地图。</p>
             <template v-else>
               <div class="map-toolbar"><div class="graph-tools"><button v-for="branch in readingMapBranches" :key="branch" :class="{ active: readingMapBranch === branch }" @click="readingMapBranch = branch">{{ branchLabel(branch) }}</button></div><small><b>{{ visibleReadingMapLinks.length }}</b> 条事件链路</small></div>
@@ -232,12 +255,9 @@
             </template>
             <small class="map-footnote">“角色串联”表示相邻事件共享已验证人物，不会被误写成因果；只有明确抽取到的因果关系才会标注为“导致”“推动”等。</small>
           </article>
-          <article v-show="insightMode === 'dna'" class="insight-card card"><span>04</span><h2>相似书籍 DNA</h2><p v-if="!similarBooks.length">目前没有足够的已读作品可供比较。</p><ul v-else><li v-for="book in similarBooks" :key="book.canonicalBookId"><strong>{{ book.title || `作品 #${book.canonicalBookId}` }}</strong><span v-if="book.author"> · {{ book.author }}</span> · 相似度 {{ Math.round(book.similarity * 100) }}%<br />{{ book.explanation }} <button class="btn btn-ghost btn-sm" @click="openRecommendedBook(book)">打开作品</button></li></ul><small>依据已索引的文本特征比较，不凭空添加标签。</small></article>
-          <article v-show="insightMode === 'shelf' && shelfPanel === 'recommendations'" class="insight-card card"><span>05</span><h2>动态书架管家</h2><p v-if="!shelfRecommendations.length">你的书架还在等待第一次阅读反馈。</p><ul v-else><li v-for="item in shelfRecommendations" :key="item.title"><strong>{{ item.title }}</strong><br />{{ item.reason }}<span v-if="item.canonicalBookId" class="recommendation-actions"><button @click="saveRecommendationFeedback(item, 'OPEN')">查看</button><button @click="saveRecommendationFeedback(item, 'LIKE')">有帮助</button><button @click="confirmAddToShelf(item)">加入书架</button><button @click="saveRecommendationFeedback(item, 'DISMISS')">暂不推荐</button></span></li></ul><small>加入书架前一定会征得你的确认。</small></article>
-          <article v-show="insightMode === 'shelf' && shelfPanel === 'plan'" class="insight-card card reading-plan-card"><span>06</span><h2>阅读计划</h2><p>{{ readingPlan?.summary || '正在根据你的阅读记录生成计划…' }}</p><ul v-if="readingPlan?.items?.length"><li v-for="item in readingPlan.items" :key="item.canonicalBookId"><strong>{{ item.title }}</strong><br />今天建议阅读 {{ item.suggestedChaptersToday }} 章 · 当前读到第 {{ item.currentChapter + 1 }} 章<span v-if="item.totalChapters"> / 共 {{ item.totalChapters }} 章</span><br /><small>{{ item.reason }}</small></li></ul><small>计划按规则生成并遵守防剧透原则，不会提前读取或把书架内容发送给模型。</small></article>
-          <article v-show="insightMode === 'shelf' && shelfPanel === 'groups'" class="insight-card card shelf-groups-card"><span>07</span><h2>书架分组</h2><p v-if="!shelfGroups.length">暂时没有可分组的已读书架内容。</p><ul v-else><li v-for="item in shelfGroups" :key="item.canonicalBookId"><strong>{{ item.title }}</strong><label><select :value="item.groupCode" @change="saveShelfGroup(item, $event.target.value)"><option value="FOLLOWING">正在追更</option><option value="SHORT_SESSION">短时阅读</option><option value="WEEKEND">周末沉浸</option><option value="RESTART">准备重读</option><option value="CLEANUP">考虑整理</option><option value="AUTO">自动安排</option></select></label><small>{{ item.pinned ? '当前分组已手动固定；选择“自动安排”可恢复智能建议。' : '根据安全的书架阅读记录生成建议。' }}</small></li></ul><small>这里只调整 Agent 的展示和排序提示，不会移动或删除书架中的作品。</small></article>
+          <article v-show="insightMode === 'dna'" class="insight-card card"><p v-if="!similarBooks.length">目前没有足够的已读作品可供比较。</p><ul v-else><li v-for="book in similarBooks" :key="book.canonicalBookId"><strong>{{ book.title || `作品 #${book.canonicalBookId}` }}</strong><span v-if="book.author"> · {{ book.author }}</span> · 相似度 {{ Math.round(book.similarity * 100) }}%<br />{{ book.explanation }} <button class="btn btn-ghost btn-sm" @click="openRecommendedBook(book)">打开作品</button></li></ul><small>依据已索引的文本特征比较，不凭空添加标签。</small></article>
             </div>
-            <div v-else class="insight-empty-stage"><span>从阅读进度出发</span><h4>选择范围后生成这一段故事的洞察</h4><p>剧情回顾、人物关系和线索板会在同一个阅读边界下协同更新。</p></div>
+            <div v-else class="insight-empty-stage"><span>洞察工作台</span><h4>把已读内容整理成一张可追溯的故事地图</h4><p>剧情胶囊帮你快速回顾进展；知识图谱梳理人物、地点、组织与事件关系；线索板集中记录待解谜团；阅读地图串起事件脉络；相似书 DNA 则从已读作品中发现阅读偏好。选择作品和章节范围后，所有模块都会严格基于同一阅读边界生成结果。</p></div>
           </section>
         </div>
       </section>
@@ -263,15 +283,15 @@
         <span class="spoiler-dialog-mark">!</span>
         <p class="spoiler-dialog-kicker">阅读边界提醒</p>
         <h2 id="spoiler-dialog-title">继续会看到尚未读到的剧情</h2>
-        <p>你选择分析到第 {{ pendingSpoilerChapter }} 章，但书架记录显示你目前只读到第 {{ safeInsightChapter }} 章。继续后最多会提前看到 {{ Math.max(0, pendingSpoilerChapter - safeInsightChapter) }} 章内容，人物关系、伏笔与剧情回忆都会包含这段信息。</p>
+        <p>你选择分析到第 {{ pendingSpoilerChapter }} 章，但书架记录显示你目前只读到第 {{ safeInsightChapter }} 章。继续后最多会提前看到 {{ Math.max(0, pendingSpoilerChapter - safeInsightChapter) }} 章内容，知识图谱、线索与剧情回忆都会包含这段信息。</p>
         <div class="spoiler-dialog-actions"><button type="button" class="btn btn-ghost" @click="cancelSpoilerAnalysis">保持无剧透</button><button type="button" class="btn btn-primary" @click="confirmSpoilerAnalysis">我已知晓，继续分析</button></div>
       </section>
     </div>
   </Teleport>
   <Teleport to="body">
-    <section v-if="showRelationshipCanvas" class="relationship-canvas-dialog" role="dialog" aria-modal="true" aria-label="人物关系星球全屏画布" @keydown.esc="closeRelationshipCanvas">
-      <header class="relationship-canvas-head"><div><span>关系视图</span><h2>{{ selectedInsightBook?.bookName || '当前作品' }}的人物关系星球</h2><p>拖动旋转，滚轮或触控板可缩放视角；每条连线均标注关系类型，点击可查看可追溯的章节原文。</p></div><div><span>{{ visibleGraphNodes.length }} 个节点</span><span>{{ visibleGraphEdges.length }} 条关系</span><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="relationship-canvas-close" @click="closeRelationshipCanvas">退出全屏</button></div></header>
-      <div class="relationship-canvas-stage"><canvas ref="fullRelationshipGlobe" class="relationship-globe" tabindex="0" role="img" aria-label="可旋转的人物关系星球全屏画布" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas><div class="canvas-corner-note">关系均来自已读章节 · 点击可核验</div></div>
+    <section v-if="showRelationshipCanvas" class="relationship-canvas-dialog" role="dialog" aria-modal="true" aria-label="小说知识图谱全屏画布" @keydown.esc="closeRelationshipCanvas">
+      <header class="relationship-canvas-head"><div><span>知识图谱</span><h2>《{{ selectedInsightBook?.bookName || '当前作品' }}》的故事知识星球</h2><p>点击任意节点后只保留与它直接相连的内容；“显示全部”可返回人物、地点、组织、事件与线索的完整图谱。</p></div><div><span>{{ visibleGraphNodes.length }} 个节点</span><span>{{ visibleGraphEdges.length }} 条关联</span><button v-if="focusedGraphNodeId" type="button" @click="clearGraphFocus">显示全部</button><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="relationship-canvas-close" @click="closeRelationshipCanvas">退出全屏</button></div></header>
+      <div class="relationship-canvas-stage"><canvas ref="fullRelationshipGlobe" class="relationship-globe" tabindex="0" role="img" aria-label="可旋转的小说知识图谱全屏画布" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas><div class="canvas-corner-note">图谱均来自已读章节 · 点击可核验</div></div>
       <footer class="relationship-canvas-foot"><div class="globe-hud-bottom"><span><i class="legend-dot character"></i>人物</span><span><i class="legend-dot location"></i>地点 / 组织</span><span><i class="legend-dot event"></i>事件 / 线索</span></div><div v-if="selectedGraphEvidence" class="canvas-selection"><span>已选中</span><b>{{ selectedGraphEvidence.label }}</b><small>第 {{ selectedGraphEvidence.chapter + 1 }} 章</small><button type="button" @click="showEvidenceSource(selectedGraphEvidence)">查看原文依据</button></div><p v-else>选中一条关系，查看它为什么会出现在图谱中。</p></footer>
     </section>
   </Teleport>
@@ -304,6 +324,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
+import { renderMarkdown } from '@/utils/markdown'
 import { apiAddToShelf } from '@/api/bookshelf'
 import { apiGetMyShelf } from '@/api/bookshelf'
 import { apiGetMyLevel } from '@/api/user'
@@ -315,7 +336,7 @@ function showActionNotice(type, message) { actionNotice.value = { type, message 
 const router = useRouter()
 const route = useRoute()
 const activeTab = ref('overview')
-const tabs = [{ id: 'overview', label: '概览' }, { id: 'chats', label: '对话' }, { id: 'insights', label: '洞察' }, { id: 'tasks', label: '任务' }, { id: 'models', label: '模型' }, { id: 'preferences', label: '设置' }]
+const tabs = [{ id: 'overview', label: '概览' }, { id: 'chats', label: '对话' }, { id: 'insights', label: '洞察' }, { id: 'organize', label: '整理' }, { id: 'tasks', label: '任务' }, { id: 'models', label: '模型' }, { id: 'preferences', label: '设置' }]
 const sessions = ref([])
 const sessionSearch = ref('')
 const activeSession = ref(null)
@@ -351,8 +372,11 @@ const shelfRecommendations = ref([])
 const readingPlan = ref(null)
 const shelfGroups = ref([])
 const shelfBooks = ref([])
+const shelfPlanApplying = ref(false)
 const starterPrompts = ['帮我回忆最近的剧情', '分析当前人物关系', '推荐一本适合今晚读的书', '这本书有哪些未解伏笔？']
 const graphTypeFilter = ref('ALL')
+const focusedGraphNodeId = ref(null)
+const clueStateFilter = ref('OPEN')
 const readingMapBranch = ref('ALL')
 const selectedGraphEvidence = ref(null)
 const relationshipGlobe = ref(null)
@@ -378,7 +402,6 @@ const showSpoilerConfirm = ref(false)
 const pendingSpoilerChapter = ref(null)
 const spoilersConfirmed = ref(false)
 const insightMode = ref('capsule')
-const shelfPanel = ref('recommendations')
 const knowledgeBuild = ref(null)
 const buildTasks = ref([])
 const showKnowledgeBuildDialog = ref(false)
@@ -394,7 +417,7 @@ const selectedInsightBook = computed(() => usableShelfBooks.value.find(book => S
 const safeInsightChapter = computed(() => Math.max(1, Number(selectedInsightBook.value?.lastChapterIndex ?? 0) + 1))
 const insightModeMeta = {
   capsule: { label: '剧情胶囊', title: '无剧透剧情回忆' },
-  graph: { label: '人物关系', title: '人物关系图谱' },
+  graph: { label: '知识图谱', title: '小说知识图谱' },
   clues: { label: '线索板', title: '明确未解的线索' },
   map: { label: '阅读地图', title: '故事事件脉络' },
   dna: { label: '相似书 DNA', title: '相似作品与阅读偏好' },
@@ -403,6 +426,18 @@ const insightModeMeta = {
 const insightModeLabel = computed(() => insightModeMeta[insightMode.value]?.label || '书籍洞察')
 const insightModeTitle = computed(() => insightModeMeta[insightMode.value]?.title || '书籍洞察')
 const chatReferenceBook = computed(() => usableShelfBooks.value.find(book => String(book.canonicalBookId) === String(chatReferenceBookId.value)) || null)
+const openClues = computed(() => clues.value.filter(clue => clue.status !== 'RESOLVED'))
+const resolvedClues = computed(() => clues.value.filter(clue => clue.status === 'RESOLVED'))
+const visibleClues = computed(() => clueStateFilter.value === 'RESOLVED' ? resolvedClues.value : openClues.value)
+const shelfDirectories = computed(() => Object.entries(shelfGroups.value.reduce((result, book) => {
+  const name = String(book.groupName || '未分类作品').replace(/^子目录\s*[一二三四五六七八九十0-9]+\s*[：:]\s*/u, '').trim() || '未分类作品'
+  ;(result[name] ||= []).push(book)
+  return result
+}, {})).map(([name, books]) => ({ name, books })))
+const shelfDirectoryOptions = computed(() => {
+  const names = shelfDirectories.value.map(directory => directory.name)
+  return [...new Set(['待整理作品', ...names])]
+})
 const visibleGraph = computed(() => {
   const nodes = (graph.value.nodes || []).filter(node => node?.id != null)
   const nodeById = new Map(nodes.map(node => [String(node.id), node]))
@@ -412,9 +447,16 @@ const visibleGraph = computed(() => {
     .filter(node => isAllTypes || node.type === graphTypeFilter.value)
     .map(node => String(node.id)))
   // Type filters are intentionally strict: selecting a type must never introduce another node type.
-  const eligibleEdges = isAllTypes
+  let eligibleEdges = isAllTypes
     ? allEdges
     : allEdges.filter(edge => primaryIds.has(String(edge.source)) && primaryIds.has(String(edge.target)))
+  if (focusedGraphNodeId.value) {
+    const focusedId = String(focusedGraphNodeId.value)
+    eligibleEdges = eligibleEdges.filter(edge => String(edge.source) === focusedId || String(edge.target) === focusedId)
+    const neighborIds = new Set([focusedId])
+    eligibleEdges.forEach(edge => { neighborIds.add(String(edge.source)); neighborIds.add(String(edge.target)) })
+    return { nodes: nodes.filter(node => neighborIds.has(String(node.id))), edges: eligibleEdges }
+  }
   const degree = new Map(nodes.map(node => [String(node.id), 0]))
   eligibleEdges.forEach(edge => {
     degree.set(String(edge.source), (degree.get(String(edge.source)) || 0) + 1)
@@ -476,7 +518,17 @@ function graphTypeLabel(type) {
   return ({ ALL: '全部', CHARACTER: '人物', LOCATION: '地点', ORGANIZATION: '组织', EVENT: '事件', CLUE: '线索' })[type] || '其他'
 }
 function clueStatusLabel(status) {
-  return ({ OPEN: '待解开', PARTIALLY_RESOLVED: '部分揭示', RESOLVED: '已解开' })[status] || '待确认'
+  return ({ OPEN: '待解开', PARTIALLY_RESOLVED: '部分揭示', RESOLVED: '已解决' })[status] || '待确认'
+}
+function clueMystery(clue) {
+  const text = String(clue?.excerpt || '')
+  const match = text.match(/【当前未解原因】([\s\S]*?)(?=【原文依据】|$)/)
+  return match?.[1]?.trim() || clue?.signal || '这条线索当时留下了尚未解释的疑问。'
+}
+function clueOriginEvidence(clue) {
+  const text = String(clue?.excerpt || '')
+  const marker = text.indexOf('【原文依据】')
+  return marker >= 0 ? text.slice(marker + '【原文依据】'.length).trim() : text
 }
 function branchLabel(branch) {
   return ({ ALL: '全部线索', MAIN: '主线', SIDE: '支线' })[branch] || '其他线索'
@@ -488,7 +540,7 @@ function readingProgressStyle(book) {
 }
 
 watch(() => route.query.tab, (tab) => {
-  const next = ['overview', 'chats', 'models', 'insights', 'tasks', 'preferences'].includes(tab) ? tab : 'overview'
+  const next = ['overview', 'chats', 'models', 'insights', 'organize', 'tasks', 'preferences'].includes(tab) ? tab : 'overview'
   if (activeTab.value !== next) activeTab.value = next
 }, { immediate: true })
 
@@ -540,14 +592,28 @@ function openEvidenceChapter () {
 function graphRelationLabel (relation) {
   return ({
     PARTICIPATES_IN: '参与事件',
-    INTERACTS_WITH: '发生互动',
-    KNOWS: '彼此相识',
-    OPPOSES: '存在对立',
-    ASSOCIATED_WITH: '存在关联',
+    MEMBER_OF: '隶属于',
+    SERVES: '侍奉 / 效忠',
+    TEACHER_OF: '老师 / 学生',
+    MASTER_OF: '师父 / 徒弟',
+    PARENT_OF: '父母 / 子女',
+    SPOUSE_OF: '夫妻',
+    SIBLING_OF: '兄弟姐妹',
+    FRIEND_OF: '朋友',
+    COMPANION_OF: '同伴',
+    KNOWS: '明确相识',
+    OWNS: '拥有',
+    VISITS: '到访',
+    LIVES_IN: '居住于',
+    OCCURS_AT: '发生于',
+    INVOLVES: '涉及',
     CLUE_FOR: '关联线索',
+    PREVENTS: '阻止',
+    RESOLVES: '解决',
     CAUSES: '推动发生',
-    LEADS_TO: '引出后续'
-  })[relation] || '关联信息'
+    LEADS_TO: '引出后续',
+    ASSOCIATED_WITH: '线索关联'
+  })[relation] || (relation ? `关系：${relation}` : '未命名关系')
 }
 
 function quadraticPoint (from, control, to, t = 0.5) {
@@ -563,7 +629,7 @@ function drawGlobeRelationLabel (context, item, alpha, radius) {
   if (item.depth < -0.22) return
   const label = graphRelationLabel(item.edge.relation)
   const point = quadraticPoint(item.source, item.control, item.target, 0.5)
-  const fontSize = Math.max(10, Math.min(13, radius / 20))
+  const fontSize = showRelationshipCanvas.value ? Math.max(13, Math.min(17, radius / 28)) : Math.max(11, Math.min(14, radius / 20))
   context.save()
   context.globalAlpha = Math.min(1, alpha + 0.2)
   context.font = `800 ${fontSize}px sans-serif`
@@ -751,7 +817,10 @@ function renderRelationshipGlobe () {
     if (item.z > -0.25) {
       context.globalAlpha = Math.min(1, frontFactor + .28)
       context.fillStyle = '#fffdf2'
-      context.font = `700 ${Math.max(10, Math.min(13, radius / 18))}px serif`
+      const nodeFontSize = showRelationshipCanvas.value ? Math.max(14, Math.min(18, radius / 25)) : Math.max(11, Math.min(14, radius / 18))
+      context.font = `800 ${nodeFontSize}px serif`
+      context.shadowColor = 'rgba(0, 0, 0, .82)'
+      context.shadowBlur = 5
       context.textAlign = item.x > centerX ? 'left' : 'right'
       context.textBaseline = 'middle'
       context.fillText(String(item.node.name || '').slice(0, 7), item.x + (item.x > centerX ? nodeRadius + 7 : -nodeRadius - 7), item.y)
@@ -828,6 +897,12 @@ function resetRelationshipGlobe () {
   requestRelationshipGlobeRender()
 }
 
+function clearGraphFocus () {
+  focusedGraphNodeId.value = null
+  selectedGraphEvidence.value = null
+  requestRelationshipGlobeRender()
+}
+
 watch([visibleGraphNodes, visibleGraphEdges, insightMode, showRelationshipCanvas], () => nextTick(requestRelationshipGlobeRender), { deep: true })
 
 async function load() {
@@ -872,10 +947,28 @@ async function load() {
   else if (sessions.value.length) await selectSession(sessions.value[0])
   pageLoading.value = false
 }
-async function newSession() {
-  const session = await apiCreateAgentSession({})
+async function newSession(title = '') {
+  // Vue event handlers pass MouseEvent as the first argument when invoked without ().
+  const sessionTitle = typeof title === 'string' ? title.trim() : ''
+  const session = await apiCreateAgentSession(sessionTitle ? { title: sessionTitle } : {})
   sessions.value.unshift(session)
+  clearReadingContext()
+  showChatPlugins.value = false
   await selectSession(session)
+}
+
+async function startOrganizeConversation() {
+  if (sending.value) return
+  const prompt = '请读取我的书架，按照作品题材和相似度给出子目录整理方案；先展示调整建议，不要删除任何书籍。'
+  try {
+    selectTab('chats')
+    await newSession('书架整理建议')
+    draft.value = prompt
+    await nextTick()
+    await send()
+  } catch (error) {
+    toast.error(error.message || '创建整理对话失败')
+  }
 }
 
 async function useStarterPrompt(prompt) {
@@ -1041,6 +1134,8 @@ function applyCurrentReadingContext() {
 }
 async function selectSession(session) {
   cancelSessionTitle()
+  clearReadingContext()
+  showChatPlugins.value = false
   activeSession.value = session
   messages.value = await apiGetAgentMessages(session.id)
   restoreSessionContext(session)
@@ -1213,9 +1308,9 @@ async function confirmAddToShelf (item) {
 }
 async function openRecommendedBook (item) {
   try {
-    const detail = await apiGetAgentReaderLink(item.canonicalBookId)
+    const detail = item?.sourceId && item?.sourceBookUrl ? item : await apiGetAgentReaderLink(item.canonicalBookId)
     if (!detail?.sourceId || !detail?.sourceBookUrl) throw new Error('这部作品暂时没有可用书源。')
-    router.push({ name: 'Reader', query: { sourceId: detail.sourceId, bookUrl: detail.sourceBookUrl, bookName: detail.title || item.title, author: detail.author, coverUrl: detail.coverUrl, intro: detail.summary, canonicalBookId: item.canonicalBookId } })
+    router.push({ name: 'Reader', query: { sourceId: detail.sourceId, bookUrl: detail.sourceBookUrl, bookName: detail.title || item.title, author: detail.author || item.author, coverUrl: detail.coverUrl || item.coverUrl, intro: detail.summary || item.summary, canonicalBookId: item.canonicalBookId, chapterIndex: 0 } })
   } catch (error) { toast.error(error.message) }
 }
 function citationItems(message) {
@@ -1242,6 +1337,7 @@ async function openInsightChapter (chapterIndex) {
   } catch (error) { toast.error(error.message) }
 }
 function selectGraphEvidence (item, kind) {
+  if (kind === 'NODE') focusedGraphNodeId.value = String(item.id)
   selectedGraphEvidence.value = {
     label: kind === 'NODE' ? `${item.name} / ${graphTypeLabel(item.type)}` : graphRelationLabel(item.relation),
     relation: kind === 'EDGE' ? item.relation : null,
@@ -1249,6 +1345,7 @@ function selectGraphEvidence (item, kind) {
     confidence: item.confidence,
     evidence: item.evidence
   }
+  requestRelationshipGlobeRender()
 }
 function bookReferenceItems(message) {
   return Array.isArray(message?.bookReferences) ? message.bookReferences : []
@@ -1273,11 +1370,13 @@ async function saveRecommendationFeedback(item, action) {
     toast.success(action === 'LIKE' ? '推荐偏好已记录' : '已暂不展示这条推荐')
   } catch (error) { toast.error(error.message) }
 }
-async function saveShelfGroup(item, groupCode) {
+async function saveShelfDirectory(item, groupName) {
+  const name = String(groupName || '').trim()
+  if (!name) return toast.error('子目录名称不能为空')
   try {
-    await apiSaveAgentShelfGroup({ canonicalBookId: String(item.canonicalBookId), groupCode })
+    await apiSaveAgentShelfGroup({ canonicalBookId: String(item.canonicalBookId), groupName: name })
     shelfGroups.value = await apiGetAgentShelfGroups()
-    toast.success(groupCode === 'AUTO' ? '已恢复自动分组' : '书架分组已更新')
+    toast.success(`已移动到“${name}”`)
   } catch (error) { toast.error(error.message) }
 }
 async function loadInsights() {
@@ -1333,6 +1432,46 @@ async function loadInsights() {
   } finally {
     insightLoading.value = false
   }
+}
+function exitInsightMode () {
+  insightLoaded.value = false
+  insightError.value = ''
+  effectiveInsightChapter.value = null
+  insightMode.value = 'capsule'
+}
+function isShelfPlan (content) {
+  const text = String(content || '')
+  return /书架整理方案|子目录一|子目录二/.test(text) && /《[^》]+》/.test(text)
+}
+async function applyShelfPlan (content) {
+  if (shelfPlanApplying.value) return
+  const text = String(content || '')
+  const assignments = []
+  const lines = text.split(/\r?\n/)
+  let groupName = ''
+  for (const line of lines) {
+    const heading = line.match(/^\s{0,3}#{2,6}\s*(?:子目录[^：:]*[：:]\s*)?(.+)$/)
+    if (heading) {
+      groupName = heading[1].replace(/[*_`]/g, '').trim()
+      continue
+    }
+    const book = line.match(/《([^》]+)》/)
+    if (book && groupName) assignments.push({ title: book[1].trim(), groupName })
+  }
+  if (!assignments.length) return toast.error('没有识别到可执行的书架分类')
+  shelfPlanApplying.value = true
+  try {
+    const booksByTitle = new Map(usableShelfBooks.value.map(book => [String(book.bookName).trim(), book]))
+    let applied = 0
+    for (const assignment of assignments) {
+      const book = booksByTitle.get(assignment.title)
+      if (!book) continue
+      await apiSaveAgentShelfGroup({ canonicalBookId: String(book.canonicalBookId), groupName: assignment.groupName })
+      applied += 1
+    }
+    shelfGroups.value = await apiGetAgentShelfGroups()
+    toast.success(`已按方案整理 ${applied} 本书，未删除任何书籍`)
+  } catch (error) { toast.error(error.message || '书架整理失败') } finally { shelfPlanApplying.value = false }
 }
 function cancelSpoilerAnalysis () {
   showSpoilerConfirm.value = false
@@ -1467,7 +1606,7 @@ onBeforeUnmount(() => {
 .insight-commandbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid rgba(16,44,50,.11); border-radius:14px; background:rgba(255,253,247,.72); }.insight-mode-switcher { display:flex; min-width:0; gap:4px; overflow-x:auto; }.insight-mode-switcher button { flex:0 0 auto; border:0; border-radius:8px; padding:8px 10px; color:var(--agent-ink-soft); background:transparent; cursor:pointer; font:inherit; font-size:.72rem; font-weight:700; }.insight-mode-switcher button:hover { background:rgba(16,44,50,.06); }.insight-mode-switcher button.active { color:#fffaf0; background:var(--agent-ink); }.build-index-button { flex:0 0 auto; border:0; border-radius:9px; padding:9px 11px; color:var(--agent-ink); background:var(--agent-lime); cursor:pointer; font:inherit; font-size:.72rem; font-weight:800; }
 .insight-grid { grid-template-columns:minmax(0,1fr)!important; }.insight-card,.insight-card:nth-child(n) { grid-column:auto!important; min-height:300px; }.insight-card.graph-card { min-height:calc(100vh - 340px); }.graph-card .relationship-map,.graph-card .cytoscape-graph { height:min(62vh,680px)!important; }.reading-map-card { min-height:calc(100vh - 340px); }.reading-map-events { max-height:calc(100vh - 510px); }
 .knowledge-build-backdrop { position:fixed; inset:0; z-index:5100; display:grid; place-items:center; padding:20px; background:rgba(9,27,31,.72); backdrop-filter:blur(8px); }.knowledge-build-dialog { width:min(100%,580px); padding:32px; border:1px solid rgba(255,253,247,.2); border-radius:23px; color:#fffaf0; background:linear-gradient(145deg,#173e42,#102c32); box-shadow:0 30px 85px rgba(0,0,0,.35); }.knowledge-build-dialog h2 { margin:7px 0 14px; color:#fffaf0; font-family:var(--font-serif); font-size:clamp(2rem,5vw,3.1rem); line-height:.96; letter-spacing:-.06em; }.dialog-kicker { color:var(--agent-lime); font-size:.66rem; font-weight:800; letter-spacing:.14em; }.knowledge-build-dialog > p { color:rgba(255,250,240,.74); line-height:1.75; }.build-cost-note { display:grid; gap:5px; margin:18px 0; padding:13px; border-left:3px solid var(--agent-lime); border-radius:8px; background:rgba(184,214,125,.14); }.build-cost-note b { color:var(--agent-lime); }.build-cost-note span,.dialog-help { color:rgba(255,250,240,.7); font-size:.72rem; line-height:1.6; }.knowledge-build-dialog label { display:flex; flex-direction:column; gap:6px; margin-top:13px; color:rgba(255,250,240,.85); font-size:.78rem; font-weight:700; }.knowledge-build-dialog select { border:1px solid rgba(255,253,247,.2); border-radius:9px; padding:10px; color:#fffaf0; background:rgba(255,253,247,.1); font:inherit; }.knowledge-build-dialog option { color:var(--agent-ink); }.knowledge-build-dialog .build-share { flex-direction:row; align-items:center; line-height:1.45; }.knowledge-build-dialog .build-share input { accent-color:var(--agent-lime); }
-@media (min-width: 1080px) { .agent-center .container { display:grid; grid-template-columns:210px minmax(0,1fr); column-gap:26px; align-items:start; }.agent-tabs { grid-column:1; grid-row:1 / span 10; position:sticky; top:76px; display:flex; flex-direction:column; align-items:stretch; gap:3px; margin:0; padding:12px 8px; border:1px solid rgba(16,44,50,.11); border-radius:16px; background:rgba(255,253,247,.72); }.agent-tabs button { border-radius:9px; padding:10px 12px; text-align:left; }.agent-tabs button.active { border:0; color:#fffaf0; background:var(--agent-ink); }.agent-hero,.agent-status-strip,.agent-page-loading,.agent-workbench,.model-layout,.insights-panel,.privacy-layout,.agent-load-notice { grid-column:2; }.agent-hero { margin-bottom:22px; }.agent-status-strip { margin-top:0; }.agent-workbench { grid-template-columns:220px minmax(0,1fr); }.workspace-notes { display:none; } }
+@media (min-width: 1080px) { .agent-center .container { display:grid; grid-template-columns:210px minmax(0,1fr); column-gap:26px; align-items:start; }.agent-tabs { grid-column:1; grid-row:1 / span 10; position:sticky; top:76px; display:flex; flex-direction:column; align-items:stretch; gap:3px; margin:0; padding:12px 8px; border:1px solid rgba(16,44,50,.11); border-radius:16px; background:rgba(255,253,247,.72); }.agent-tabs button { border-radius:9px; padding:10px 12px; text-align:left; }.agent-tabs button.active { border:0; color:#fffaf0; background:var(--agent-ink); }.agent-hero,.agent-status-strip,.agent-page-loading,.agent-workbench,.model-layout,.insights-panel,.organize-panel,.privacy-layout,.agent-load-notice { grid-column:2; }.agent-hero { margin-bottom:22px; }.agent-status-strip { margin-top:0; }.agent-workbench { grid-template-columns:220px minmax(0,1fr); }.workspace-notes { display:none; } }
 @media (max-width:760px) { .task-center-card { width:100%; }.insight-commandbar { align-items:stretch; flex-direction:column; }.build-index-button { width:100%; }.knowledge-build-dialog { padding:27px 22px; }.insight-card.graph-card { min-height:520px; }.graph-card .relationship-map,.graph-card .cytoscape-graph { height:420px!important; } }
 
 /* The insight workspace uses a stable navigation rail and one focused reading surface. */
@@ -1545,12 +1684,12 @@ onBeforeUnmount(() => {
 /* A fixed application canvas keeps navigation stable while each workspace owns its own overflow. */
 .agent-center.page { height:calc(100dvh - 64px); min-height:0; padding:0; overflow:hidden; }
 .agent-center.page .container { height:100%; box-sizing:border-box; max-width:none; padding:18px 24px; }
-.agent-dashboard,.model-layout,.task-center-panel,.privacy-layout { min-height:0; overflow:auto; overscroll-behavior:contain; }
+.agent-dashboard,.model-layout,.task-center-panel,.organize-panel,.privacy-layout { min-height:0; overflow:auto; overscroll-behavior:contain; }
 .agent-dashboard { padding-right:5px; }
 .agent-workbench { min-height:0!important; }
 .agent-workbench,.chat-pane,.session-list { height:100%; }
 .chat-history { min-height:0!important; overscroll-behavior:contain; }
-.model-layout,.task-center-panel,.privacy-layout { padding-right:8px; }
+.model-layout,.task-center-panel,.organize-panel,.privacy-layout { padding-right:8px; }
 
 .message-edit-button { display:block; margin:7px 0 -3px auto; border:0; padding:2px 0; color:inherit; background:transparent; cursor:pointer; font:inherit; font-size:.67rem; opacity:.62; text-decoration:underline; text-underline-offset:3px; }
 .center-message:hover .message-edit-button { opacity:1; }
@@ -1569,6 +1708,16 @@ onBeforeUnmount(() => {
 .chat-model-menu button { display:grid; gap:2px; border:0; border-radius:8px; padding:9px 10px; color:var(--agent-ink); background:transparent; text-align:left; cursor:pointer; font:inherit; }.chat-model-menu button:hover { background:rgba(16,44,50,.055); }.chat-model-menu button.selected { color:#fffaf0; background:var(--agent-ink); }.chat-model-menu button span { font-size:.76rem; font-weight:800; }.chat-model-menu button small { color:inherit; font-size:.62rem; opacity:.68; }.chat-model-menu .model-picker-manage { display:block; border-top:1px solid rgba(16,44,50,.1); border-radius:0; padding-top:10px; color:var(--agent-coral); font-size:.68rem; font-weight:800; }
 
 .insight-stage { min-height:0; overflow:hidden; }
+.insights-panel.insight-focused .insight-page-head { display:none; }
+.insights-panel.insight-focused .insight-console,
+.insights-panel.insight-focused .insight-boundary-note { display:none; }
+.insight-focused-context { position:relative; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:8px 14px; padding:13px 16px; border:1px solid rgba(84,122,69,.24); border-radius:15px; background:linear-gradient(105deg,#fffdf7,#edf4dc); box-shadow:0 8px 20px rgba(16,44,50,.07); }
+.insight-focused-context > div { display:flex; align-items:baseline; gap:9px; min-width:0; }
+.insight-focused-context span { color:#547a45; font-size:.62rem; font-weight:900; letter-spacing:.12em; }
+.insight-focused-context strong { overflow:hidden; color:var(--agent-ink); font-family:var(--font-serif); font-size:1.15rem; text-overflow:ellipsis; white-space:nowrap; }
+.insight-focused-context small { color:var(--agent-ink-soft); font-size:.7rem; }
+.insight-focused-exit { min-height:32px!important; border:1px solid rgba(16,44,50,.18)!important; border-radius:9px!important; padding:6px 11px!important; color:var(--agent-ink)!important; background:#fffdf7!important; font:inherit; font-size:.68rem!important; font-weight:800; cursor:pointer; }
+.insight-focused-exit:hover { border-color:var(--agent-coral)!important; color:var(--agent-coral)!important; background:#fff8f2!important; }
 .insight-stage-head { flex:0 0 auto; }
 .insight-stage-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
 .knowledge-manage-button { border:1px solid rgba(16,44,50,.2); border-radius:8px; padding:7px 9px; color:#315e42; background:#eef4dc; cursor:pointer; font:inherit; font-size:.68rem; font-weight:800; }.knowledge-manage-button:hover { border-color:#547a45; background:#e1edc5; }.knowledge-manage-button.danger { color:#9a3f31; background:#fff2ed; }.knowledge-manage-button.danger:hover { border-color:#b95242; background:#ffe3da; }
@@ -1584,11 +1733,11 @@ onBeforeUnmount(() => {
   .agent-center.page .container { grid-template-columns:216px minmax(0,1fr); grid-template-rows:minmax(0,1fr); column-gap:20px; align-items:stretch; }
   .agent-tabs { grid-column:1; grid-row:1; position:static; align-self:stretch; min-height:0; margin:0; border:1px solid rgba(16,44,50,.1); border-radius:13px; background:rgba(255,253,247,.55); }
   .agent-tabs::before { content:'阅见助手'; padding:8px 10px 12px; color:var(--agent-ink); font-family:var(--font-serif); font-size:1.06rem; letter-spacing:-.04em; }
-  .agent-dashboard,.agent-workbench,.model-layout,.task-center-panel,.insights-panel,.privacy-layout,.agent-load-notice { grid-column:2; grid-row:1; }
+  .agent-dashboard,.agent-workbench,.model-layout,.task-center-panel,.insights-panel,.organize-panel,.privacy-layout,.agent-load-notice { grid-column:2; grid-row:1; }
   .agent-workbench { grid-template-columns:242px minmax(0,1fr)!important; height:100%!important; }
   .insights-panel { grid-template-rows:auto auto auto minmax(0,1fr); min-height:0; height:100%; overflow:hidden; }
   .insight-workspace { min-height:0; height:100%; }
-  .model-layout,.task-center-panel,.privacy-layout { height:100%; }
+  .model-layout,.task-center-panel,.organize-panel,.privacy-layout { height:100%; }
 }
 @media (max-width:1079px) {
   .agent-center.page { height:auto; min-height:calc(100dvh - 64px); overflow:visible; }
@@ -1637,7 +1786,7 @@ onBeforeUnmount(() => {
   .agent-tabs { padding:22px 12px; border:0; border-radius:0; background:linear-gradient(180deg,#102c32,#173e42); box-shadow:inset -1px 0 rgba(255,253,247,.12); }
   .agent-tabs::before { padding:7px 10px 20px; color:#fffaf0; }
   .agent-tabs button { border:0!important; border-radius:8px; padding:10px 12px; color:rgba(255,250,240,.64); font-size:.78rem; font-weight:700; }.agent-tabs button:hover { color:#fffaf0; background:rgba(255,253,247,.08); }.agent-tabs button.active { color:#102c32; background:var(--agent-lime); }
-  .agent-dashboard,.model-layout,.task-center-panel,.privacy-layout { padding:26px 32px; overflow:hidden; }
+  .agent-dashboard,.model-layout,.task-center-panel,.organize-panel,.privacy-layout { padding:26px 32px; overflow:hidden; }
   .agent-workbench,.insights-panel { box-sizing:border-box; padding:22px 28px; }
   .agent-workbench { grid-template-columns:250px minmax(0,1fr)!important; }
   .agent-dashboard { align-content:start; }.dashboard-head { padding-top:2px; }.dashboard-metrics > article { min-height:184px; }.dashboard-shortcuts button { min-height:112px; }
@@ -1653,6 +1802,49 @@ onBeforeUnmount(() => {
 .task-center-panel { grid-template-rows:auto minmax(0,1fr); gap:18px; }.task-center-head { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; max-width:none!important; padding:0!important; }.task-center-head h2 { margin-bottom:6px; }.task-center-head p { max-width:610px; margin:0; }.task-refresh { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto; border:1px solid rgba(16,44,50,.13); border-radius:8px; padding:7px 9px; color:var(--agent-ink-soft); background:#fffdf7; cursor:pointer; font:inherit; font-size:.68rem; font-weight:800; }.task-refresh:hover { border-color:var(--agent-ink); color:var(--agent-ink); }.task-refresh span { font-size:1rem; line-height:1; }
 .task-list { display:grid; align-content:start; gap:10px; min-height:0; overflow:auto; padding-right:5px; }.task-row { display:grid; grid-template-columns:minmax(230px,.8fr) minmax(320px,1.2fr) auto; gap:26px; padding:18px 20px; }.task-row-main { min-width:0; }.task-row-main strong { overflow:hidden; max-width:100%; text-overflow:ellipsis; white-space:nowrap; }.task-row-main small { margin-top:6px; }.task-row-progress { min-width:0; }.task-progress-label { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:7px; }.task-progress-label b,.task-progress-label small { margin:0; }.task-row-progress > small { margin-top:7px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.task-delete { align-self:center; border:1px solid rgba(163,69,53,.28); border-radius:8px; padding:7px 9px; color:#a34535; background:#fffaf7; cursor:pointer; font:inherit; font-size:.68rem; font-weight:700; }.task-delete:hover { border-color:#a34535; background:rgba(212,97,69,.1); }.task-empty { min-height:180px; display:grid; place-items:center; margin:0; text-align:center; }
 @media (max-width:760px) { .task-center-head { align-items:flex-start; }.task-row { grid-template-columns:1fr; gap:13px; }.task-delete { justify-self:start; }.task-list { overflow:visible; }.build-range { grid-template-columns:1fr; gap:7px; }.build-range > span { display:none; } }
+.clue-board-card ul { grid-template-columns:1fr!important; max-height:calc(100vh - 390px)!important; overflow:auto; }
+.clue-board-card li { display:grid; gap:10px; align-items:start; border:1px solid rgba(16,44,50,.1); border-radius:14px; padding:14px; background:rgba(255,253,247,.72); }
+.clue-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; color:var(--agent-ink); }
+.clue-origin,.clue-resolution { position:relative; display:grid; gap:5px; border-left:3px solid #d69b4b; padding:9px 110px 9px 12px; background:#fff9ed; }
+.clue-resolution { border-left-color:#5b966b; background:#eef7ed; }
+.clue-origin > span,.clue-resolution > span { color:#8b602a; font-size:.66rem; font-weight:900; letter-spacing:.05em; }
+.clue-resolution > span { color:#39704a; }
+.clue-origin p,.clue-resolution p { margin:0!important; color:var(--agent-ink-soft); font-size:.76rem; line-height:1.65; }
+.clue-origin .evidence-jump,.clue-resolution .evidence-jump { position:absolute; right:10px; top:50%; transform:translateY(-50%); }
+.clue-board-card .clue-status { justify-self:end; margin:0; border-radius:99px; padding:3px 7px; color:#9a5c31; background:#f7e4cf; font-size:.65rem; font-style:normal; font-weight:800; }
+.clue-board-card .clue-status.resolved { color:#39704a; background:#e1f0df; }
+.capsule-summary { display:inline; color:var(--agent-ink-soft); font-family:inherit!important; font-size:.82rem!important; letter-spacing:normal!important; }
+.capsule-lead { max-width:900px!important; margin:18px 0 24px!important; color:var(--agent-ink)!important; font-family:var(--font-serif); font-size:clamp(1.15rem,2vw,1.65rem); line-height:1.85!important; }
+.capsule-evidence { border:1px solid rgba(16,44,50,.11); border-radius:12px; padding:11px 13px; background:rgba(255,253,247,.72); }
+.capsule-evidence summary { color:var(--agent-ink-soft); cursor:pointer; font-size:.75rem; font-weight:800; }
+.capsule-evidence[open] summary { margin-bottom:11px; color:var(--agent-ink); }
+.clue-tabs { display:flex; gap:8px; margin-bottom:14px; }
+.clue-tabs button { border:1px solid rgba(16,44,50,.13); border-radius:99px; padding:7px 12px; color:var(--agent-ink-soft); background:#fffdf7; cursor:pointer; font:inherit; font-size:.72rem; font-weight:800; }
+.clue-tabs button.active { color:#fffdf7; background:var(--agent-ink); }
+.organize-panel { display:grid; grid-template-rows:auto minmax(0,1fr); align-content:start; gap:20px; min-height:0; }
+.organize-head { display:flex; align-items:end; justify-content:space-between; gap:24px; }
+.organize-head h2 { margin:5px 0; color:var(--agent-ink); font-family:var(--font-serif); font-size:2.2rem; }
+.organize-head p { margin:0; color:var(--agent-ink-soft); }
+.organize-chat { display:inline-flex; align-items:center; gap:12px; border:1px solid rgba(16,44,50,.12); border-radius:12px; padding:10px 12px 10px 15px; color:#fffdf7; background:var(--agent-coral); box-shadow:0 8px 18px rgba(181,99,70,.18); cursor:pointer; font:inherit; font-size:.75rem; font-weight:800; transition:transform .16s ease,box-shadow .16s ease; }.organize-chat b { display:grid; width:25px; height:25px; place-items:center; border-radius:8px; color:var(--agent-coral); background:#fffdf7; font-size:.88rem; }.organize-chat:hover { transform:translateY(-1px); box-shadow:0 11px 24px rgba(181,99,70,.24); }.organize-chat:disabled { cursor:not-allowed; opacity:.55; transform:none; }
+.directory-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+.directory-card { min-width:0; padding:20px; }
+.directory-card header { display:grid; grid-template-columns:1fr auto; align-items:end; border-bottom:1px solid rgba(16,44,50,.1); padding-bottom:12px; }
+.directory-card header span { grid-column:1/-1; color:var(--agent-coral); font-size:.66rem; font-weight:800; letter-spacing:.12em; }
+.directory-card header h3 { margin:3px 0 0; color:var(--agent-ink); font-family:var(--font-serif); font-size:1.45rem; }
+.directory-card header small { color:var(--agent-ink-soft); }
+.directory-books { display:grid; gap:0; padding-top:4px; }
+.directory-books article { display:grid; grid-template-columns:minmax(0,1fr) minmax(116px,150px); gap:16px; align-items:center; min-height:66px; border-bottom:1px solid rgba(16,44,50,.075); padding:9px 2px; }.directory-books article:last-child { border-bottom:0; }
+.directory-book-copy { min-width:0; }
+.directory-books strong,.directory-books small { display:block; }
+.directory-books strong { overflow:hidden; color:var(--agent-ink); font-family:var(--font-serif); font-size:.85rem; text-overflow:ellipsis; white-space:nowrap; }
+.directory-books small { overflow:hidden; margin-top:4px; color:var(--agent-ink-soft); font-size:.66rem; text-overflow:ellipsis; white-space:nowrap; }
+.directory-picker { position:relative; min-width:0; }.directory-picker select { width:100%; appearance:none; border:1px solid rgba(16,44,50,.13); border-radius:10px; padding:8px 28px 8px 10px; color:var(--agent-ink-soft); background:#f8f4eb; cursor:pointer; font:inherit; font-size:.68rem; font-weight:700; outline:none; }.directory-picker select:hover,.directory-picker select:focus { border-color:#72905c; color:var(--agent-ink); background:#fffdf7; box-shadow:0 0 0 3px rgba(184,214,125,.15); }.directory-picker i { position:absolute; right:9px; top:50%; color:var(--agent-coral); font-size:.8rem; font-style:normal; pointer-events:none; transform:translateY(-55%); }
+.sr-only { position:absolute!important; width:1px!important; height:1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; }
+@media(max-width:620px){.organize-head{align-items:flex-start;flex-direction:column}.organize-chat{width:100%;justify-content:space-between}.directory-books article{grid-template-columns:1fr}.directory-picker{width:100%}}
+.graph-intro,.map-intro { margin:0 0 14px!important; color:var(--agent-ink-soft); }
+.relationship-canvas-head h2 { color:#fffdf2!important; text-shadow:0 2px 12px rgba(0,0,0,.48); }
+.relationship-canvas-head p,.relationship-canvas-head > div > span { color:#d9f1e7!important; text-shadow:0 1px 8px rgba(0,0,0,.6); }
+.relationship-canvas-head button { color:#fffdf2!important; border-color:rgba(255,255,255,.38)!important; background:rgba(4,24,33,.62)!important; }
 </style>
 
 <style scoped>
@@ -1685,6 +1877,11 @@ onBeforeUnmount(() => {
 .session-list-foot { border-top-color:rgba(16,44,50,.1)!important; }
 .center-message.user { color:var(--agent-ink)!important; background:#eadfce!important; }
 .model-intro,.insight-query,.insight-nav { color:var(--agent-ink)!important; background:#fffdf8!important; }
+.agent-tabs { color:var(--agent-ink)!important; background:#fffdf8!important; }
+.agent-tabs::before { color:var(--agent-ink)!important; }
+.agent-tabs button { color:var(--agent-ink-soft)!important; background:transparent!important; }
+.agent-tabs button:hover { color:var(--agent-ink)!important; background:#f1eadf!important; }
+.agent-tabs button.active { color:var(--agent-ink)!important; background:var(--agent-lime)!important; box-shadow:none!important; }
 .model-intro h2,.insight-query-copy h2 { color:var(--agent-ink)!important; }
 .model-intro p,.model-intro ul,.insight-query-copy p,.insight-query label { color:var(--agent-ink-soft)!important; }
 .model-intro::after,.insight-query::after { color:rgba(16,44,50,.05)!important; }
@@ -1768,4 +1965,79 @@ onBeforeUnmount(() => {
 .task-row-progress .task-progress-label small { display:block; margin:0; color:#47612f; font-size:.78rem; font-weight:800; line-height:1.4; }
 .task-row-progress .task-progress-track { height:10px; overflow:hidden; border-radius:99px; background:#dfe9d8; }
 .task-row-progress .task-progress-track i { background:linear-gradient(90deg,#5e9166,#9bc46c); }
+
+.message-markdown { min-width:0; white-space:normal; overflow-wrap:anywhere; }
+.message-markdown :deep(> :first-child) { margin-top:0; }
+.message-markdown :deep(> :last-child) { margin-bottom:0; }
+.message-markdown :deep(p) { margin:.55em 0; }
+.message-markdown :deep(h1),.message-markdown :deep(h2),.message-markdown :deep(h3),.message-markdown :deep(h4),.message-markdown :deep(h5),.message-markdown :deep(h6) { margin:1.15em 0 .45em; color:inherit; font-family:var(--font-serif); font-weight:800; line-height:1.35; }
+.message-markdown :deep(h1) { font-size:1.35rem; }.message-markdown :deep(h2) { font-size:1.18rem; }.message-markdown :deep(h3) { font-size:1.04rem; }.message-markdown :deep(h4) { font-size:.96rem; }
+.message-markdown :deep(ul),.message-markdown :deep(ol) { margin:.65em 0; padding-left:1.45rem; }
+.message-markdown :deep(li) { margin:.32em 0; padding-left:.12rem; }
+.message-markdown :deep(blockquote) { margin:.8em 0; border-left:3px solid var(--agent-lime); padding:.15em 0 .15em .85em; color:var(--agent-ink-soft); }
+.message-markdown :deep(hr) { height:1px; margin:1.05em 0; border:0; background:rgba(16,44,50,.13); }
+.message-markdown :deep(code) { border-radius:5px; padding:.12em .35em; background:#f0eadf; font-family:Consolas,'Courier New',monospace; font-size:.88em; }
+.message-markdown :deep(pre) { margin:.8em 0; overflow:auto; border-radius:10px; padding:12px; color:#edf7ef; background:#17363d; white-space:pre; }
+.message-markdown :deep(pre code) { padding:0; color:inherit; background:transparent; }
+.message-markdown :deep(a) { color:#3f7355; text-decoration:underline; text-underline-offset:3px; }
+.message-markdown :deep(strong) { color:inherit; font-weight:850; }
+.shelf-plan-action { margin-top:10px; border:1px solid rgba(84,122,69,.35); border-radius:9px; padding:8px 11px; color:#315f37; background:#edf4d7; cursor:pointer; font:inherit; font-size:.72rem; font-weight:800; }
+.shelf-plan-action:hover { border-color:#547a45; background:#e1edc5; }
+.shelf-plan-action:disabled { cursor:wait; opacity:.62; }
+
+/* Keep the knowledge globe square and give its evidence panel a dedicated reading column. */
+@media (min-width:901px) {
+  .insight-stage .graph-card {
+    display:grid;
+    width:100%;
+    min-width:0;
+    box-sizing:border-box;
+    grid-template-columns:minmax(0,1fr) minmax(0,.9fr);
+    grid-template-rows:auto auto minmax(0,1fr) auto;
+    column-gap:18px;
+    align-content:stretch;
+    height:100%!important;
+    overflow:hidden;
+  }
+  .insight-stage .graph-card > .graph-intro { grid-column:1; grid-row:1; min-width:0; overflow-wrap:anywhere; }
+  .insight-stage .graph-card > .globe-toolbar { grid-column:1; grid-row:2; }
+  .insight-stage .graph-card > .relationship-globe-shell {
+    grid-column:2;
+    grid-row:1 / span 3;
+    width:min(100%, calc(100dvh - 330px));
+    max-width:100%;
+    aspect-ratio:1 / 1;
+    height:auto;
+    min-height:0;
+    transform:translateY(-12px);
+  }
+  .insight-stage .graph-card > .graph-inspector {
+    grid-column:1;
+    grid-row:3;
+    display:flex;
+    flex-direction:column;
+    min-width:0;
+    max-height:100%;
+    margin-top:0;
+    overflow:auto;
+  }
+  .insight-stage .graph-card > .graph-footnote { grid-column:1 / -1; grid-row:4; }
+  .insight-stage .graph-card .relationship-globe { width:100%; height:100%!important; }
+}
+
+@media (min-width:901px) {
+  .insight-stage .insight-grid { overflow:hidden!important; padding-right:0; }
+  .insight-stage .graph-card > .graph-inspector { overflow:hidden; }
+}
+
+@media (max-width:900px) {
+  .insight-stage .graph-card { display:flex; flex-direction:column; }
+  .insight-stage .graph-card .relationship-globe-shell {
+    width:100%;
+    aspect-ratio:1 / 1;
+    height:auto;
+    min-height:0;
+  }
+}
+
 </style>

@@ -139,7 +139,11 @@ public class AgentController {
                 });
                 // Structured UI data stays outside model prose; optional previews cannot fail an answered chat.
                 try {
-                    emitter.send(SseEmitter.event().name("recommendations").data(recommendationService.dynamicShelf(userId).stream().limit(3).toList()));
+                    String request = dto.getContent() == null ? "" : dto.getContent();
+                    boolean excludesShelf = request.contains("不要从书架") || request.contains("不从书架")
+                            || request.contains("别从书架") || request.contains("不用书架");
+                    emitter.send(SseEmitter.event().name("recommendations").data(excludesShelf
+                            ? List.of() : recommendationService.dynamicShelf(userId).stream().limit(3).toList()));
                     if (dto.getCanonicalBookId() != null && dto.getCurrentChapter() != null) {
                         int boundary = spoilerBoundaryService.clamp(userId, dto.getCanonicalBookId(), dto.getCurrentChapter());
                         emitter.send(SseEmitter.event().name("graph").data(knowledgeService.graph(dto.getCanonicalBookId(), boundary)));
@@ -311,8 +315,8 @@ public class AgentController {
         List<String> allTimeline = knowledgeService.timeline(canonicalBookId, boundary);
         // Show the reader's latest story context rather than the first indexed cards.
         List<String> timeline = allTimeline.subList(Math.max(0, allTimeline.size() - 6), allTimeline.size());
-        List<ClueVO> clues = knowledgeService.clues(canonicalBookId, boundary).stream().limit(5).toList();
-        return R.ok(new PlotCapsuleVO(boundary, timeline, clues,
+        List<ClueVO> clues = knowledgeService.clues(canonicalBookId, boundary);
+        return R.ok(new PlotCapsuleVO(boundary, knowledgeService.recapSummary(canonicalBookId, boundary), timeline, clues,
                 spoilersConfirmed ? "你已确认允许剧透；内容会覆盖至所选章节。" : "内容仅来自已建立索引且不超过当前阅读边界的章节，不会引用后续剧情。"));
     }
 

@@ -127,6 +127,7 @@ public class LightRagServiceImpl implements LightRagService {
         int[] budget = {0};
         return communityMapper.selectList(Wrappers.<LightRagCommunity>lambdaQuery().eq(LightRagCommunity::getCanonicalBookId, bookId)
                         .le(LightRagCommunity::getChapterEnd, currentChapter).in(LightRagCommunity::getCommunityLevel, allowedLevels)
+                        .eq(LightRagCommunity::getModelVersion, embeddingVersion())
                         .isNull(LightRagCommunity::getDeletedAt))
                 .stream().filter(value -> allowedLevels.contains(value.getCommunityLevel()))
                 .sorted(Comparator.comparingDouble((LightRagCommunity value) -> embeddingService.similarity(queryVector, read(value.getEmbeddingJson()))).reversed())
@@ -220,29 +221,28 @@ public class LightRagServiceImpl implements LightRagService {
      */
     private String summarize(List<KnowledgeChunk> chunks) {
         if (chunks.isEmpty()) return "暂无已建立索引的正文依据。";
-        Map<String, Integer> keywords = new LinkedHashMap<>();
-        StringBuilder evidence = new StringBuilder();
-        for (KnowledgeChunk chunk : chunks) {
-            if (chunk.getKeywords() != null) {
-                for (String keyword : chunk.getKeywords().split("[,\\s]+")) {
-                    String normalized = keyword.trim().toLowerCase(Locale.ROOT);
-                    if (normalized.length() >= 2) keywords.merge(normalized, 1, Integer::sum);
-                }
-            }
-            if (evidence.length() >= 840 || chunk.getContent() == null) continue;
-            String excerpt = chunk.getContent().replaceAll("\\s+", " ").trim();
-            if (excerpt.isBlank()) continue;
-            int remaining = 840 - evidence.length();
-            int limit = Math.min(Math.min(160, excerpt.length()), remaining);
-            evidence.append(" 第").append(chunk.getChapterIndex() + 1).append("章：")
-                    .append(excerpt, 0, Math.max(0, limit)).append(";");
-        }
-        String terms = keywords.entrySet().stream().sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-                .limit(12).map(Map.Entry::getKey).reduce((left, right) -> left + "、" + right).orElse("无");
         int first = chunks.get(0).getChapterIndex() + 1;
         int last = chunks.get(chunks.size() - 1).getChapterIndex() + 1;
-        String result = "第" + first + "至" + last + "章的内容卡片。重复出现的词：" + terms + "。原文依据：" + evidence;
-        return result.substring(0, Math.min(1200, result.length()));
+        Set<Integer> chapterIndexes = chunks.stream().map(KnowledgeChunk::getChapterIndex).collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        List<KnowledgeGraphNode> nodes = graphNodeMapper.selectList(Wrappers.<KnowledgeGraphNode>lambdaQuery()
+                .eq(KnowledgeGraphNode::getCanonicalBookId, chunks.get(0).getCanonicalBookId())
+                .in(KnowledgeGraphNode::getFirstChapter, chapterIndexes)
+                .eq(KnowledgeGraphNode::getReviewStatus, APPROVED)
+                .ge(KnowledgeGraphNode::getConfidence, properties.getMinGraphConfidence())
+                .orderByDesc(KnowledgeGraphNode::getConfidence).last("LIMIT 12"));
+        String events = nodes.stream().filter(node -> "EVENT".equals(node.getNodeType())).map(KnowledgeGraphNode::getName)
+                .distinct().limit(3).reduce((a, b) -> a + "；" + b).orElse("");
+        String people = nodes.stream().filter(node -> "CHARACTER".equals(node.getNodeType())).map(KnowledgeGraphNode::getName)
+                .distinct().limit(5).reduce((a, b) -> a + "、" + b).orElse("");
+        String places = nodes.stream().filter(node -> Set.of("LOCATION", "ORGANIZATION").contains(node.getNodeType())).map(KnowledgeGraphNode::getName)
+                .distinct().limit(4).reduce((a, b) -> a + "、" + b).orElse("");
+        StringBuilder result = new StringBuilder("第").append(first).append("至第").append(last).append("章，故事");
+        if (!events.isBlank()) result.append("围绕").append(events).append("展开");
+        else result.append("继续推进主要人物的行动与冲突");
+        if (!people.isBlank()) result.append("；涉及人物：").append(people);
+        if (!places.isBlank()) result.append("；相关地点或势力：").append(places);
+        result.append("。这是基于已核验实体和事件生成的剧情概括，原文依据请通过章节引用查看。");
+        return result.toString();
     }
     private String nodeTypeLabel(String type) {
         return switch (type == null ? "" : type) {

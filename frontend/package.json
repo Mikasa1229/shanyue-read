@@ -11,6 +11,8 @@
   "dependencies": {
     "axios": "^1.7.2",
     "cytoscape": "^3.34.0",
+    "dompurify": "^3.4.13",
+    "marked": "^18.0.9",
     "pinia": "^2.1.7",
     "vue": "^3.4.29",
     "vue-router": "^4.3.3"

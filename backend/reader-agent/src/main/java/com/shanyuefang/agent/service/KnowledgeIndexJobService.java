@@ -9,6 +9,8 @@ import java.util.Map;
 public interface KnowledgeIndexJobService {
     KnowledgeIndexJob begin(IndexChapterDTO dto);
     KnowledgeIndexJob beginDelete(long canonicalBookId);
+    KnowledgeIndexJob beginEmbeddingRebuild(long canonicalBookId);
+    boolean claimEmbeddingRebuild(long jobId);
     void complete(long jobId);
     void fail(long jobId, Exception exception);
     List<KnowledgeIndexJob> recent(int limit);

@@ -79,6 +79,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     /** Approximate Chinese-character targets; sentence boundaries take priority over an exact size. */
     private static final int CHUNK_SIZE = 800;
     private static final int CHUNK_OVERLAP = 120;
+    private static final int EMBEDDING_REINDEX_BATCH_SIZE = 32;
     private static final Pattern PERSON_PATTERN = Pattern.compile("([\\p{IsHan}]{2,4})(?:说道|问道|看着|听到|走到|来到|笑道|想起)");
     private static final Pattern CLUE_PATTERN = Pattern.compile("[^。！？]{0,80}(似乎|秘密|奇怪|线索|疑惑|真相|隐约|不对劲|伏笔)[^。！？]{0,100}");
     private static final Pattern LOCATION_PATTERN = Pattern.compile("(?:在|来到|前往|位于)([\\p{IsHan}]{2,8}(?:城|镇|村|山|府|楼|馆|院|谷|岛))");
@@ -258,6 +259,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         List<ScoredChunk> postgres = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
                 .eq(KnowledgeChunk::getCanonicalBookId, canonicalBookId)
                 .le(KnowledgeChunk::getChapterIndex, currentChapter)
+                .eq(KnowledgeChunk::getEmbeddingModelVersion, agentProperties.getEmbeddingModelVersion())
                         .orderByDesc(KnowledgeChunk::getChapterIndex)
                         .orderByAsc(KnowledgeChunk::getId)
                         // The old 600-row tail silently excluded early chapters once a reader
@@ -410,6 +412,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                         .orderByDesc(KnowledgeGraphEdge::getConfidence)
                         .last("LIMIT 240"))
                 .stream().filter(edge -> visibleIds.contains(edge.getSourceNodeId()) && visibleIds.contains(edge.getTargetNodeId()))
+                // Do not expose legacy generic character edges in the reader graph. They
+                // are not a usable relationship predicate and can only be shown when a
+                // future extraction supplies a concrete, evidence-backed relation.
+                .filter(edge -> !Set.of("INTERACTS_WITH", "SUPPORTS", "OPPOSES", "TRAVELS_WITH").contains(edge.getRelation()))
                 .map(edge -> new KnowledgeGraphVO.Edge(edge.getSourceNodeId(), edge.getTargetNodeId(), edge.getRelation(),
                         edge.getFirstChapter(), edge.getEvidence(), edge.getConfidence())).toList();
         return new KnowledgeGraphVO(viewNodes, viewEdges);
@@ -421,7 +427,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                         .eq(KnowledgeClue::getCanonicalBookId, canonicalBookId)
                         .le(KnowledgeClue::getChapterIndex, currentChapter)
                         .eq(KnowledgeClue::getReviewStatus, APPROVED)
-                        .orderByDesc(KnowledgeClue::getChapterIndex).last("LIMIT 30"))
+                        .orderByDesc(KnowledgeClue::getChapterIndex).last("LIMIT 200"))
                 .stream().map(clue -> clue.getResolvedChapter() != null && clue.getResolvedChapter() > currentChapter
                         ? new ClueVO(clue.getChapterIndex(), clue.getExcerpt(), clue.getSignal(), "OPEN", null, null)
                         : new ClueVO(clue.getChapterIndex(), clue.getExcerpt(), clue.getSignal(), clue.getStatus(),
@@ -452,6 +458,78 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 .entrySet().stream().sorted(Map.Entry.comparingByKey())
                 .map(entry -> "第" + (entry.getKey() + 1) + "章：" + excerpt(entry.getValue().get(0).getContent(), 110))
                 .toList();
+    }
+
+    @Override
+    public String recapSummary(long canonicalBookId, int currentChapter) {
+        List<KnowledgeGraphNode> events = nodeMapper.selectList(Wrappers.<KnowledgeGraphNode>lambdaQuery()
+                .eq(KnowledgeGraphNode::getCanonicalBookId, canonicalBookId)
+                .eq(KnowledgeGraphNode::getNodeType, "EVENT")
+                .likeRight(KnowledgeGraphNode::getSourceModelVersion, STORY_EVENT_VERSION_PREFIX)
+                .le(KnowledgeGraphNode::getLastChapter, currentChapter)
+                .eq(KnowledgeGraphNode::getReviewStatus, APPROVED)
+                .ge(KnowledgeGraphNode::getConfidence, agentProperties.getMinGraphConfidence())
+                .orderByDesc(KnowledgeGraphNode::getLastChapter)
+                .orderByDesc(KnowledgeGraphNode::getConfidence).last("LIMIT 16"));
+        if (events.isEmpty()) return "已读范围内暂时没有完成归并的剧情事件，重新构建对应章节后会生成阶段回顾。";
+        List<KnowledgeGraphNode> ordered = deduplicateRecapEvents(events).stream()
+                .sorted(Comparator.comparing(KnowledgeGraphNode::getFirstChapter)).toList();
+        List<String> mainEvents = ordered.stream().filter(event -> !isSideBranch(event.getEvidence()))
+                .map(KnowledgeGraphNode::getName).limit(5).toList();
+        List<String> sideEvents = ordered.stream().filter(event -> isSideBranch(event.getEvidence()))
+                .map(KnowledgeGraphNode::getName).limit(2).toList();
+        List<String> activeEvents = ordered.stream().filter(event -> safe(event.getEvidence()).contains("·进行中】"))
+                .map(KnowledgeGraphNode::getName).limit(2).toList();
+        Set<Long> eventIds = ordered.stream().map(KnowledgeGraphNode::getId).collect(java.util.stream.Collectors.toSet());
+        List<KnowledgeGraphEdge> links = edgeMapper.selectList(Wrappers.<KnowledgeGraphEdge>lambdaQuery()
+                .eq(KnowledgeGraphEdge::getCanonicalBookId, canonicalBookId)
+                .in(KnowledgeGraphEdge::getTargetNodeId, eventIds)
+                .eq(KnowledgeGraphEdge::getReviewStatus, APPROVED).last("LIMIT 80"));
+        Set<Long> participantIds = links.stream().filter(edge -> "PARTICIPATES_IN".equals(edge.getRelation()))
+                .map(KnowledgeGraphEdge::getSourceNodeId).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        String people = participantIds.isEmpty() ? "" : nodeMapper.selectBatchIds(participantIds).stream()
+                .filter(node -> "CHARACTER".equals(node.getNodeType())).map(KnowledgeGraphNode::getName).distinct().limit(5)
+                .reduce((a, b) -> a + "、" + b).orElse("");
+        StringBuilder summary = new StringBuilder("截至第").append(currentChapter + 1).append("章，");
+        if (!mainEvents.isEmpty()) {
+            summary.append("故事主线经历了").append(String.join("；", mainEvents)).append("。");
+        }
+        if (!sideEvents.isEmpty()) {
+            summary.append("与此同时，").append(String.join("；", sideEvents)).append("。");
+        }
+        if (!activeEvents.isEmpty()) {
+            summary.append("目前仍在推进的是").append(String.join("、", activeEvents)).append("。");
+        } else if (!people.isBlank()) {
+            summary.append("这一阶段的关键人物包括").append(people).append("。");
+        }
+        return summary.toString();
+    }
+
+    private List<KnowledgeGraphNode> deduplicateRecapEvents(List<KnowledgeGraphNode> events) {
+        List<KnowledgeGraphNode> result = new ArrayList<>();
+        for (KnowledgeGraphNode candidate : events) {
+            Set<Integer> candidatePairs = characterPairs(candidate.getName());
+            boolean duplicate = result.stream().anyMatch(existing -> {
+                Set<Integer> existingPairs = characterPairs(existing.getName());
+                if (candidatePairs.isEmpty() || existingPairs.isEmpty()) return false;
+                long overlap = candidatePairs.stream().filter(existingPairs::contains).count();
+                double similarity = overlap / (double) Math.min(candidatePairs.size(), existingPairs.size());
+                boolean sameRange = Math.abs(candidate.getFirstChapter() - existing.getFirstChapter()) <= 2
+                        && Math.abs(candidate.getLastChapter() - existing.getLastChapter()) <= 2;
+                return sameRange && similarity >= 0.55D;
+            });
+            if (!duplicate) result.add(candidate);
+        }
+        return result;
+    }
+
+    private Set<Integer> characterPairs(String value) {
+        String normalized = safe(value).replaceAll("[^\\p{IsHan}A-Za-z0-9]", "");
+        Set<Integer> pairs = new java.util.HashSet<>();
+        for (int i = 0; i + 1 < normalized.length(); i++) {
+            pairs.add(normalized.substring(i, i + 2).hashCode());
+        }
+        return pairs;
     }
 
     /**
@@ -742,6 +820,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             calibrateCharacterKnowledge(canonicalBookId, chapters, modelConfig);
             synthesizeStoryEvents(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
             synthesizeClues(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
+            reconcileClueLifecycle(canonicalBookId, startChapter - 1, endChapter - 1);
             refreshBookProfile(canonicalBookId);
             lightRagService.refresh(canonicalBookId);
             // The relational graph is authoritative; projection refresh keeps Neo4j complete after merging a range.
@@ -777,6 +856,13 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private void calibrateCharacterKnowledge(long bookId, Map<Integer, StringBuilder> chapters,
                                              StructuredGraphExtractor.ModelConfig modelConfig) {
         if (chapters.isEmpty()) return;
+        // 清理早期版本留下的“发生互动”边。它没有稳定语义，继续留在 Neo4j
+        // 投影中会让重新抽取后的具体关系仍被旧边污染。
+        edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery()
+                .eq(KnowledgeGraphEdge::getCanonicalBookId, bookId)
+                .in(KnowledgeGraphEdge::getRelation, List.of("INTERACTS_WITH", "SUPPORTS", "OPPOSES", "TRAVELS_WITH"))
+                .inSql(KnowledgeGraphEdge::getSourceNodeId, "SELECT id FROM t_knowledge_graph_node WHERE node_type = 'CHARACTER'")
+                .inSql(KnowledgeGraphEdge::getTargetNodeId, "SELECT id FROM t_knowledge_graph_node WHERE node_type = 'CHARACTER'"));
         int start = chapters.keySet().stream().mapToInt(Integer::intValue).min().orElse(0);
         int end = chapters.keySet().stream().mapToInt(Integer::intValue).max().orElse(start);
         calibrateCharacterKnowledgePass(bookId, chapters, modelConfig, start, end);
@@ -817,7 +903,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 String evidence = relation.evidence().stream().limit(3).map(StructuredGraphExtractor.ChapterFact::evidence)
                         .collect(java.util.stream.Collectors.joining("；"));
                 if (isGenericCharacterRelation(relation.type()) && hasSpecificCharacterRelation(bookId, source.getId(), target.getId())) continue;
-                if (Set.of("MENTORS", "SERVES").contains(relation.type())) {
+                if (Set.of("TEACHER_OF", "MASTER_OF", "PARENT_OF", "SERVES").contains(relation.type())) {
                     deleteReverseDirectionalRelation(bookId, source.getId(), target.getId(), relation.type());
                 }
                 upsertEdge(bookId, first.chapterIndex(), source, target, relation.type(), evidence,
@@ -1055,6 +1141,48 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
     }
 
+    /**
+     * Resolves previously discovered clues incrementally. A clue is only marked resolved
+     * when a later indexed chapter contains an explicit reveal signal and repeats at least
+     * one distinctive term from the clue; a generic "答案" sentence is not sufficient.
+     */
+    private void reconcileClueLifecycle(long bookId, int startChapter, int endChapter) {
+        List<KnowledgeClue> openClues = clueMapper.selectList(Wrappers.<KnowledgeClue>lambdaQuery()
+                .eq(KnowledgeClue::getCanonicalBookId, bookId)
+                .in(KnowledgeClue::getStatus, List.of("OPEN", "PARTIALLY_RESOLVED"))
+                .le(KnowledgeClue::getChapterIndex, endChapter)
+                .eq(KnowledgeClue::getReviewStatus, APPROVED));
+        if (openClues.isEmpty()) return;
+        List<KnowledgeChunk> laterChunks = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
+                .eq(KnowledgeChunk::getCanonicalBookId, bookId)
+                .gt(KnowledgeChunk::getChapterIndex, startChapter)
+                .le(KnowledgeChunk::getChapterIndex, endChapter)
+                .orderByAsc(KnowledgeChunk::getChapterIndex));
+        for (KnowledgeClue clue : openClues) {
+            List<String> terms = clueTerms(clue.getSignal(), clue.getExcerpt());
+            if (terms.isEmpty()) continue;
+            for (KnowledgeChunk chunk : laterChunks) {
+                String text = safe(chunk.getContent());
+                if (!CLUE_RESOLUTION_PATTERN.matcher(text).find()) continue;
+                long matches = terms.stream().filter(text::contains).count();
+                if (matches < Math.min(2, terms.size())) continue;
+                clue.setStatus("RESOLVED");
+                clue.setResolvedChapter(chunk.getChapterIndex());
+                clue.setResolutionEvidence(excerpt(text, 280));
+                clue.setUpdatedAt(LocalDateTime.now());
+                clueMapper.updateById(clue);
+                break;
+            }
+        }
+    }
+
+    private List<String> clueTerms(String signal, String excerpt) {
+        String value = safe(signal) + safe(excerpt).replaceAll("【[^】]+】", " ");
+        return java.util.regex.Pattern.compile("[\\p{IsHan}]{2,6}").matcher(value).results()
+                .map(match -> match.group()).filter(term -> !Set.of("当前未解", "原文依据", "已经知道", "没有答案").contains(term))
+                .distinct().limit(4).toList();
+    }
+
     private boolean hasClueSignal(String content) {
         String value = safe(content);
         return List.of("蹊跷", "古怪", "秘密", "真相", "隐瞒", "不知为何", "无人知晓", "无法解释", "答应", "承诺")
@@ -1089,6 +1217,38 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             elasticsearchKnowledgeStore.index(chunk);
         });
         log.info("Reprojected {} LightRAG evidence chunks for book {}", chunks.size(), canonicalBookId);
+    }
+
+    @Override
+    public int reembedBookEvidence(long canonicalBookId) {
+        String version = agentProperties.getEmbeddingModelVersion();
+        List<KnowledgeChunk> chunks = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
+                .eq(KnowledgeChunk::getCanonicalBookId, canonicalBookId)
+                .ne(KnowledgeChunk::getEmbeddingModelVersion, version)
+                .orderByAsc(KnowledgeChunk::getChapterIndex).orderByAsc(KnowledgeChunk::getId));
+        if (chunks.isEmpty()) return 0;
+
+        for (int start = 0; start < chunks.size(); start += EMBEDDING_REINDEX_BATCH_SIZE) {
+            List<KnowledgeChunk> batch = chunks.subList(start, Math.min(chunks.size(), start + EMBEDDING_REINDEX_BATCH_SIZE));
+            List<List<Double>> vectors = embeddingService.embedAll(batch.stream().map(KnowledgeChunk::getContent).toList());
+            if (vectors.size() != batch.size()) throw new IllegalStateException("Embedding provider returned an incomplete batch");
+            for (int index = 0; index < batch.size(); index++) {
+                KnowledgeChunk chunk = batch.get(index);
+                chunk.setEmbeddingJson(writeVector(vectors.get(index)));
+                chunk.setEmbeddingModelVersion(version);
+                chunkMapper.updateById(chunk);
+            }
+        }
+        documentMapper.update(null, Wrappers.<KnowledgeDocument>lambdaUpdate()
+                .eq(KnowledgeDocument::getCanonicalBookId, canonicalBookId)
+                .set(KnowledgeDocument::getEmbeddingModelVersion, version)
+                .set(KnowledgeDocument::getUpdatedAt, LocalDateTime.now()));
+        refreshProfiles(canonicalBookId);
+        lightRagService.refresh(canonicalBookId);
+        // The PostgreSQL vectors are authoritative. Do not flush Milvus once per batch here:
+        // local Milvus throttles flushes heavily, so its optional projection is repaired separately.
+        log.info("Re-embedded {} LightRAG evidence chunks for book {} with {}", chunks.size(), canonicalBookId, version);
+        return chunks.size();
     }
 
     @Override
@@ -1289,7 +1449,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 || ("LOCATION".equals(sourceType) && "EVENT".equals(targetType));
         if (Set.of("VISITS", "LIVES_IN").contains(relation)) return "CHARACTER".equals(sourceType) && "LOCATION".equals(targetType);
         if (Set.of("MEMBER_OF", "SERVES").contains(relation)) return "CHARACTER".equals(sourceType) && "ORGANIZATION".equals(targetType);
-        if (Set.of("KNOWS", "SUPPORTS", "OPPOSES", "MENTORS", "FAMILY_OF", "TRAVELS_WITH", "INTERACTS_WITH").contains(relation))
+        if (Set.of("KNOWS", "PARENT_OF", "SPOUSE_OF", "SIBLING_OF", "FRIEND_OF", "COMPANION_OF",
+                "TEACHER_OF", "MASTER_OF").contains(relation))
             return "CHARACTER".equals(sourceType) && "CHARACTER".equals(targetType);
         return false;
     }

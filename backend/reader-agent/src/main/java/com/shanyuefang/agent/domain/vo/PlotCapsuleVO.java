@@ -10,6 +10,7 @@ import java.util.List;
 @AllArgsConstructor
 public class PlotCapsuleVO {
     private int throughChapter;
+    private String summary;
     private List<String> timeline;
     private List<ClueVO> unresolvedClues;
     private String safetyNote;

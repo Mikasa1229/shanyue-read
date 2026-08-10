@@ -34,6 +34,15 @@ public class AgentReadOnlyToolService {
     private final ObjectMapper objectMapper;
 
     public ToolResult execute(long userId, ChatMessageDTO dto, String request) {
+        return execute(userId, dto, request, request, true);
+    }
+
+    public ToolResult execute(long userId, ChatMessageDTO dto, String request, String bookSearchRequest) {
+        return execute(userId, dto, request, bookSearchRequest, true);
+    }
+
+    public ToolResult execute(long userId, ChatMessageDTO dto, String request, String bookSearchRequest,
+                              boolean prefetchBookSearch) {
         String normalized = request == null ? "" : request.toLowerCase(Locale.ROOT);
         List<String> context = new ArrayList<>();
         List<String> tools = new ArrayList<>();
@@ -46,9 +55,9 @@ public class AgentReadOnlyToolService {
         if (dto.getCanonicalBookId() != null && asksForBookDetail(normalized)) {
             tools.add("book.detail.read");
             context.add(readBookDetail(dto.getCanonicalBookId()));
-        } else if (asksForBookSearch(normalized)) {
+        } else if (prefetchBookSearch && asksForBookSearch(normalized)) {
             tools.add("book.search.read");
-            SearchResult searchResult = searchBooks(request);
+            SearchResult searchResult = searchBooks(bookSearchRequest);
             context.add(searchResult.context());
             bookReferences.addAll(searchResult.bookReferences());
         }
@@ -83,7 +92,7 @@ public class AgentReadOnlyToolService {
         KnowledgeGraphVO graph = knowledgeService.graph(bookId, currentChapter);
         String nodes = graph.getNodes().stream().limit(12).map(node -> node.getName() + "（" + node.getType() + "）").reduce((a, b) -> a + "、" + b).orElse("无");
         String edges = graph.getEdges().stream().limit(LOCAL_GRAPH_EDGE_BUDGET).map(edge -> edge.getSource() + "-" + edge.getRelation() + "->" + edge.getTarget()).reduce((a, b) -> a + "；" + b).orElse("无");
-        List<ClueVO> clues = knowledgeService.clues(bookId, currentChapter).stream().limit(4).toList();
+        List<ClueVO> clues = knowledgeService.clues(bookId, currentChapter).stream().limit(12).toList();
         String normalized = request.toLowerCase(Locale.ROOT);
         List<String> seeds = graph.getNodes().stream().map(node -> node.getName()).filter(name -> normalized.contains(name.toLowerCase(Locale.ROOT)))
                 .limit(3).toList();
@@ -139,7 +148,7 @@ public class AgentReadOnlyToolService {
         return request.contains("recap") || request.contains("progress") || request.contains("timeline") || request.contains("回顾") || request.contains("进度") || request.contains("剧情");
     }
     private boolean asksForBookDetail(String request) { return request.contains("book detail") || request.contains("about this book") || request.contains("这本书") || request.contains("作品简介"); }
-    static boolean asksForBookSearch(String request) {
+    public static boolean asksForBookSearch(String request) {
         return request.contains("find book") || request.contains("recommend book") || request.contains("recommendation")
                 || request.contains("找书") || request.contains("搜书") || request.contains("搜索")
                 || request.contains("推荐") || request.contains("书源") || request.contains("有什么书")

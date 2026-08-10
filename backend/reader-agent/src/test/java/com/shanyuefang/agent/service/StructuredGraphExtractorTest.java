@@ -91,11 +91,11 @@ class StructuredGraphExtractorTest {
                         List.of(new StructuredGraphExtractor.IdentityResolution(
                                 "宁姚", "黑衣少女", List.of(reveal), 0.96D)),
                         List.of(new StructuredGraphExtractor.CharacterRelation(
-                                "宁姚", "陈平安", "MENTORS", List.of(reveal), 0.91D)));
+                                "宁姚", "陈平安", "TEACHER_OF", List.of(reveal), 0.91D)));
 
         assertEquals("宁姚", extraction.identities().get(0).canonicalName());
         assertEquals("黑衣少女", extraction.identities().get(0).mention());
-        assertEquals("MENTORS", extraction.relations().get(0).type());
+        assertEquals("TEACHER_OF", extraction.relations().get(0).type());
         assertEquals(15, extraction.relations().get(0).evidence().get(0).chapterIndex());
     }
 }

@@ -27,7 +27,8 @@
             </div>
           </div>
           <article v-for="(message, index) in messages" :key="`${message.id || index}-${message.role}`" :class="['agent-message', message.role === 'USER' ? 'is-user' : 'is-agent']">
-            <span>{{ message.content }}</span>
+            <div v-if="message.role === 'ASSISTANT'" class="message-markdown" v-html="renderMarkdown(message.content)" />
+            <span v-else>{{ message.content }}</span>
             <div v-if="bookReferenceItems(message).length" class="agent-book-references">
               <button v-for="book in bookReferenceItems(message)" :key="book.canonicalBookId" type="button" @click="openRecommendation(book)"><small>平台书源已验证</small><strong>《{{ book.title }}》</strong><span>{{ book.author || '作者未知' }} · 点击阅读</span></button>
             </div>
@@ -44,8 +45,7 @@
               <p v-if="previewError" class="agent-preview-note">{{ previewError }}</p>
               <details v-if="plotCapsule" class="agent-capsule">
                 <summary>无剧透回忆胶囊</summary>
-                <template v-if="plotCapsule.timeline?.length"><p v-for="item in plotCapsule.timeline.slice(0, 5)" :key="item">{{ item }}</p></template>
-                <p v-else>已读到第 {{ (plotCapsule.readingBoundary || 0) + 1 }} 章；这部分尚未建立可引用的剧情索引。</p>
+                <p>{{ plotCapsule.summary || '这部分尚未生成可用的阶段剧情回顾。' }}</p>
                 <small>{{ plotCapsule.safetyNote }}</small>
               </details>
               <div v-if="recommendations.length" class="agent-recommendations">
@@ -95,6 +95,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { renderMarkdown } from '@/utils/markdown'
 import { apiCreateAgentSession, apiGetAgentGraph, apiGetAgentMessages, apiGetAgentReaderLink, apiGetPlotCapsule, apiGetQuickRecommendations, streamAgentMessage } from '@/api/agent'
 import { apiGetMyShelf } from '@/api/bookshelf'
 
@@ -270,7 +271,7 @@ async function loadPreview() {
 async function openRecommendation(item) {
   if (!item?.canonicalBookId) return
   try {
-    const detail = await apiGetAgentReaderLink(item.canonicalBookId)
+    const detail = item?.sourceId && item?.sourceBookUrl ? item : await apiGetAgentReaderLink(item.canonicalBookId)
     if (!detail?.sourceId || !detail?.sourceBookUrl) {
       previewError.value = '这本推荐作品暂时没有可用书源；你可以在 Agent 中心继续查看。'
       return
@@ -383,6 +384,12 @@ async function openCitation(citation) {
 .agent-prompts { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .agent-prompts button { border: 1px solid var(--paper-3); border-radius: var(--radius-full); padding: 6px 10px; background: var(--paper-1); color: var(--ink-2); cursor: pointer; font-size: .75rem; }
 .agent-message { max-width: 88%; padding: 10px 12px; border-radius: var(--radius-md); white-space: pre-wrap; font-size: .875rem; line-height: 1.6; }
+.message-markdown { min-width:0; white-space:normal; overflow-wrap:anywhere; }
+.message-markdown :deep(> :first-child) { margin-top:0; }.message-markdown :deep(> :last-child) { margin-bottom:0; }
+.message-markdown :deep(h5),.message-markdown :deep(h6) { margin:1em 0 .4em; color:inherit; font-family:var(--font-serif); font-weight:800; line-height:1.35; }
+.message-markdown :deep(p) { margin:.45em 0; }.message-markdown :deep(h1),.message-markdown :deep(h2),.message-markdown :deep(h3),.message-markdown :deep(h4) { margin:1em 0 .4em; color:inherit; font-family:var(--font-serif); font-weight:800; line-height:1.35; }.message-markdown :deep(h1) { font-size:1.15rem; }.message-markdown :deep(h2) { font-size:1.05rem; }.message-markdown :deep(h3),.message-markdown :deep(h4) { font-size:.95rem; }
+.message-markdown :deep(ul),.message-markdown :deep(ol) { margin:.55em 0; padding-left:1.25rem; }.message-markdown :deep(li) { margin:.25em 0; }.message-markdown :deep(hr) { height:1px; margin:.8em 0; border:0; background:rgba(16,44,50,.14); }.message-markdown :deep(blockquote) { margin:.65em 0; border-left:3px solid var(--sage-0); padding-left:.7em; color:var(--ink-3); }
+.message-markdown :deep(code) { border-radius:4px; padding:.1em .3em; background:var(--paper-1); font-family:Consolas,'Courier New',monospace; font-size:.86em; }.message-markdown :deep(pre) { overflow:auto; border-radius:8px; padding:10px; color:#edf7ef; background:#17363d; white-space:pre; }.message-markdown :deep(pre code) { padding:0; color:inherit; background:transparent; }.message-markdown :deep(a) { color:var(--sage-0); text-decoration:underline; text-underline-offset:2px; }
 .agent-book-references { display:grid; gap:7px; margin-top:9px; white-space:normal; }.agent-book-references button { display:grid; gap:2px; width:100%; border:1px solid var(--paper-3); border-radius:10px; padding:9px; color:var(--ink-1); background:var(--paper-0); cursor:pointer; text-align:left; }.agent-book-references button:hover { border-color:var(--gold-1); }.agent-book-references small { color:var(--gold-0); font-size:.58rem; font-weight:800; }.agent-book-references strong { font-family:var(--font-serif); font-size:.8rem; }.agent-book-references span { color:var(--ink-3); font-size:.66rem; }
 .agent-citations { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(138,121,101,.28); white-space: normal; }.agent-citations button { border:0; padding:0; background:transparent; color:var(--sage-0); text-align:left; font:inherit; font-size:.68rem; cursor:pointer; }.agent-citations button:hover { text-decoration:underline; }
 .is-user { align-self: flex-end; color: var(--paper-0); background: var(--ink-0); border-bottom-right-radius: 2px; }

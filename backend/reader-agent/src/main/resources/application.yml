@@ -59,7 +59,7 @@ app:
     encryption-key: ${AGENT_ENCRYPTION_KEY:}
     internal-token: ${AGENT_INTERNAL_TOKEN:}
     gateway-token: ${AGENT_GATEWAY_TOKEN:}
-    native-tool-calling-enabled: ${AGENT_NATIVE_TOOL_CALLING_ENABLED:false}
+    native-tool-calling-enabled: ${AGENT_NATIVE_TOOL_CALLING_ENABLED:true}
     platform-provider: deepseek
     platform-model: ${AGENT_PLATFORM_MODEL:deepseek-chat}
     platform-fast-model: ${AGENT_PLATFORM_FAST_MODEL:}

@@ -13,6 +13,7 @@ public class AgentShelfGroup {
     private Long userId;
     private Long canonicalBookId;
     private String groupCode;
+    private String groupName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

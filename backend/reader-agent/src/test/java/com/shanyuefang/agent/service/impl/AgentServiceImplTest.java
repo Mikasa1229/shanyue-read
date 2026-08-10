@@ -103,6 +103,45 @@ class AgentServiceImplTest {
         assertEquals("诡秘之主", references.get(0).getTitle());
     }
 
+    @Test
+    void carriesRecentRecommendationCorrectionsIntoTheNextSearch() {
+        String request = AgentServiceImpl.recommendationSearchRequest("我说了让你推荐一本", List.of(
+                "推荐一本适合今晚读的书", "不要剑来", "我的意思是不要从书架里找", "你不会从书源里找吗"));
+
+        assertTrue(request.contains("不要剑来"));
+        assertTrue(request.contains("不要从书架里找"));
+        assertTrue(request.contains("书源"));
+    }
+
+    @Test
+    void mergesFunctionCallReferencesWithServerSideFallbackReferences() {
+        BookReferenceVO first = new BookReferenceVO(1L, "剑来", "烽火戏诸侯", "", 2L, "book-url", "");
+        BookReferenceVO second = new BookReferenceVO(3L, "诡秘之主", "爱潜水的乌贼", "", 4L, "other-url", "");
+
+        List<BookReferenceVO> references = AgentServiceImpl.mergeBookReferences(List.of(first), List.of(first, second));
+
+        assertEquals(2, references.size());
+        assertEquals("诡秘之主", references.get(1).getTitle());
+    }
+
+    @Test
+    void doesNotPrefetchAnOpenRecommendationBeforeNativeFunctionCalling() {
+        assertTrue(!AgentServiceImpl.shouldPrefetchBookSearch("推荐一本适合今晚读的书", true));
+        assertTrue(AgentServiceImpl.shouldPrefetchBookSearch("推荐一本适合今晚读的书", false));
+        assertTrue(AgentServiceImpl.shouldPrefetchBookSearch("搜索《诡秘之主》", true));
+        assertTrue(AgentServiceImpl.shouldPrefetchBookSearch("分析当前人物关系", true));
+    }
+
+    @Test
+    void removesExplicitlyExcludedBooksFromClickableReferences() {
+        List<BookReferenceVO> references = AgentServiceImpl.filterExcludedReferences("推荐一本，但不要《剑来》，不要从书架里找", List.of(
+                new BookReferenceVO(1L, "剑来", "烽火戏诸侯", "", 2L, "book-url", ""),
+                new BookReferenceVO(3L, "诡秘之主", "爱潜水的乌贼", "", 4L, "other-url", "")));
+
+        assertEquals(1, references.size());
+        assertEquals("诡秘之主", references.get(0).getTitle());
+    }
+
     private AgentMessage message(String role, String content) {
         AgentMessage message = new AgentMessage();
         message.setRole(role);

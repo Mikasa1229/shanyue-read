@@ -33,15 +33,17 @@ public class StructuredGraphExtractor {
             Map.entry("ORG", "ORGANIZATION"), Map.entry("GROUP", "ORGANIZATION"), Map.entry("FACTION", "ORGANIZATION"),
             Map.entry("INCIDENT", "EVENT"), Map.entry("PLOT", "EVENT"), Map.entry("FORESHADOWING", "CLUE"));
     private static final Set<String> RELATION_TYPES = Set.of(
-            "KNOWS", "SUPPORTS", "OPPOSES", "MENTORS", "SERVES", "FAMILY_OF", "TRAVELS_WITH", "INTERACTS_WITH",
+            "KNOWS", "SUPPORTS", "OPPOSES", "TEACHER_OF", "MASTER_OF", "SERVES", "PARENT_OF", "SPOUSE_OF",
+            "SIBLING_OF", "FRIEND_OF", "COMPANION_OF", "TRAVELS_WITH",
             "MEMBER_OF", "OWNS", "VISITS", "LIVES_IN", "OCCURS_AT", "PARTICIPATES_IN", "INVOLVES", "CAUSES",
             "LEADS_TO", "PREVENTS", "RESOLVES", "CLUE_FOR", "ASSOCIATED_WITH");
     private static final Map<String, String> RELATION_ALIASES = Map.ofEntries(
-            Map.entry("FRIEND", "SUPPORTS"), Map.entry("FRIEND_OF", "SUPPORTS"), Map.entry("ACQUAINTANCE", "KNOWS"),
+            Map.entry("FRIEND", "FRIEND_OF"), Map.entry("ACQUAINTANCE", "KNOWS"),
             Map.entry("RELATED", "KNOWS"), Map.entry("RELATED_TO", "KNOWS"), Map.entry("RELATION", "KNOWS"),
-            Map.entry("DISLIKES", "OPPOSES"), Map.entry("HATES", "OPPOSES"), Map.entry("APPRENTICE_OF", "MENTORS"),
+            Map.entry("DISLIKES", "OPPOSES"), Map.entry("HATES", "OPPOSES"), Map.entry("MENTORS", "TEACHER_OF"),
+            Map.entry("APPRENTICE_OF", "MASTER_OF"), Map.entry("FAMILY_OF", "PARENT_OF"),
             Map.entry("AT", "VISITS"), Map.entry("LOCATION", "VISITS"), Map.entry("VISIT", "VISITS"),
-            Map.entry("BELONGS_TO", "MEMBER_OF"), Map.entry("INTERACTED_WITH", "INTERACTS_WITH"),
+            Map.entry("BELONGS_TO", "MEMBER_OF"),
             Map.entry("INTERVENES", "INVOLVES"), Map.entry("推动", "LEADS_TO"), Map.entry("导致", "CAUSES"),
             Map.entry("促成", "LEADS_TO"), Map.entry("阻止", "PREVENTS"), Map.entry("解决", "RESOLVES"));
     private static final String EXTRACTION_INSTRUCTIONS = """
@@ -49,7 +51,7 @@ public class StructuredGraphExtractor {
             JSON 只有 entities 和 relations。entities 每项为 name,type,identityHint,aliases,evidence,confidence；relations 每项为 source,sourceIdentityHint,target,targetIdentityHint,type,evidence,confidence。
             节点 type 只能为 CHARACTER、LOCATION、ORGANIZATION、EVENT、CLUE。每章必须优先抽取 1 到 3 个明确叙事 EVENT；事件 name 必须是原文中连续的 8 到 36 字动作或变化片段。再抽取事件参与者、地点和组织；最多 10 个节点、14 条关系。
             普通物品、牌匾、招式、地名出现本身不是 CLUE。CLUE 仅限原文明确留下未解疑问、异常隐瞒、未兑现承诺或反复强调而尚不能解释的信息；没有时不输出 CLUE。
-            relation type 只能为 KNOWS、SUPPORTS、OPPOSES、MENTORS、SERVES、FAMILY_OF、TRAVELS_WITH、INTERACTS_WITH、MEMBER_OF、OWNS、VISITS、LIVES_IN、OCCURS_AT、PARTICIPATES_IN、INVOLVES、CAUSES、LEADS_TO、PREVENTS、RESOLVES、CLUE_FOR、ASSOCIATED_WITH。禁止输出 CHARACTER、LOCATION、EVENT、CLUE、RELATED 等泛化关系。
+            人物之间只能输出稳定社会关系：PARENT_OF、SPOUSE_OF、SIBLING_OF、FRIEND_OF、COMPANION_OF、TEACHER_OF、MASTER_OF、SERVES、KNOWS。帮助、对抗、同行、对话等动作要抽为 EVENT，不得作为人物关系。其它实体关系可用 MEMBER_OF、OWNS、VISITS、LIVES_IN、OCCURS_AT、PARTICIPATES_IN、INVOLVES、CAUSES、LEADS_TO、PREVENTS、RESOLVES、CLUE_FOR、ASSOCIATED_WITH。禁止 RELATED 等泛化关系。
             人物参与事件用 PARTICIPATES_IN；事件发生地点用 OCCURS_AT；事件之间才可用 CAUSES、LEADS_TO、PREVENTS、RESOLVES；线索必须以 CLUE_FOR 或 ASSOCIATED_WITH 指向相关实体或事件。
             name、identityHint、aliases、evidence 必须逐字来自本章原文。人物、地点和组织的 identityHint 只在同名不同实体确有原文依据时填写，否则空字符串；不要把临时描述当 identityHint。evidence 必须是同时包含关系两端的连续原文片段，且不超过 96 字。没有合格事实时返回 {"entities":[],"relations":[]}。
             """;
@@ -75,7 +77,7 @@ public class StructuredGraphExtractor {
                     最多 8 个节点、12 条关系。先做指代与别名归一：已知实体目录中的称呼必须使用其规范名作为 name，并把本章实际称呼写入 aliases；目录没有依据时不得强行合并同名实体。人物、地点、组织优先于 EVENT。
                     EVENT 仅表示本章可供跨章归并的原子事实，不是故事地图中的全局事件；每章最多2个，只有人物目标、冲突、关键关系、重要信息或局势发生明确变化时才输出。普通对话、赶路、日常动作、情绪、观感、称呼和场景切换不要输出 EVENT。name 应概括变化而非照抄琐碎动作。
                     普通物品不是 CLUE。CLUE 只有原文明确未解、异常、隐瞒或承诺时才允许。所有 evidence 最多 42 字且逐字来自原文；identityHint 不确定时用空字符串。
-                    relation type 只能为 KNOWS、SUPPORTS、OPPOSES、MENTORS、SERVES、FAMILY_OF、TRAVELS_WITH、INTERACTS_WITH、MEMBER_OF、OWNS、VISITS、LIVES_IN、OCCURS_AT、PARTICIPATES_IN、INVOLVES、CAUSES、LEADS_TO、PREVENTS、RESOLVES、CLUE_FOR、ASSOCIATED_WITH。人物参与事件用 PARTICIPATES_IN，事件地点用 OCCURS_AT，人物居住地用 LIVES_IN，人物到达地点用 VISITS，人物所属势力用 MEMBER_OF。只抽取原文明确关系，不得把所有同场人物都写成 KNOWS。
+                    人物长期关系只能为 PARENT_OF（父母到子女）、SPOUSE_OF、SIBLING_OF、FRIEND_OF、COMPANION_OF、TEACHER_OF（老师到学生）、MASTER_OF（师父到徒弟）、SERVES、KNOWS。帮助、保护、冲突、追杀、同行和普通互动是剧情动作，不得冒充人物长期关系；这些动作应归入 EVENT，并用 PARTICIPATES_IN 连接人物。其它关系可用 MEMBER_OF、OWNS、VISITS、LIVES_IN、OCCURS_AT、PARTICIPATES_IN、INVOLVES、CAUSES、LEADS_TO、PREVENTS、RESOLVES、CLUE_FOR、ASSOCIATED_WITH。只抽取原文明确关系，不得把所有同场人物都写成 KNOWS。
                     关系证据中可出现规范名或本章 aliases，但必须明确支持关系两端。无合格内容就返回空数组。
                     """;
             // Respect the configured bound; a fixed 6,000-character cap discarded long chapter endings.
@@ -207,8 +209,8 @@ public class StructuredGraphExtractor {
             String instructions = """
                     你是中文小说人物知识校准器。输入是连续章节原文和此前已确认实体目录。只返回 JSON：{"identities":[],"relations":[]}，不要 Markdown。
                     identities 每项只含 canonicalName,mention,factIndex,evidence,confidence。仅当原文能够确认较早的描述性称呼与后来正式姓名属于同一人物时输出，例如前文持续称“黑衣少女”，同一叙事链后来明确称“宁姚”。canonicalName 必须是正式姓名，mention 必须是描述性称呼；两者不可只是同场出现的人名，不可凭性别、动作或语义相似猜测。
-                    relations 每项只含 source,target,type,factIndex,evidence,confidence。source 和 target 必须是人物正式姓名或已确认称呼。type 只能为 KNOWS、SUPPORTS、OPPOSES、MENTORS、SERVES、FAMILY_OF、TRAVELS_WITH、INTERACTS_WITH。
-                    关系有方向：MENTORS 必须是“老师/教导者 -> 学生”，SERVES 是“效忠者 -> 被效忠者”；其它人物关系可按原文叙述方向。优先输出具体类型：共同旅行用 TRAVELS_WITH，明确教导用 MENTORS，帮助保护用 SUPPORTS，敌对伤害用 OPPOSES，亲属用 FAMILY_OF，侍奉效忠用 SERVES。KNOWS 只表示明确认识但无更具体关系；INTERACTS_WITH 只用于发生影响剧情的重要互动且无法归入其它类型，普通同场或一句对话不得输出。
+                    relations 每项只含 source,target,type,factIndex,evidence,confidence。source 和 target 必须是人物正式姓名或已确认称呼。type 只能为 PARENT_OF、SPOUSE_OF、SIBLING_OF、FRIEND_OF、COMPANION_OF、TEACHER_OF、MASTER_OF、SERVES、KNOWS。
+                    只抽取跨场景仍成立的社会或身份关系。帮助、保护、冲突、追杀、同行、对话和普通互动都是剧情动作，不是人物关系，一律不要输出。PARENT_OF 必须是“父母 -> 子女”，TEACHER_OF 是“老师 -> 学生”，MASTER_OF 是“师父 -> 徒弟”，SERVES 是“效忠者 -> 被效忠者”。没有明确称谓或身份依据就不输出，宁缺毋滥。
                     evidence 必须是对应 factIndex 中逐字连续的短原文，最多120字，且直接支持身份等价或关系，不能返回整章。关系 evidence 必须出现两个端点名称或实体目录中的已确认称呼。不得使用窗口外剧情、百科知识或常识。宁缺毋滥，最多2个身份归并和8条关系。
                     """;
             StringBuilder source = new StringBuilder(entityCatalog(knownEntities)).append("\n章节原文：\n");
@@ -272,13 +274,16 @@ public class StructuredGraphExtractor {
                 || value.source.equals(value.target) || !StringUtils.hasText(value.type) || value.factIndex == null
                 || !StringUtils.hasText(value.evidence) || value.factIndex < 1 || value.factIndex > facts.size()) return null;
         String type = normalizeRelationType(value.type);
-        if (!Set.of("KNOWS", "SUPPORTS", "OPPOSES", "MENTORS", "SERVES", "FAMILY_OF", "TRAVELS_WITH", "INTERACTS_WITH").contains(type)) return null;
+        // 人物校准只发布可解释的具体关系；INTERACTS_WITH 是早期兜底类型，
+        // 会把“发生互动”这类没有语义的边重新写回图谱，因此在校准链路拒绝。
+        if (!Set.of("KNOWS", "PARENT_OF", "SPOUSE_OF", "SIBLING_OF", "FRIEND_OF", "COMPANION_OF",
+                "TEACHER_OF", "MASTER_OF", "SERVES").contains(type)) return null;
         ChapterFact fact = facts.get(value.factIndex - 1);
         String evidence = trimEvidence(value.evidence, fact.evidence());
         if (evidence == null || evidence.length() > 240 || !containsKnownEndpoint(evidence, value.source, knownEntities)
                 || !containsKnownEndpoint(evidence, value.target, knownEntities) || !relationEvidenceSignal(type, evidence)) return null;
         String source = value.source.trim(), target = value.target.trim();
-        if ("MENTORS".equals(type) && endpointDescribedAsLearner(evidence, source, knownEntities)) {
+        if (Set.of("TEACHER_OF", "MASTER_OF").contains(type) && endpointDescribedAsLearner(evidence, source, knownEntities)) {
             String swap = source; source = target; target = swap;
         }
         return new CharacterRelation(source, target, type,
@@ -307,14 +312,15 @@ public class StructuredGraphExtractor {
     private boolean relationEvidenceSignal(String type, String evidence) {
         String value = normalizeForEvidence(evidence);
         return switch (type) {
-            case "MENTORS" -> List.of("教他", "教她", "教导", "传授", "指点", "手把手", "徒弟", "弟子", "学生", "学徒", "读给", "讲解").stream().anyMatch(value::contains);
-            case "FAMILY_OF" -> explicitFamilyEvidence(value);
-            case "TRAVELS_WITH" -> List.of("同行", "一起走", "一起去", "结伴", "赶路", "并肩", "会合", "来到身边").stream().anyMatch(value::contains);
-            case "SUPPORTS" -> List.of("帮", "救", "护", "照顾", "支持", "赠", "替", "疗伤", "熬药").stream().anyMatch(value::contains);
-            case "OPPOSES" -> List.of("杀", "打", "砸", "仇", "敌", "追杀", "出手", "交手", "冲突", "阻止", "报仇").stream().anyMatch(value::contains);
+            case "TEACHER_OF" -> List.of("老师", "先生", "学生", "教导", "传授", "指点", "讲解").stream().anyMatch(value::contains);
+            case "MASTER_OF" -> List.of("师父", "师傅", "徒弟", "弟子", "学徒", "传授").stream().anyMatch(value::contains);
+            case "PARENT_OF" -> explicitFamilyEvidence(value) && List.of("父亲", "母亲", "爹", "娘", "父子", "父女", "母子", "母女", "儿子", "女儿").stream().anyMatch(value::contains);
+            case "SPOUSE_OF" -> List.of("夫妻", "夫君", "妻子", "丈夫", "娘子").stream().anyMatch(value::contains);
+            case "SIBLING_OF" -> List.of("亲兄", "亲弟", "亲姐", "亲妹", "哥哥", "弟弟", "姐姐", "妹妹", "兄妹", "姐弟").stream().anyMatch(value::contains);
+            case "FRIEND_OF" -> List.of("朋友", "好友", "挚友", "知己").stream().anyMatch(value::contains);
+            case "COMPANION_OF" -> List.of("同伴", "伙伴", "搭档", "队友").stream().anyMatch(value::contains);
             case "SERVES" -> List.of("效忠", "侍奉", "服侍", "属下", "主人", "侍女", "丫鬟").stream().anyMatch(value::contains);
             case "KNOWS" -> List.of("认识", "相识", "见过", "朋友", "熟悉", "知道").stream().anyMatch(value::contains);
-            case "INTERACTS_WITH" -> List.of("问", "答", "喊", "递", "交给", "约定", "商议", "争执").stream().anyMatch(value::contains);
             default -> false;
         };
     }

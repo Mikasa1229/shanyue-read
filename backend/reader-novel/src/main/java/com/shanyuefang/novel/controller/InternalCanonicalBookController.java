@@ -10,6 +10,8 @@ import com.shanyuefang.novel.service.CanonicalBookService;
 import com.shanyuefang.novel.service.NovelInternalAccess;
 import com.shanyuefang.novel.mapper.CanonicalBookMapper;
 import com.shanyuefang.novel.domain.entity.CanonicalBook;
+import com.shanyuefang.novel.domain.vo.SearchBookVO;
+import com.shanyuefang.novel.service.BookSourceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,6 +30,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class InternalCanonicalBookController {
     private final CanonicalBookService canonicalBookService;
+    private final BookSourceService bookSourceService;
     private final NovelInternalAccess internalAccess;
     private final CanonicalBookMapper canonicalBookMapper;
 
@@ -53,9 +56,11 @@ public class InternalCanonicalBookController {
         if (value.isBlank()) return R.ok(List.of());
         int boundedLimit = Math.max(1, Math.min(limit, 12));
         List<String> terms = searchTerms(value);
+        List<String> exclusions = exclusionTerms(value);
         List<CanonicalBook> catalog = canonicalBookMapper.selectList(com.baomidou.mybatisplus.core.toolkit.Wrappers.<CanonicalBook>lambdaQuery()
                 .ne(CanonicalBook::getMergeStatus, "MERGED").last("LIMIT 500"));
         List<Map<String, Object>> matched = readableSearchResults(catalog.stream()
+                .filter(book -> !isExcluded(book, exclusions))
                 .map(book -> Map.entry(book, relevance(book, value, terms)))
                 .filter(entry -> entry.getValue() > 0)
                 .sorted(Map.Entry.<CanonicalBook, Integer>comparingByValue().reversed())
@@ -63,9 +68,47 @@ public class InternalCanonicalBookController {
         // Natural-language recommendation constraints rarely match a title literally. In that case
         // return real readable catalog candidates and let the Agent disclose metadata limitations.
         if (matched.isEmpty() && isRecommendationRequest(value)) {
-            matched = readableSearchResults(catalog.stream(), boundedLimit);
+            matched = readableSearchResults(catalog.stream().filter(book -> !isExcluded(book, exclusions)), boundedLimit);
+        }
+        // A function call must be able to discover works that have not entered the local
+        // canonical catalog yet. Source search resolves every result to a canonical work.
+        if (matched.isEmpty()) {
+            matched = sourceDiscoveryResults(value, exclusions, boundedLimit);
         }
         return R.ok(matched);
+    }
+
+    private List<Map<String, Object>> sourceDiscoveryResults(String query, List<String> exclusions, int limit) {
+        String keyword = discoveryKeyword(query);
+        if (keyword.isBlank()) return List.of();
+        return bookSourceService.aggregateSearch(keyword, 1).stream()
+                .filter(book -> book.getCanonicalBookId() != null && book.getSourceId() != null
+                        && book.getBookUrl() != null && !book.getBookUrl().isBlank())
+                .filter(book -> !isExcluded(book.getName(), book.getAuthor(), exclusions))
+                .collect(java.util.stream.Collectors.toMap(
+                        book -> book.getCanonicalBookId() + "|" + book.getSourceId() + "|" + book.getBookUrl(),
+                        this::sourceResult, (left, right) -> left, java.util.LinkedHashMap::new))
+                .values().stream().limit(limit).toList();
+    }
+
+    private Map<String, Object> sourceResult(SearchBookVO book) {
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("canonicalBookId", book.getCanonicalBookId());
+        result.put("title", book.getName());
+        result.put("author", book.getAuthor() == null ? "" : book.getAuthor());
+        result.put("coverUrl", book.getCoverUrl() == null ? "" : book.getCoverUrl());
+        result.put("summary", book.getIntro() == null ? "" : book.getIntro());
+        result.put("sourceId", book.getSourceId());
+        result.put("sourceBookUrl", book.getBookUrl());
+        return result;
+    }
+
+    static String discoveryKeyword(String request) {
+        if (request == null) return "";
+        String normalized = request.replaceAll("本会话最近约束[:：].*$", "")
+                .replaceAll("(?:请|帮我|直接|推荐|搜索|搜书|找书|一本|几本|适合|今晚|读的|想读|想看|作品|小说|书源|里面|平台|可读|不要|不看|排除|别推荐|从)", " ")
+                .replaceAll("[《》\"'，。；！？,:：;]", " ").replaceAll("\\s+", " ").trim();
+        return normalized.length() > 40 ? normalized.substring(0, 40) : normalized;
     }
 
     private List<Map<String, Object>> readableSearchResults(java.util.stream.Stream<CanonicalBook> books, int limit) {
@@ -98,6 +141,30 @@ public class InternalCanonicalBookController {
                 .replaceAll("(请|帮我|一下|一本|几本|一点|比较|好看|有名|小说|网文|作品|书源|里面|能够|可以|搜索|搜到|推荐|想看|我要|要看|完结|短篇|长篇|换一本|换个|直接|热门|点击|引用|链接)", " ");
         return java.util.Arrays.stream(normalized.split("[^\\p{IsHan}a-z0-9]+"))
                 .map(String::trim).filter(term -> term.length() >= 2).distinct().limit(8).toList();
+    }
+
+    static List<String> exclusionTerms(String request) {
+        if (request == null || request.isBlank()) return List.of();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?:不要|不看|排除|别推荐)(?:《)?([^》，。；！？\\n]{1,24})(?:》)?")
+                .matcher(request.toLowerCase(java.util.Locale.ROOT));
+        List<String> values = new java.util.ArrayList<>();
+        while (matcher.find()) {
+            String value = matcher.group(1).replaceAll("(?:相关的?|这本|这类|作品|小说|书)$", "").trim();
+            if (!value.isBlank() && !value.contains("书架")) values.add(value);
+        }
+        return values.stream().distinct().limit(8).toList();
+    }
+
+    private boolean isExcluded(CanonicalBook book, List<String> exclusions) {
+        return isExcluded(book.getTitle(), book.getAuthor(), exclusions);
+    }
+
+    private boolean isExcluded(String bookTitle, String bookAuthor, List<String> exclusions) {
+        if (exclusions.isEmpty()) return false;
+        String title = bookTitle == null ? "" : bookTitle.toLowerCase(java.util.Locale.ROOT);
+        String author = bookAuthor == null ? "" : bookAuthor.toLowerCase(java.util.Locale.ROOT);
+        return exclusions.stream().anyMatch(value -> title.contains(value) || author.contains(value));
     }
 
     private int relevance(CanonicalBook book, String raw, List<String> terms) {

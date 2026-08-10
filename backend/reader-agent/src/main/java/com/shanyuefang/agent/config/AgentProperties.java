@@ -11,7 +11,7 @@ public class AgentProperties {
     /** Secret injected by the gateway on browser-facing Agent requests. */
     private String gatewayToken;
     /** Disabled until each configured OpenAI-compatible provider is verified for native function calls. */
-    private boolean nativeToolCallingEnabled = false;
+    private boolean nativeToolCallingEnabled = true;
     private String platformProvider = "deepseek";
     private String platformModel = "deepseek-chat";
     private String platformFastModel;

@@ -41,16 +41,24 @@ public class VectorKnowledgeStore {
     private final AtomicLong unavailableUntilMillis = new AtomicLong(0L);
 
     public void index(KnowledgeChunk chunk) {
-        if (!enabled()) return;
+        indexAll(chunk == null ? List.of() : List.of(chunk));
+    }
+
+    /** Bulk projection keeps an embedding-version migration from issuing one Milvus flush per chunk. */
+    public void indexAll(List<KnowledgeChunk> chunks) {
+        if (chunks == null || chunks.isEmpty() || !enabled()) return;
         MilvusVectorStore store = vectorStoreProvider.getIfAvailable();
         if (store == null) return;
         try {
-            Document document = new Document(String.valueOf(chunk.getId()), chunk.getContent(), Map.of(
-                    "canonicalBookId", chunk.getCanonicalBookId(), "chapterIndex", chunk.getChapterIndex(), "chunkId", chunk.getId()));
-            document.setEmbedding(readVector(chunk.getEmbeddingJson()));
-            runBounded(() -> { store.add(List.of(document)); return null; });
+            List<Document> documents = chunks.stream().map(chunk -> {
+                Document document = new Document(String.valueOf(chunk.getId()), chunk.getContent(), Map.of(
+                        "canonicalBookId", chunk.getCanonicalBookId(), "chapterIndex", chunk.getChapterIndex(), "chunkId", chunk.getId()));
+                document.setEmbedding(readVector(chunk.getEmbeddingJson()));
+                return document;
+            }).toList();
+            runBounded(() -> { store.add(documents); return null; });
         } catch (Exception exception) {
-            log.warn("LightRAG evidence-vector projection failed: chunkId={}", chunk.getId(), exception);
+            log.warn("LightRAG evidence-vector projection failed: chunks={}", chunks.size(), exception);
         }
     }
 

@@ -582,6 +582,13 @@ onMounted(async () => {
   margin-bottom: var(--space-6);
 }
 
+@media (min-width: 769px) {
+  .profile-main { min-height:0; }
+  .profile-main > .content-card:has(.checkin-calendar) { height:auto; box-sizing:border-box; overflow:visible; }
+  .profile-main > .content-card:has(.checkin-calendar) .content-title { margin-bottom: 14px; }
+  .profile-main > .content-card:has(.checkin-calendar) .checkin-calendar { max-height:none; box-sizing:border-box; overflow:visible; }
+}
+
 .auth-error {
   background: var(--vermilion-light);
   color: var(--vermilion);

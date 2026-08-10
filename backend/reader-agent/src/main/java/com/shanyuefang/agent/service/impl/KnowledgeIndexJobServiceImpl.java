@@ -81,6 +81,34 @@ public class KnowledgeIndexJobServiceImpl implements KnowledgeIndexJobService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KnowledgeIndexJob beginEmbeddingRebuild(long canonicalBookId) {
+        String version = agentProperties.getEmbeddingModelVersion();
+        String dedupeKey = "embedding-rebuild:" + canonicalBookId + ":" + version;
+        KnowledgeIndexJob job = jobMapper.selectOne(Wrappers.<KnowledgeIndexJob>lambdaQuery()
+                .eq(KnowledgeIndexJob::getDedupeKey, dedupeKey));
+        if (job == null) {
+            job = new KnowledgeIndexJob();
+            job.setId(SnowflakeIdUtil.next()); job.setCanonicalBookId(canonicalBookId);
+            job.setJobType("EMBEDDING_REBUILD"); job.setStatus("PENDING");
+            job.setPayloadJson(write(Map.of("canonicalBookId", canonicalBookId, "embeddingModelVersion", version)));
+            job.setRetryCount(0); job.setDedupeKey(dedupeKey); job.setCreatedAt(LocalDateTime.now()); job.setUpdatedAt(LocalDateTime.now());
+            jobMapper.insert(job);
+            return job;
+        }
+        if ("COMPLETED".equals(job.getStatus()) || "PROCESSING".equals(job.getStatus()) || "PENDING".equals(job.getStatus())) return job;
+        job.setStatus("PENDING");
+        job.setRetryCount((job.getRetryCount() == null ? 0 : job.getRetryCount()) + 1);
+        job.setErrorMessage(null); job.setUpdatedAt(LocalDateTime.now()); jobMapper.updateById(job);
+        return job;
+    }
+
+    @Override
+    public boolean claimEmbeddingRebuild(long jobId) {
+        return jobMapper.claimEmbeddingRebuild(jobId) == 1;
+    }
+
+    @Override
     public void complete(long jobId) {
         updateStatus(jobId, "COMPLETED", null);
     }
@@ -140,12 +168,11 @@ public class KnowledgeIndexJobServiceImpl implements KnowledgeIndexJobService {
     }
 
     private void updateStatus(long jobId, String status, String errorMessage) {
-        KnowledgeIndexJob job = new KnowledgeIndexJob();
-        job.setId(jobId);
-        job.setStatus(status);
-        job.setErrorMessage(errorMessage);
-        job.setUpdatedAt(LocalDateTime.now());
-        jobMapper.updateById(job);
+        jobMapper.update(null, Wrappers.<KnowledgeIndexJob>lambdaUpdate()
+                .eq(KnowledgeIndexJob::getId, jobId)
+                .set(KnowledgeIndexJob::getStatus, status)
+                .set(KnowledgeIndexJob::getErrorMessage, errorMessage)
+                .set(KnowledgeIndexJob::getUpdatedAt, LocalDateTime.now()));
     }
 
     private String write(IndexChapterDTO dto) {

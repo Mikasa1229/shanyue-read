@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Comparator;
 import java.time.LocalDateTime;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import com.shanyuefang.common.result.ResultCode;
 import jakarta.validation.Valid;
@@ -108,6 +109,24 @@ public class AgentAdminController {
         knowledgeService.clearGraph(canonicalBookId);
         bookKnowledgeBuildService.markCleared(canonicalBookId);
         return R.ok();
+    }
+    @PostMapping("/books/{canonicalBookId}/embeddings:rebuild")
+    public R<Map<String, Object>> rebuildEmbeddings(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId) {
+        adminAccess.requireAdmin(userId);
+        if (canonicalBookId <= 0) return R.fail(ResultCode.PARAM_ERROR, "Canonical book ID must be positive");
+        var job = indexJobService.beginEmbeddingRebuild(canonicalBookId);
+        if (!indexJobService.claimEmbeddingRebuild(job.getId())) {
+            return R.ok(Map.of("canonicalBookId", canonicalBookId, "jobId", job.getId(), "status", job.getStatus()));
+        }
+        CompletableFuture.runAsync(() -> {
+            try {
+                knowledgeService.reembedBookEvidence(canonicalBookId);
+                indexJobService.complete(job.getId());
+            } catch (Exception exception) {
+                indexJobService.fail(job.getId(), exception);
+            }
+        });
+        return R.ok(Map.of("canonicalBookId", canonicalBookId, "jobId", job.getId(), "status", "QUEUED"));
     }
     @GetMapping("/books/{canonicalBookId}/graph-review-claims")
     public R<List<GraphReviewClaimVO>> graphReviewClaims(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,

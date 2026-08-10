@@ -1,12 +1,12 @@
 package com.shanyuefang.agent.domain.dto;
 
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 @Data
 public class SaveShelfGroupDTO {
     @NotNull private Long canonicalBookId;
-    @Pattern(regexp = "FOLLOWING|SHORT_SESSION|WEEKEND|RESTART|CLEANUP|AUTO")
-    private String groupCode;
+    @Size(min = 1, max = 32)
+    private String groupName;
 }

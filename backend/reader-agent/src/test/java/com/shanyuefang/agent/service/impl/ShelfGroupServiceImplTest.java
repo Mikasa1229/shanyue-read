@@ -5,6 +5,7 @@ import com.shanyuefang.agent.domain.dto.SaveShelfGroupDTO;
 import com.shanyuefang.agent.domain.entity.AgentShelfGroup;
 import com.shanyuefang.agent.feign.NovelShelfFeignClient;
 import com.shanyuefang.agent.mapper.AgentShelfGroupMapper;
+import com.shanyuefang.agent.mapper.KnowledgeVectorProfileMapper;
 import com.shanyuefang.common.exception.BusinessException;
 import com.shanyuefang.common.result.R;
 import org.junit.jupiter.api.Test;
@@ -31,7 +32,7 @@ class ShelfGroupServiceImplTest {
 
         SaveShelfGroupDTO dto = new SaveShelfGroupDTO();
         dto.setCanonicalBookId(9L);
-        dto.setGroupCode("FOLLOWING");
+        dto.setGroupName("玄幻与仙侠");
 
         assertThrows(BusinessException.class, () -> service.save(1L, dto));
         verify(mapper, never()).insert(any(AgentShelfGroup.class));
@@ -45,29 +46,29 @@ class ShelfGroupServiceImplTest {
         ShelfGroupServiceImpl service = service(shelfClient, mapper);
         SaveShelfGroupDTO dto = new SaveShelfGroupDTO();
         dto.setCanonicalBookId(8L);
-        dto.setGroupCode("WEEKEND");
+        dto.setGroupName("周末书单");
 
         assertThrows(BusinessException.class, () -> service.save(1L, dto));
         verify(mapper, never()).insert(any(AgentShelfGroup.class));
     }
 
     @Test
-    void automaticGroupClearsOnlyAUsersManualOverrideAfterOwnershipCheck() {
+    void savesDirectoryOnlyAfterOwnershipCheck() {
         NovelShelfFeignClient shelfClient = mock(NovelShelfFeignClient.class);
         AgentShelfGroupMapper mapper = mock(AgentShelfGroupMapper.class);
         when(shelfClient.list(any(), anyLong())).thenReturn(R.ok(List.of(Map.of("canonicalBookId", 8L))));
         ShelfGroupServiceImpl service = service(shelfClient, mapper);
         SaveShelfGroupDTO dto = new SaveShelfGroupDTO();
         dto.setCanonicalBookId(8L);
-        dto.setGroupCode("AUTO");
+        dto.setGroupName("仙侠作品");
 
         assertDoesNotThrow(() -> service.save(1L, dto));
-        verify(mapper).delete(any());
+        verify(mapper).insert(any(AgentShelfGroup.class));
     }
 
     private ShelfGroupServiceImpl service(NovelShelfFeignClient shelfClient, AgentShelfGroupMapper mapper) {
         AgentProperties properties = new AgentProperties();
         properties.setInternalToken("test-token");
-        return new ShelfGroupServiceImpl(shelfClient, properties, mapper);
+        return new ShelfGroupServiceImpl(shelfClient, properties, mapper, mock(KnowledgeVectorProfileMapper.class));
     }
 }

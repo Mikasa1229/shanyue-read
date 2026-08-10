@@ -29,6 +29,7 @@ public interface KnowledgeService {
     KnowledgeGraphVO graph(long canonicalBookId, int currentChapter);
     List<ClueVO> clues(long canonicalBookId, int currentChapter);
     List<String> timeline(long canonicalBookId, int currentChapter);
+    String recapSummary(long canonicalBookId, int currentChapter);
     ReadingMapVO readingMap(long canonicalBookId, int currentChapter);
     List<SimilarBookVO> similarBooks(long canonicalBookId, int currentChapter, int limit);
     void rebuildGraph(long canonicalBookId);
@@ -51,6 +52,9 @@ public interface KnowledgeService {
 
     /** Repairs optional evidence projections without re-extracting or rewriting graph claims. */
     void reprojectEvidence(long canonicalBookId, int maxChunks);
+
+    /** Re-embeds durable chapter evidence after changing the configured embedding model. */
+    int reembedBookEvidence(long canonicalBookId);
 
     /** Rebuilds only the optional Neo4j projection from PostgreSQL's authoritative graph tables. */
     void reprojectGraph(long canonicalBookId);
