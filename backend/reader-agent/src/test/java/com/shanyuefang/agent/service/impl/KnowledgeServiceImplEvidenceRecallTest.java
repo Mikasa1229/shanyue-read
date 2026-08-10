@@ -91,6 +91,7 @@ class KnowledgeServiceImplEvidenceRecallTest {
         KnowledgeServiceImpl service = new KnowledgeServiceImpl(mock(KnowledgeDocumentMapper.class), chunks,
                 mock(KnowledgeClueMapper.class), mock(KnowledgeVectorProfileMapper.class), nodes, aliases,
                 mock(KnowledgeClueGraphLinkMapper.class), mock(LightRagCommunityMapper.class), mock(KnowledgeGraphEdgeMapper.class),
+                mock(KnowledgeRelationAssertionMapper.class),
                 embeddings, new ObjectMapper(), mock(GraphKnowledgeStore.class), mock(StructuredGraphExtractor.class),
                 mock(ProfileVectorService.class), mock(LightRagService.class), vectors, elasticsearch, reranker,
                 mock(CanonicalBookFeignClient.class), new AgentProperties());
@@ -125,7 +126,8 @@ class KnowledgeServiceImplEvidenceRecallTest {
                                          ElasticsearchKnowledgeStore elasticsearch, RerankerService reranker) {
         return new KnowledgeServiceImpl(mock(KnowledgeDocumentMapper.class), chunks, mock(KnowledgeClueMapper.class),
                 mock(KnowledgeVectorProfileMapper.class), mock(KnowledgeGraphNodeMapper.class), mock(KnowledgeEntityAliasMapper.class),
-                mock(KnowledgeClueGraphLinkMapper.class), mock(LightRagCommunityMapper.class), mock(KnowledgeGraphEdgeMapper.class), embeddings,
+                mock(KnowledgeClueGraphLinkMapper.class), mock(LightRagCommunityMapper.class), mock(KnowledgeGraphEdgeMapper.class),
+                mock(KnowledgeRelationAssertionMapper.class), embeddings,
                 new ObjectMapper(), mock(GraphKnowledgeStore.class), mock(StructuredGraphExtractor.class), mock(ProfileVectorService.class),
                 mock(LightRagService.class), vectors, elasticsearch, reranker, mock(CanonicalBookFeignClient.class), new AgentProperties());
     }

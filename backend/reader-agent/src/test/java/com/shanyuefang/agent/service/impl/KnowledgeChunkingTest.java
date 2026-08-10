@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class KnowledgeChunkingTest {
     @Test
@@ -26,5 +27,32 @@ class KnowledgeChunkingTest {
 
         assertThat(chunks).hasSizeGreaterThan(1);
         assertThat(chunks).allSatisfy(chunk -> assertThat(chunk.length()).isLessThanOrEqualTo(800));
+    }
+
+    @Test
+    void characterScenesKeepSentenceBoundariesInsteadOfSplittingActionEvidence() throws Exception {
+        KnowledgeServiceImpl service = service();
+        java.lang.reflect.Method method = KnowledgeServiceImpl.class.getDeclaredMethod("characterScenes", String.class);
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<String> scenes = (List<String>) method.invoke(service,
+                "林默扶住周青。周青将密函交给林默。" + "甲".repeat(710) + "。黎青带林默离开港口。");
+
+        assertThat(scenes).allMatch(scene -> scene.endsWith("。"));
+        assertThat(scenes).anyMatch(scene -> scene.contains("林默扶住周青。周青将密函交给林默。"));
+    }
+
+    private KnowledgeServiceImpl service() {
+        return new KnowledgeServiceImpl(mock(com.shanyuefang.agent.mapper.KnowledgeDocumentMapper.class),
+                mock(com.shanyuefang.agent.mapper.KnowledgeChunkMapper.class), mock(com.shanyuefang.agent.mapper.KnowledgeClueMapper.class),
+                mock(com.shanyuefang.agent.mapper.KnowledgeVectorProfileMapper.class), mock(com.shanyuefang.agent.mapper.KnowledgeGraphNodeMapper.class),
+                mock(com.shanyuefang.agent.mapper.KnowledgeEntityAliasMapper.class), mock(com.shanyuefang.agent.mapper.KnowledgeClueGraphLinkMapper.class),
+                mock(com.shanyuefang.agent.mapper.LightRagCommunityMapper.class), mock(com.shanyuefang.agent.mapper.KnowledgeGraphEdgeMapper.class),
+                mock(com.shanyuefang.agent.mapper.KnowledgeRelationAssertionMapper.class), mock(com.shanyuefang.agent.service.EmbeddingService.class),
+                new com.fasterxml.jackson.databind.ObjectMapper(), mock(com.shanyuefang.agent.service.GraphKnowledgeStore.class),
+                mock(com.shanyuefang.agent.service.StructuredGraphExtractor.class), mock(com.shanyuefang.agent.service.ProfileVectorService.class),
+                mock(com.shanyuefang.agent.service.LightRagService.class), mock(com.shanyuefang.agent.service.VectorKnowledgeStore.class),
+                mock(com.shanyuefang.agent.service.ElasticsearchKnowledgeStore.class), mock(com.shanyuefang.agent.service.RerankerService.class),
+                mock(com.shanyuefang.agent.feign.CanonicalBookFeignClient.class), new com.shanyuefang.agent.config.AgentProperties());
     }
 }

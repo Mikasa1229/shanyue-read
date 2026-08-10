@@ -9,6 +9,7 @@ import com.shanyuefang.agent.domain.entity.KnowledgeClue;
 import com.shanyuefang.agent.domain.entity.KnowledgeVectorProfile;
 import com.shanyuefang.agent.domain.entity.KnowledgeDocument;
 import com.shanyuefang.agent.domain.entity.KnowledgeGraphEdge;
+import com.shanyuefang.agent.domain.entity.KnowledgeRelationAssertion;
 import com.shanyuefang.agent.domain.entity.KnowledgeGraphNode;
 import com.shanyuefang.agent.domain.entity.KnowledgeEntityAlias;
 import com.shanyuefang.agent.domain.entity.KnowledgeClueGraphLink;
@@ -24,6 +25,7 @@ import com.shanyuefang.agent.mapper.KnowledgeClueMapper;
 import com.shanyuefang.agent.mapper.KnowledgeVectorProfileMapper;
 import com.shanyuefang.agent.mapper.KnowledgeDocumentMapper;
 import com.shanyuefang.agent.mapper.KnowledgeGraphEdgeMapper;
+import com.shanyuefang.agent.mapper.KnowledgeRelationAssertionMapper;
 import com.shanyuefang.agent.mapper.KnowledgeGraphNodeMapper;
 import com.shanyuefang.agent.mapper.KnowledgeEntityAliasMapper;
 import com.shanyuefang.agent.mapper.KnowledgeClueGraphLinkMapper;
@@ -100,6 +102,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final KnowledgeClueGraphLinkMapper clueGraphLinkMapper;
     private final LightRagCommunityMapper communityMapper;
     private final KnowledgeGraphEdgeMapper edgeMapper;
+    private final KnowledgeRelationAssertionMapper relationAssertionMapper;
     private final EmbeddingService embeddingService;
     private final ObjectMapper objectMapper;
     private final GraphKnowledgeStore graphKnowledgeStore;
@@ -157,6 +160,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery()
                 .eq(KnowledgeGraphEdge::getCanonicalBookId, dto.getCanonicalBookId())
                 .eq(KnowledgeGraphEdge::getFirstChapter, dto.getChapterIndex()));
+        relationAssertionMapper.delete(Wrappers.<KnowledgeRelationAssertion>lambdaQuery()
+                .eq(KnowledgeRelationAssertion::getCanonicalBookId, dto.getCanonicalBookId())
+                .eq(KnowledgeRelationAssertion::getChapterIndex, dto.getChapterIndex()));
 
         KnowledgeDocument document = new KnowledgeDocument();
         document.setId(SnowflakeIdUtil.next());
@@ -828,6 +834,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         // Rebuild the relational authority first. Optional projections remain readable if a model
         // call fails and are replaced only after every chapter has been extracted successfully.
         edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery().eq(KnowledgeGraphEdge::getCanonicalBookId, canonicalBookId));
+        relationAssertionMapper.delete(Wrappers.<KnowledgeRelationAssertion>lambdaQuery()
+                .eq(KnowledgeRelationAssertion::getCanonicalBookId, canonicalBookId));
         nodeMapper.delete(Wrappers.<KnowledgeGraphNode>lambdaQuery().eq(KnowledgeGraphNode::getCanonicalBookId, canonicalBookId));
         clueMapper.delete(Wrappers.<KnowledgeClue>lambdaQuery().eq(KnowledgeClue::getCanonicalBookId, canonicalBookId));
         clueGraphLinkMapper.delete(Wrappers.<KnowledgeClueGraphLink>lambdaQuery().eq(KnowledgeClueGraphLink::getCanonicalBookId, canonicalBookId));
@@ -921,6 +929,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         clueGraphLinkMapper.delete(Wrappers.<KnowledgeClueGraphLink>lambdaQuery().eq(KnowledgeClueGraphLink::getCanonicalBookId, canonicalBookId));
         clueMapper.delete(Wrappers.<KnowledgeClue>lambdaQuery().eq(KnowledgeClue::getCanonicalBookId, canonicalBookId));
         edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery().eq(KnowledgeGraphEdge::getCanonicalBookId, canonicalBookId));
+        relationAssertionMapper.delete(Wrappers.<KnowledgeRelationAssertion>lambdaQuery()
+                .eq(KnowledgeRelationAssertion::getCanonicalBookId, canonicalBookId));
         nodeMapper.delete(Wrappers.<KnowledgeGraphNode>lambdaQuery().eq(KnowledgeGraphNode::getCanonicalBookId, canonicalBookId));
     }
 
@@ -1018,24 +1028,63 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         List<String> relationSignals = List.of("教", "传授", "指点", "引导", "同行", "结伴", "帮", "救", "护", "照看", "照拂",
                 "引荐", "雇", "干活", "邻居", "隔壁", "赠", "杀", "仇", "追杀", "交手", "对峙", "父亲", "母亲", "兄弟",
                 "姐妹", "效忠", "侍奉", "主人", "朋友", "认识", "相识");
-        int width = 720, step = 560;
         List<CharacterTextWindow> windows = new ArrayList<>();
-        for (int offset = 0; offset < normalized.length(); offset += step) {
-            int end = Math.min(normalized.length(), offset + width);
-            String text = normalized.substring(offset, end);
+        List<String> scenes = characterScenes(normalized);
+        for (int offset = 0; offset < scenes.size(); offset++) {
+            String text = scenes.get(offset);
             int named = (int) knownNames.stream().filter(text::contains).limit(5).count();
             int characterPairs = named < 2 ? 0 : named * (named - 1) / 2;
             int identity = (int) identitySignals.stream().filter(text::contains).limit(4).count();
             int relation = (int) relationSignals.stream().filter(text::contains).limit(4).count();
             windows.add(new CharacterTextWindow(text, identity * 8 + Math.min(named, 3) * 3 + characterPairs * 4 + relation * 2, offset));
-            if (end == normalized.length()) break;
         }
-        // Four windows preserve more independent character-pair evidence in long chapters;
-        // the bounded model input still limits a character calibration pass to 48 facts.
-        return windows.stream().sorted(Comparator.comparingInt(CharacterTextWindow::score).reversed()
-                        .thenComparingInt(CharacterTextWindow::offset)).limit(4)
-                .sorted(Comparator.comparingInt(CharacterTextWindow::offset))
+        // Favor high-signal scenes while preserving diverse entity pairs. This prevents one long,
+        // repetitive neighbor scene from taking every character-calibration slot in a chapter.
+        Set<String> coveredPairs = new LinkedHashSet<>();
+        List<CharacterTextWindow> selected = new ArrayList<>();
+        windows.stream().sorted(Comparator.comparingInt(CharacterTextWindow::score).reversed()
+                        .thenComparingInt(CharacterTextWindow::offset)).forEach(window -> {
+                    Set<String> pairs = characterPairKeys(window.text(), knownNames);
+                    boolean addsPair = pairs.stream().anyMatch(pair -> !coveredPairs.contains(pair));
+                    if (selected.size() < 4 && (addsPair || selected.isEmpty())) {
+                        selected.add(window); coveredPairs.addAll(pairs);
+                    }
+                });
+        if (selected.size() < 4) windows.stream().sorted(Comparator.comparingInt(CharacterTextWindow::score).reversed()
+                        .thenComparingInt(CharacterTextWindow::offset)).filter(window -> !selected.contains(window))
+                .limit(4 - selected.size()).forEach(selected::add);
+        return selected.stream().sorted(Comparator.comparingInt(CharacterTextWindow::offset))
                 .map(window -> new StructuredGraphExtractor.ChapterFact(null, chapter, window.text())).toList();
+    }
+
+    /** Splits at natural sentence boundaries so relation evidence is not cut mid-dialogue or action. */
+    private List<String> characterScenes(String content) {
+        List<String> sentences = new ArrayList<>();
+        Matcher matcher = Pattern.compile("[^。！？!?]+[。！？!?]?").matcher(content);
+        while (matcher.find()) {
+            String sentence = matcher.group().trim();
+            if (!sentence.isEmpty()) sentences.add(sentence);
+        }
+        if (sentences.isEmpty()) return List.of(content);
+        List<String> scenes = new ArrayList<>();
+        StringBuilder scene = new StringBuilder();
+        for (String sentence : sentences) {
+            if (!scene.isEmpty() && scene.length() + sentence.length() > 720) {
+                scenes.add(scene.toString()); scene = new StringBuilder();
+            }
+            scene.append(sentence);
+        }
+        if (!scene.isEmpty()) scenes.add(scene.toString());
+        return scenes;
+    }
+
+    private Set<String> characterPairKeys(String text, Set<String> knownNames) {
+        List<String> names = knownNames.stream().filter(text::contains).sorted().limit(5).toList();
+        Set<String> pairs = new LinkedHashSet<>();
+        for (int left = 0; left < names.size(); left++) for (int right = left + 1; right < names.size(); right++) {
+            pairs.add(names.get(left) + "\u0000" + names.get(right));
+        }
+        return pairs;
     }
 
     /** Selects co-mentioned known people for model review; it does not claim that a relationship exists. */
@@ -1135,6 +1184,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery().eq(KnowledgeGraphEdge::getCanonicalBookId, bookId)
                 .and(query -> query.eq(KnowledgeGraphEdge::getSourceNodeId, mention.getId()).or()
                         .eq(KnowledgeGraphEdge::getTargetNodeId, mention.getId())));
+        relationAssertionMapper.delete(Wrappers.<KnowledgeRelationAssertion>lambdaQuery().eq(KnowledgeRelationAssertion::getCanonicalBookId, bookId)
+                .and(query -> query.eq(KnowledgeRelationAssertion::getSourceNodeId, mention.getId()).or()
+                        .eq(KnowledgeRelationAssertion::getTargetNodeId, mention.getId())));
         aliasMapper.delete(Wrappers.<KnowledgeEntityAlias>lambdaQuery().eq(KnowledgeEntityAlias::getCanonicalBookId, bookId)
                 .eq(KnowledgeEntityAlias::getNodeId, mention.getId()));
         clueGraphLinkMapper.delete(Wrappers.<KnowledgeClueGraphLink>lambdaQuery().eq(KnowledgeClueGraphLink::getCanonicalBookId, bookId)
@@ -1336,6 +1388,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         clueMapper.delete(Wrappers.<KnowledgeClue>lambdaQuery().eq(KnowledgeClue::getCanonicalBookId, canonicalBookId));
         clueGraphLinkMapper.delete(Wrappers.<KnowledgeClueGraphLink>lambdaQuery().eq(KnowledgeClueGraphLink::getCanonicalBookId, canonicalBookId));
         edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery().eq(KnowledgeGraphEdge::getCanonicalBookId, canonicalBookId));
+        relationAssertionMapper.delete(Wrappers.<KnowledgeRelationAssertion>lambdaQuery()
+                .eq(KnowledgeRelationAssertion::getCanonicalBookId, canonicalBookId));
         nodeMapper.delete(Wrappers.<KnowledgeGraphNode>lambdaQuery().eq(KnowledgeGraphNode::getCanonicalBookId, canonicalBookId));
     }
 
@@ -1751,6 +1805,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     private void upsertEdge(long bookId, int chapter, KnowledgeGraphNode left, KnowledgeGraphNode right, String relation, String content, double confidence, String sourceModelVersion) {
+        persistVerifiedRelationAssertion(bookId, chapter, left, right, relation, content, confidence, sourceModelVersion);
         String edgeKey = bookId + ":" + left.getId() + ":" + right.getId() + ":" + relation;
         RebuildContext context = rebuildContext.get();
         KnowledgeGraphEdge edge = context == null ? null : context.edges.get(edgeKey);
@@ -1771,6 +1826,26 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             if (context == null) graphKnowledgeStore.upsertEdge(edge);
         }
         if (context != null) context.edges.put(edgeKey, edge);
+    }
+
+    /**
+     * Stores the atomic statement before updating the compact graph projection. The deterministic
+     * verifier is intentionally narrow: it accepts only evidence already validated upstream and
+     * leaves semantic re-verification available as a separate later stage.
+     */
+    private void persistVerifiedRelationAssertion(long bookId, int chapter, KnowledgeGraphNode source,
+                                                  KnowledgeGraphNode target, String relation, String evidence,
+                                                  double confidence, String extractionModelVersion) {
+        String normalizedEvidence = excerpt(evidence, 240);
+        if (source == null || target == null || !StringUtils.hasText(relation) || !StringUtils.hasText(normalizedEvidence)) return;
+        KnowledgeRelationAssertion assertion = new KnowledgeRelationAssertion();
+        assertion.setId(SnowflakeIdUtil.next()); assertion.setCanonicalBookId(bookId);
+        assertion.setSourceNodeId(source.getId()); assertion.setTargetNodeId(target.getId()); assertion.setRelation(relation);
+        assertion.setChapterIndex(Math.max(0, chapter)); assertion.setEvidence(normalizedEvidence);
+        assertion.setEvidenceHash(sha256(normalizedEvidence)); assertion.setConfidence(Math.max(0D, Math.min(1D, confidence)));
+        assertion.setExtractionModelVersion(safe(extractionModelVersion)); assertion.setVerifierVersion("evidence-gate-v1");
+        assertion.setVerificationStatus("VERIFIED"); assertion.setCreatedAt(LocalDateTime.now()); assertion.setUpdatedAt(LocalDateTime.now());
+        relationAssertionMapper.insertIfAbsent(assertion);
     }
 
     private static final class RebuildContext {

@@ -323,6 +323,7 @@ public class StructuredGraphExtractor {
         String evidence = trimEvidence(value.evidence, fact.evidence());
         if (evidence == null || evidence.length() > 240 || !containsKnownEndpoint(evidence, value.source, knownEntities)
                 || !containsKnownEndpoint(evidence, value.target, knownEntities) || !relationEvidenceSignal(type, evidence)
+                || ("KNOWS".equals(type) && !explicitKnowledgeRelation(evidence, value.source, value.target, knownEntities))
                 || relationEvidenceExplicitlyNegated(type, evidence)) return null;
         String source = value.source.trim(), target = value.target.trim();
         if (Set.of("TEACHER_OF", "MASTER_OF").contains(type) && endpointDescribedAsLearner(evidence, source, knownEntities)) {
@@ -362,7 +363,8 @@ public class StructuredGraphExtractor {
             case "FRIEND_OF" -> List.of("朋友", "好友", "挚友", "知己").stream().anyMatch(value::contains);
             case "COMPANION_OF" -> List.of("同伴", "伙伴", "搭档", "队友").stream().anyMatch(value::contains);
             case "SERVES" -> List.of("效忠", "侍奉", "服侍", "属下", "主人", "侍女", "丫鬟").stream().anyMatch(value::contains);
-            case "KNOWS" -> List.of("认识", "相识", "见过", "朋友", "熟悉", "知道", "邻居", "隔壁").stream().anyMatch(value::contains);
+            // "知道某人做了什么" and a chance encounter do not establish a social relation.
+            case "KNOWS" -> List.of("认识", "相识", "熟识", "熟悉", "朋友", "邻居", "隔壁").stream().anyMatch(value::contains);
             case "NEIGHBOR_OF" -> List.of("邻居", "隔壁", "毗邻", "隔墙").stream().anyMatch(value::contains);
             case "GUIDES" -> List.of("引导", "教导", "教诲", "指点", "讲解", "劝说", "嘱咐").stream().anyMatch(value::contains);
             case "HELPS" -> List.of("帮", "帮助", "帮忙", "引荐", "提了提", "答应", "陪", "替", "照应").stream().anyMatch(value::contains);
@@ -373,6 +375,44 @@ public class StructuredGraphExtractor {
             case "EMPLOYS" -> List.of("雇", "工钱", "干活", "做工", "收学徒").stream().anyMatch(value::contains);
             default -> false;
         };
+    }
+
+    /**
+     * A generic relation needs a local, explicit statement. This keeps a character's knowledge
+     * of a fact (or merely seeing another character) from becoming a durable KNOWS graph edge.
+     */
+    private boolean explicitKnowledgeRelation(String evidence, String source, String target,
+                                              List<EntityContext> knownEntities) {
+        String compact = normalizeForEvidence(evidence);
+        List<String> sourceMentions = endpointMentions(source, knownEntities);
+        List<String> targetMentions = endpointMentions(target, knownEntities);
+        for (String left : sourceMentions) {
+            for (String right : targetMentions) {
+                if (explicitKnowledgeRelation(compact, normalizeForEvidence(left), normalizeForEvidence(right))) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean explicitKnowledgeRelation(String evidence, String source, String target) {
+        if (!StringUtils.hasText(source) || !StringUtils.hasText(target)) return false;
+        String left = java.util.regex.Pattern.quote(source);
+        String right = java.util.regex.Pattern.quote(target);
+        String relation = "(?:认识|相识|熟识|熟悉|是.{0,6}(?:朋友|邻居)|(?:朋友|邻居|隔壁))";
+        // The endpoint and the relation phrase must form one short clause in either order.
+        return evidence.matches(".*(?:" + left + ".{0,18}" + relation + ".{0,18}" + right
+                + "|" + right + ".{0,18}" + relation + ".{0,18}" + left
+                + "|" + left + ".{0,12}(?:与|和|跟).{0,12}" + right + ".{0,18}" + relation
+                + "|" + right + ".{0,12}(?:与|和|跟).{0,12}" + left + ".{0,18}" + relation + ").*");
+    }
+
+    private List<String> endpointMentions(String endpoint, List<EntityContext> knownEntities) {
+        List<String> mentions = new ArrayList<>();
+        if (StringUtils.hasText(endpoint)) mentions.add(endpoint.trim());
+        if (knownEntities != null) knownEntities.stream().filter(entity -> endpoint.equals(entity.name()))
+                .flatMap(entity -> entity.aliases() == null ? java.util.stream.Stream.empty() : entity.aliases().stream())
+                .filter(StringUtils::hasText).map(String::trim).forEach(mentions::add);
+        return mentions.stream().distinct().toList();
     }
 
     /** A respectful title or a future possibility must not manufacture a teacher/apprentice edge. */

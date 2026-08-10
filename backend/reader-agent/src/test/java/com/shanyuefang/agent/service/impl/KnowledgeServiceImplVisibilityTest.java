@@ -156,7 +156,8 @@ class KnowledgeServiceImplVisibilityTest {
         return new KnowledgeServiceImpl(
                 mock(KnowledgeDocumentMapper.class), mock(KnowledgeChunkMapper.class), mock(KnowledgeClueMapper.class),
                 mock(KnowledgeVectorProfileMapper.class), nodes, aliases,
-                mock(KnowledgeClueGraphLinkMapper.class), mock(LightRagCommunityMapper.class), mock(KnowledgeGraphEdgeMapper.class), mock(EmbeddingService.class),
+                mock(KnowledgeClueGraphLinkMapper.class), mock(LightRagCommunityMapper.class), mock(KnowledgeGraphEdgeMapper.class),
+                mock(com.shanyuefang.agent.mapper.KnowledgeRelationAssertionMapper.class), mock(EmbeddingService.class),
                 new ObjectMapper(), graph, mock(StructuredGraphExtractor.class), profiles,
                 mock(LightRagService.class), mock(VectorKnowledgeStore.class), mock(ElasticsearchKnowledgeStore.class),
                 mock(RerankerService.class), mock(CanonicalBookFeignClient.class), properties);

@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StructuredGraphExtractorTest {
     @Test
@@ -97,5 +99,19 @@ class StructuredGraphExtractorTest {
         assertEquals("黑衣少女", extraction.identities().get(0).mention());
         assertEquals("TEACHER_OF", extraction.relations().get(0).type());
         assertEquals(15, extraction.relations().get(0).evidence().get(0).chapterIndex());
+    }
+
+    @Test
+    void onlyAcceptsExplicitAndLocallyBoundKnowledgeRelations() throws Exception {
+        StructuredGraphExtractor extractor = new StructuredGraphExtractor(null, null);
+        java.lang.reflect.Method method = StructuredGraphExtractor.class.getDeclaredMethod(
+                "explicitKnowledgeRelation", String.class, String.class, String.class);
+        method.setAccessible(true);
+
+        assertTrue((boolean) method.invoke(extractor, "林默认识周青，两人是多年的朋友。", "林默", "周青"));
+        assertTrue((boolean) method.invoke(extractor, "林默与周青是隔壁邻居。", "林默", "周青"));
+        assertFalse((boolean) method.invoke(extractor, "林默知道周青去了城外。", "林默", "周青"));
+        assertFalse((boolean) method.invoke(extractor, "林默看见周青后，没有停下脚步。", "林默", "周青"));
+        assertFalse((boolean) method.invoke(extractor, "林默对周青的评价令旁人意外。", "林默", "周青"));
     }
 }
