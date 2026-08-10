@@ -1012,8 +1012,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             if (StringUtils.hasText(entity.name())) knownNames.add(entity.name());
             if (entity.aliases() != null) entity.aliases().stream().filter(StringUtils::hasText).forEach(knownNames::add);
         }
-        List<String> identitySignals = List.of("黑衣少女", "白衣少年", "锦衣少年", "年轻道人", "老道人", "少女", "少年",
-                "姑娘", "公子", "先生", "师父", "师傅", "徒弟", "名叫", "叫作", "自称", "身份", "原来是", "正是");
+        // These are linguistic disclosure markers rather than descriptions from any one novel.
+        List<String> identitySignals = List.of("名叫", "叫作", "自称", "身份", "原来是", "正是", "化名", "真名", "本名",
+                "身份揭晓", "身份暴露", "竟然是");
         List<String> relationSignals = List.of("教", "传授", "指点", "引导", "同行", "结伴", "帮", "救", "护", "照看", "照拂",
                 "引荐", "雇", "干活", "邻居", "隔壁", "赠", "杀", "仇", "追杀", "交手", "对峙", "父亲", "母亲", "兄弟",
                 "姐妹", "效忠", "侍奉", "主人", "朋友", "认识", "相识");

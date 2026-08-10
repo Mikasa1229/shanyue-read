@@ -189,7 +189,9 @@ public class StructuredGraphExtractor {
                 if (evidence.isEmpty() || candidate.signal.length() < 8 || candidate.signal.length() > 48) continue;
                 clues.add(new ClueCandidate(candidate.signal.trim(), candidate.unresolvedReason.trim(), evidence, clamp(candidate.confidence)));
             }
-            return new ClueExtraction(clues.stream().filter(this::significantClue).limit(2).toList());
+            // The model has already performed the narrative significance judgement against
+            // verbatim evidence. Do not apply a title-specific keyword whitelist here.
+            return new ClueExtraction(clues.stream().limit(2).toList());
         } catch (Exception exception) {
             log.warn("Clue window extraction failed", exception);
             return ClueExtraction.empty();
@@ -237,7 +239,7 @@ public class StructuredGraphExtractor {
         try {
             String instructions = """
                     你是中文小说人物知识校准器。输入是连续章节原文和此前已确认实体目录。只返回 JSON：{"identities":[],"relations":[]}，不要 Markdown。
-                    identities 每项只含 canonicalName,mention,factIndex,evidence,confidence。仅当原文能够确认较早的描述性称呼与后来正式姓名属于同一人物时输出，例如前文持续称“黑衣少女”，同一叙事链后来明确称“宁姚”。canonicalName 必须是正式姓名，mention 必须是描述性称呼；两者不可只是同场出现的人名，不可凭性别、动作或语义相似猜测。
+                    identities 每项只含 canonicalName,mention,factIndex,evidence,confidence。仅当原文能够确认较早的描述性称呼与后来正式姓名属于同一人物时输出。canonicalName 必须是正式姓名，mention 必须是描述性称呼；两者不可只是同场出现的人名，不可凭性别、动作或语义相似猜测。
                     relations 每项只含 source,target,type,factIndex,evidence,confidence。source 和 target 必须是人物正式姓名或已确认称呼。type 只能为 PARENT_OF、SPOUSE_OF、SIBLING_OF、FRIEND_OF、COMPANION_OF、TEACHER_OF、MASTER_OF、SERVES、KNOWS、NEIGHBOR_OF、GUIDES、HELPS、PROTECTS、OPPOSES、TRAVELS_WITH、CARETAKES、EMPLOYS。
                     同时抽取两层可解释关系：(1) 跨场景仍成立的社会或身份关系；(2) 有直接文本依据的阶段性叙事关系，例如邻里、具体帮助、保护、引导、敌对、实际同行、照看或提供工作。普通对话、仅同场出现、一次无后果的动作不能输出。PARENT_OF 必须是“父母 -> 子女”，TEACHER_OF 是“老师 -> 学生”，MASTER_OF 是“师父 -> 徒弟”，SERVES 是“效忠者 -> 被效忠者”。GUIDES 不能冒充 TEACHER_OF 或 MASTER_OF；若原文没有师徒成立，只能用 GUIDES。NEIGHBOR_OF 和 TRAVELS_WITH 为双向语义，其他关系按动作方向输出。没有直接证据就不输出，宁缺毋滥。
                     evidence 必须是对应 factIndex 中逐字连续的短原文，最多120字，且直接支持身份等价或关系，不能返回整章。关系 evidence 必须出现两个端点名称或实体目录中的已确认称呼，并包含能说明该关系的动作、称谓或结构性事实。若片段明确说“尚未正式成为徒弟”“没有收徒机会”等否定，绝不可输出 TEACHER_OF 或 MASTER_OF。下方“优先审查的人物对”只是根据同段共现筛出的候选，你必须独立判断：有证据才输出，没证据就不输出；不要为凑数量臆造。不得使用窗口外剧情、百科知识或常识。先覆盖不同人物对，再增加同一人物对的多个关系；宁缺毋滥，最多2个身份归并和12条关系。
@@ -390,13 +392,6 @@ public class StructuredGraphExtractor {
         return List.of("父亲", "母亲", "爹叫", "娘叫", "父子", "父女", "母子", "母女", "亲兄", "亲弟", "亲姐", "亲妹",
                 "哥哥", "弟弟", "姐姐", "妹妹", "夫妻", "夫君", "妻子", "丈夫", "儿子", "女儿", "叔叔", "姑姑")
                 .stream().anyMatch(evidence::contains);
-    }
-
-    private boolean significantClue(ClueCandidate clue) {
-        String value = clue.signal() + clue.unresolvedReason();
-        if (value.contains("家长里短") || value.contains("儿媳") || value.contains("婆媳") || value.contains("态度恶劣")) return false;
-        return List.of("陈平安", "宁姚", "齐静春", "刘羡阳", "宋集薪", "顾粲", "小镇", "本命", "身份", "幕后", "真相",
-                "秘密", "异常", "危机", "承诺", "剑", "瓷", "槐", "铁锁", "牌坊", "老猿").stream().anyMatch(value::contains);
     }
 
     private ModelExtraction callExtractionWithRetry(OpenAiChatClient client, OpenAiChatOptions options,
