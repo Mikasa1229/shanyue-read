@@ -21,6 +21,7 @@ import com.shanyuefang.agent.mapper.KnowledgeGraphNodeMapper;
 import com.shanyuefang.agent.mapper.UserModelConfigMapper;
 import com.shanyuefang.agent.service.ApiKeyCipher;
 import com.shanyuefang.agent.service.BookKnowledgeBuildService;
+import com.shanyuefang.agent.service.BookKnowledgeBuildProgressService;
 import com.shanyuefang.agent.service.KnowledgeService;
 import com.shanyuefang.agent.service.StructuredGraphExtractor;
 import com.shanyuefang.common.exception.BusinessException;
@@ -69,6 +70,9 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
     private final CommentPublishFeignClient commentPublishClient;
     private final CanonicalBookFeignClient canonicalBookClient;
     private final RabbitTemplate rabbitTemplate;
+    /** Non-final for compatibility with focused constructor-based unit tests. */
+    @org.springframework.beans.factory.annotation.Autowired
+    private BookKnowledgeBuildProgressService progressService;
 
     /** Requeue durable work left between delivery and acknowledgement, and fail only a genuinely interrupted worker. */
     @EventListener(ApplicationReadyEvent.class)
@@ -341,6 +345,10 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
             if (PLATFORM.equals(task.getModelMode())) settle(task);
             if (Boolean.TRUE.equals(task.getIsPublic())) publishShare(task);
         } catch (Exception exception) {
+            // Per-chapter progress is committed independently; reload it before recording a terminal
+            // failure so an in-memory task object cannot overwrite the visible count with zero.
+            BookKnowledgeBuildTask latest = taskMapper.selectById(task.getId());
+            if (latest != null && latest.getCompletedChapters() != null) task.setCompletedChapters(latest.getCompletedChapters());
             task.setStatus("FAILED"); task.setErrorMessage(safeMessage(exception));
             task.setMessage("构建失败：" + task.getErrorMessage());
             task.setCompletedAt(LocalDateTime.now()); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "FAILED", task.getCompletedChapters(), task.getErrorMessage());
@@ -359,7 +367,16 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         String message = completed >= task.getTotalChapters()
                 ? "已完成 " + completed + " / " + task.getTotalChapters() + " 章的大模型关系抽取"
                 : "已完成 " + completed + " / " + task.getTotalChapters() + " 章，正在分析第 " + (task.getStartChapter() + completed) + " 章";
-        task.setMessage(message); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "RUNNING", completed, null);
+        task.setMessage(message); task.setUpdatedAt(LocalDateTime.now());
+        // buildGraphRange holds one transaction for graph consistency. Persist this small task update in
+        // an independent transaction so the two-second UI poll does not wait for every chapter to finish.
+        if (progressService != null) {
+            progressService.record(task.getId(), task.getCanonicalBookId(), task.getTotalChapters(),
+                    task.getStartChapter(), completed);
+        } else {
+            taskMapper.updateById(task);
+            updateSpace(task, "RUNNING", completed, null);
+        }
     }
     private void recordCoverage(long canonicalBookId, List<Integer> chapterIndexes) {
         for (Integer chapterIndex : chapterIndexes) {

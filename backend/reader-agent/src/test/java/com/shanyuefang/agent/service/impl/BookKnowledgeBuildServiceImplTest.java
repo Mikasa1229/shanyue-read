@@ -20,6 +20,7 @@ import com.shanyuefang.agent.mapper.KnowledgeGraphNodeMapper;
 import com.shanyuefang.agent.mapper.UserModelConfigMapper;
 import com.shanyuefang.agent.service.ApiKeyCipher;
 import com.shanyuefang.agent.service.KnowledgeService;
+import com.shanyuefang.agent.service.BookKnowledgeBuildProgressService;
 import com.shanyuefang.agent.config.KnowledgeMessagingConfig;
 import com.shanyuefang.common.result.R;
 import com.shanyuefang.common.exception.BusinessException;
@@ -286,6 +287,26 @@ class BookKnowledgeBuildServiceImplTest {
         assertEquals(false, service.consumeQueuedTask(71L));
 
         verify(knowledge, never()).buildGraphRange(any(Long.class), any(Integer.class), any(Integer.class), any(), any());
+    }
+
+    @Test
+    void chapterCompletionIsPersistedImmediatelyForTaskPolling() throws Exception {
+        BookKnowledgeBuildTaskMapper tasks = mock(BookKnowledgeBuildTaskMapper.class);
+        BookKnowledgeBuildTask task = new BookKnowledgeBuildTask();
+        task.setId(71L); task.setCanonicalBookId(9L); task.setStartChapter(1); task.setTotalChapters(100);
+        BookKnowledgeBuildServiceImpl service = service(mock(KnowledgeChunkMapper.class), mock(UserModelConfigMapper.class), tasks);
+        BookKnowledgeBuildProgressService progress = mock(BookKnowledgeBuildProgressService.class);
+        java.lang.reflect.Field field = BookKnowledgeBuildServiceImpl.class.getDeclaredField("progressService");
+        field.setAccessible(true);
+        field.set(service, progress);
+
+        java.lang.reflect.Method method = BookKnowledgeBuildServiceImpl.class
+                .getDeclaredMethod("updateProgress", BookKnowledgeBuildTask.class, int.class);
+        method.setAccessible(true);
+        method.invoke(service, task, 1);
+
+        verify(progress).record(71L, 9L, 100, 1, 1);
+        verify(tasks, never()).updateById(task);
     }
 
     private KnowledgeChunk chunk(int chapter, String content) {
