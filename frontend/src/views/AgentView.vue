@@ -237,13 +237,14 @@
             <small class="graph-footnote">{{ graph.edges?.length || 0 }} 条图谱关联仅来自已读章节；较淡的连线表示可信度较低。</small>
           </article>
           <article v-show="insightMode === 'clues'" class="insight-card card clue-board-card">
-            <div class="clue-tabs"><button v-for="state in ['OPEN','RESOLVED']" :key="state" :class="{ active: clueStateFilter === state }" type="button" @click="clueStateFilter = state">{{ state === 'OPEN' ? `待解线索 ${openClues.length}` : `已解线索 ${resolvedClues.length}` }}</button></div>
-            <p v-if="!visibleClues.length">{{ clueStateFilter === 'OPEN' ? '当前阅读范围内没有待解线索。' : '当前阅读范围内还没有已经揭晓的线索。' }}</p>
+            <div class="clue-tabs"><button v-for="state in ['OPEN','PARTIALLY_RESOLVED','RESOLVED']" :key="state" :class="{ active: clueStateFilter === state }" type="button" @click="clueStateFilter = state">{{ clueTabLabel(state) }}</button></div>
+            <p v-if="!visibleClues.length">{{ clueStateFilter === 'OPEN' ? '当前阅读范围内没有待解线索。' : clueStateFilter === 'PARTIALLY_RESOLVED' ? '当前阅读范围内没有已推进但尚未解开的线索。' : '当前阅读范围内还没有已经揭晓的线索。' }}</p>
             <ul v-else>
-              <li v-for="clue in visibleClues" :key="`${clue.chapterIndex}-${clue.excerpt}`" :class="{ 'resolved-clue': clue.status === 'RESOLVED' }">
-                <div class="clue-card-head"><b>{{ clue.signal }}</b><em class="clue-status" :class="{ resolved: clue.status === 'RESOLVED' }">{{ clueStatusLabel(clue.status) }}</em></div>
+              <li v-for="clue in visibleClues" :key="`${clue.chapterIndex}-${clue.excerpt}`" :class="{ 'resolved-clue': clue.status === 'RESOLVED', 'partial-clue': clue.status === 'PARTIALLY_RESOLVED' }">
+                <div class="clue-card-head"><b>{{ clue.signal }}</b><em class="clue-status" :class="{ resolved: clue.status === 'RESOLVED', partial: clue.status === 'PARTIALLY_RESOLVED' }">{{ clueStatusLabel(clue.status) }}</em></div>
                 <section class="clue-origin"><span>谜团提出 · 第 {{ clue.chapterIndex + 1 }} 章</span><p>{{ clueMystery(clue) }}</p><button class="evidence-jump" @click="showEvidenceSource({ label: '谜团最初依据', chapter: clue.chapterIndex, evidence: clueOriginEvidence(clue), confidence: 1 })">查看最初依据</button></section>
-                <section v-if="clue.status === 'RESOLVED'" class="clue-resolution"><span>后续揭晓 · 第 {{ (clue.resolvedChapter ?? clue.chapterIndex) + 1 }} 章</span><p>{{ clue.resolutionEvidence || '已确认谜底，但暂时没有可展示的揭晓摘要。' }}</p><button class="evidence-jump" @click="showEvidenceSource({ label: '谜团揭晓依据', chapter: clue.resolvedChapter ?? clue.chapterIndex, evidence: clue.resolutionEvidence || clue.excerpt, confidence: 1 })">查看揭晓依据</button></section>
+                <section v-for="(progress, index) in clue.progress || []" :key="`${progress.chapterIndex}-${index}`" class="clue-resolution" :class="{ final: progress.type === 'FINAL' }"><span>{{ progress.type === 'FINAL' ? '后续揭晓' : '线索推进' }} · 第 {{ progress.chapterIndex + 1 }} 章</span><p>{{ progress.explanation || progress.evidence }}</p><button class="evidence-jump" @click="showEvidenceSource({ label: progress.type === 'FINAL' ? '谜团揭晓依据' : '线索推进依据', chapter: progress.chapterIndex, evidence: progress.evidence, confidence: 1 })">查看原文依据</button></section>
+                <section v-if="!(clue.progress || []).length && clue.status === 'RESOLVED'" class="clue-resolution final"><span>后续揭晓 · 第 {{ (clue.resolvedChapter ?? clue.chapterIndex) + 1 }} 章</span><p>{{ clue.resolutionEvidence || '已确认谜底，但暂时没有可展示的揭晓摘要。' }}</p><button class="evidence-jump" @click="showEvidenceSource({ label: '谜团揭晓依据', chapter: clue.resolvedChapter ?? clue.chapterIndex, evidence: clue.resolutionEvidence || clue.excerpt, confidence: 1 })">查看揭晓依据</button></section>
               </li>
             </ul>
           </article>
@@ -428,9 +429,10 @@ const insightModeMeta = {
 const insightModeLabel = computed(() => insightModeMeta[insightMode.value]?.label || '书籍洞察')
 const insightModeTitle = computed(() => insightModeMeta[insightMode.value]?.title || '书籍洞察')
 const chatReferenceBook = computed(() => usableShelfBooks.value.find(book => String(book.canonicalBookId) === String(chatReferenceBookId.value)) || null)
-const openClues = computed(() => clues.value.filter(clue => clue.status !== 'RESOLVED'))
+const openClues = computed(() => clues.value.filter(clue => clue.status === 'OPEN'))
+const partialClues = computed(() => clues.value.filter(clue => clue.status === 'PARTIALLY_RESOLVED'))
 const resolvedClues = computed(() => clues.value.filter(clue => clue.status === 'RESOLVED'))
-const visibleClues = computed(() => clueStateFilter.value === 'RESOLVED' ? resolvedClues.value : openClues.value)
+const visibleClues = computed(() => ({ OPEN: openClues.value, PARTIALLY_RESOLVED: partialClues.value, RESOLVED: resolvedClues.value })[clueStateFilter.value] || openClues.value)
 const shelfDirectories = computed(() => Object.entries(shelfGroups.value.reduce((result, book) => {
   const name = String(book.groupName || '未分类作品').replace(/^子目录\s*[一二三四五六七八九十0-9]+\s*[：:]\s*/u, '').trim() || '未分类作品'
   ;(result[name] ||= []).push(book)
@@ -653,6 +655,11 @@ function graphRelationLabel (relation) {
     LEADS_TO: '引出后续',
     ASSOCIATED_WITH: '线索关联'
   })[relation] || (relation ? `关系：${relation}` : '未命名关系')
+}
+function clueTabLabel(status) {
+  if (status === 'OPEN') return `待解线索 ${openClues.value.length}`
+  if (status === 'PARTIALLY_RESOLVED') return `推进中 ${partialClues.value.length}`
+  return `已解线索 ${resolvedClues.value.length}`
 }
 
 function quadraticPoint (from, control, to, t = 0.5) {
@@ -1876,6 +1883,8 @@ onBeforeUnmount(() => {
 .clue-origin .evidence-jump,.clue-resolution .evidence-jump { position:absolute; right:10px; top:50%; transform:translateY(-50%); }
 .clue-board-card .clue-status { justify-self:end; margin:0; border-radius:99px; padding:3px 7px; color:#9a5c31; background:#f7e4cf; font-size:.65rem; font-style:normal; font-weight:800; }
 .clue-board-card .clue-status.resolved { color:#39704a; background:#e1f0df; }
+.clue-board-card .clue-status.partial { color:#786121; background:#f4edc8; }
+.clue-resolution.final { border-left-color:#39704a; background:#e1f0df; }
 .capsule-summary { display:inline; color:var(--agent-ink-soft); font-family:inherit!important; font-size:.82rem!important; letter-spacing:normal!important; }
 .capsule-lead { max-width:900px!important; margin:18px 0 24px!important; color:var(--agent-ink)!important; font-family:var(--font-serif); font-size:clamp(1.15rem,2vw,1.65rem); line-height:1.85!important; }
 .capsule-evidence { border:1px solid rgba(16,44,50,.11); border-radius:12px; padding:11px 13px; background:rgba(255,253,247,.72); }
