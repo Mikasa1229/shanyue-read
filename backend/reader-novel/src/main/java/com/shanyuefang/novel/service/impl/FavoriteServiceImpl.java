@@ -26,14 +26,14 @@ public class FavoriteServiceImpl extends ServiceImpl<FavoriteBookMapper, Favorit
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void addFavorite(long userId, AddFavoriteDTO dto) {
-        // 幂等：已存在则更新封面/作者等元数据
-        FavoriteBook existing = lambdaQuery()
-                .eq(FavoriteBook::getUserId, userId)
-                .eq(FavoriteBook::getBookUrl, dto.getBookUrl())
-                .one();
+        Long canonicalBookId = resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl());
+        // Favorites follow canonical works so adding a different mirror stays idempotent.
+        FavoriteBook existing = canonicalBookId == null ? null : lambdaQuery().eq(FavoriteBook::getUserId, userId)
+                .eq(FavoriteBook::getCanonicalBookId, canonicalBookId).one();
+        if (existing == null) existing = lambdaQuery().eq(FavoriteBook::getUserId, userId).eq(FavoriteBook::getBookUrl, dto.getBookUrl()).one();
         if (existing != null) {
             existing.setSourceId(dto.getSourceId());
-            existing.setCanonicalBookId(resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl()));
+            existing.setCanonicalBookId(canonicalBookId);
             existing.setSourceName(dto.getSourceName());
             existing.setBookName(dto.getBookName());
             existing.setAuthor(dto.getAuthor());
@@ -45,7 +45,7 @@ public class FavoriteServiceImpl extends ServiceImpl<FavoriteBookMapper, Favorit
         book.setId(SnowflakeIdUtil.next());
         book.setUserId(userId);
         book.setSourceId(dto.getSourceId());
-        book.setCanonicalBookId(resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl()));
+        book.setCanonicalBookId(canonicalBookId);
         book.setSourceName(dto.getSourceName());
         book.setBookName(dto.getBookName());
         book.setAuthor(dto.getAuthor());
@@ -100,6 +100,13 @@ public class FavoriteServiceImpl extends ServiceImpl<FavoriteBookMapper, Favorit
 
     @Override
     public boolean isFavorited(long userId, String bookUrl) {
+        return isFavorited(userId, null, bookUrl);
+    }
+
+    @Override
+    public boolean isFavorited(long userId, Long canonicalBookId, String bookUrl) {
+        if (canonicalBookId != null && lambdaQuery().eq(FavoriteBook::getUserId, userId)
+                .eq(FavoriteBook::getCanonicalBookId, canonicalBookId).exists()) return true;
         return lambdaQuery()
                 .eq(FavoriteBook::getUserId, userId)
                 .eq(FavoriteBook::getBookUrl, bookUrl)

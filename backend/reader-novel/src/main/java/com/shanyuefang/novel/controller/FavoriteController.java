@@ -47,8 +47,9 @@ public class FavoriteController {
     /** 检查某本书是否已收藏 */
     @GetMapping("/check")
     public R<Map<String, Boolean>> check(@RequestHeader("X-User-Id") Long userId,
-                                         @RequestParam String bookUrl) {
-        boolean favorited = favoriteService.isFavorited(userId, bookUrl);
+                                         @RequestParam(required = false) Long canonicalBookId,
+                                         @RequestParam(required = false) String bookUrl) {
+        boolean favorited = favoriteService.isFavorited(userId, canonicalBookId, bookUrl);
         return R.ok(Map.of("favorited", favorited));
     }
 }

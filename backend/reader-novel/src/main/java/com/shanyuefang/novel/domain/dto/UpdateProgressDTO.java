@@ -5,6 +5,9 @@ import lombok.Data;
 
 @Data
 public class UpdateProgressDTO {
+    private Long canonicalBookId;
+    private Long sourceId;
+    private String sourceName;
     @NotBlank
     private String bookUrl;
     @NotBlank

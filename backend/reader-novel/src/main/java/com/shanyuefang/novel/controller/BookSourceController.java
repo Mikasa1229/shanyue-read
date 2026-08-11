@@ -6,6 +6,7 @@ import com.shanyuefang.common.result.ResultCode;
 import com.shanyuefang.novel.domain.vo.BookChapterVO;
 import com.shanyuefang.novel.domain.vo.BookSourceVO;
 import com.shanyuefang.novel.domain.vo.SearchBookVO;
+import com.shanyuefang.novel.domain.vo.AggregatedBookVO;
 import com.shanyuefang.novel.service.BookSourceService;
 import com.shanyuefang.novel.messaging.KnowledgeIndexPublisher;
 import com.shanyuefang.novel.domain.entity.BookContentVersion;
@@ -91,6 +92,20 @@ public class BookSourceController {
             @RequestParam(name = "keyword") String keyword,
             @RequestParam(name = "page", defaultValue = "1") int page) {
         return R.ok(bookSourceService.aggregateSearch(keyword, page));
+    }
+
+    @Operation(summary = "规范作品聚合搜索：一部作品保留所有可切换书源")
+    @GetMapping("/aggregate-search")
+    public R<List<AggregatedBookVO>> aggregateCanonicalSearch(
+            @RequestParam(name = "keyword") String keyword,
+            @RequestParam(name = "page", defaultValue = "1") int page) {
+        return R.ok(bookSourceService.aggregateCanonicalSearch(keyword, page));
+    }
+
+    @Operation(summary = "查看规范作品的全部书源")
+    @GetMapping("/canonical/{canonicalBookId}/sources")
+    public R<AggregatedBookVO> canonicalSources(@PathVariable Long canonicalBookId) {
+        return R.ok(bookSourceService.canonicalBookSources(canonicalBookId).stream().findFirst().orElse(null));
     }
 
     @Operation(summary = "使用指定书源搜索书籍")

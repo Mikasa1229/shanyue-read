@@ -45,14 +45,14 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void addBook(long userId, AddToShelfDTO dto) {
-        // 幂等：已存在则更新封面/作者等元数据
-        BookshelfBook existing = lambdaQuery()
-                .eq(BookshelfBook::getUserId, userId)
-                .eq(BookshelfBook::getBookUrl, dto.getBookUrl())
-                .one();
+        Long canonicalBookId = resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl());
+        // Canonical identity is the primary shelf key. URL matching remains a historical fallback.
+        BookshelfBook existing = canonicalBookId == null ? null : lambdaQuery().eq(BookshelfBook::getUserId, userId)
+                .eq(BookshelfBook::getCanonicalBookId, canonicalBookId).one();
+        if (existing == null) existing = lambdaQuery().eq(BookshelfBook::getUserId, userId).eq(BookshelfBook::getBookUrl, dto.getBookUrl()).one();
         if (existing != null) {
             existing.setSourceId(dto.getSourceId());
-            existing.setCanonicalBookId(resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl()));
+            existing.setCanonicalBookId(canonicalBookId);
             existing.setSourceName(dto.getSourceName());
             existing.setBookName(dto.getBookName());
             existing.setAuthor(dto.getAuthor());
@@ -64,7 +64,7 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
         book.setId(SnowflakeIdUtil.next());
         book.setUserId(userId);
         book.setSourceId(dto.getSourceId());
-        book.setCanonicalBookId(resolveCanonicalId(dto.getSourceId(), dto.getBookUrl(), dto.getBookName(), dto.getAuthor(), dto.getCoverUrl()));
+        book.setCanonicalBookId(canonicalBookId);
         book.setSourceName(dto.getSourceName());
         book.setBookName(dto.getBookName());
         book.setAuthor(dto.getAuthor());
@@ -135,6 +135,13 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
 
     @Override
     public boolean isOnShelf(long userId, String bookUrl) {
+        return isOnShelf(userId, null, bookUrl);
+    }
+
+    @Override
+    public boolean isOnShelf(long userId, Long canonicalBookId, String bookUrl) {
+        if (canonicalBookId != null && lambdaQuery().eq(BookshelfBook::getUserId, userId)
+                .eq(BookshelfBook::getCanonicalBookId, canonicalBookId).exists()) return true;
         return lambdaQuery()
                 .eq(BookshelfBook::getUserId, userId)
                 .eq(BookshelfBook::getBookUrl, bookUrl)
@@ -144,9 +151,13 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateProgress(long userId, UpdateProgressDTO dto) {
-        var update = lambdaUpdate()
-                .eq(BookshelfBook::getUserId, userId)
-                .eq(BookshelfBook::getBookUrl, dto.getBookUrl())
+        var update = lambdaUpdate().eq(BookshelfBook::getUserId, userId);
+        if (dto.getCanonicalBookId() != null) update.eq(BookshelfBook::getCanonicalBookId, dto.getCanonicalBookId());
+        else update.eq(BookshelfBook::getBookUrl, dto.getBookUrl());
+        update
+                .set(dto.getSourceId() != null, BookshelfBook::getSourceId, dto.getSourceId())
+                .set(StringUtils.hasText(dto.getSourceName()), BookshelfBook::getSourceName, dto.getSourceName())
+                .set(StringUtils.hasText(dto.getBookUrl()), BookshelfBook::getBookUrl, dto.getBookUrl())
                 .set(BookshelfBook::getLastChapterName, dto.getChapterName())
                 .set(BookshelfBook::getLastChapterUrl, dto.getChapterUrl())
                 .set(BookshelfBook::getLastReadAt, LocalDateTime.now());

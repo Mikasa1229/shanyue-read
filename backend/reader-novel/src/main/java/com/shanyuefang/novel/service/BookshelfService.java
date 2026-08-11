@@ -13,6 +13,7 @@ public interface BookshelfService {
     void removeBook(long userId, String bookUrl);
     Page<ShelfBookVO> listMyShelf(long userId, int page, int size);
     boolean isOnShelf(long userId, String bookUrl);
+    boolean isOnShelf(long userId, Long canonicalBookId, String bookUrl);
     void updateProgress(long userId, UpdateProgressDTO dto);
     List<HotBookVO> getHotBooks(int top);
 }

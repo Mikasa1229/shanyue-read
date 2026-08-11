@@ -103,6 +103,7 @@
                 <div class="book-meta">
                   <div class="book-name-row"><div class="book-name">{{ book.name || '未知书名' }}</div><span v-if="isKnowledgeReady(book)" class="knowledge-badge">AI 知识库</span></div>
                   <div class="book-author">{{ book.author || '未知作者' }}</div>
+                  <div v-if="book.sourceCount > 1" class="source-count">{{ book.sourceCount }} 个可用书源</div>
                   <div v-if="book.intro" class="book-intro">{{ book.intro }}</div>
                   <div class="book-actions mt-4">
                     <button class="btn btn-sm btn-ghost" @click="goToDetail(book)">查看详情</button>
@@ -142,7 +143,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { apiAggregateSearch, apiGetChapters } from '@/api/bookSource'
+import { apiAggregateCanonicalSearch, apiGetChapters } from '@/api/bookSource'
 import { apiGetBookKnowledgeStatuses } from '@/api/agent'
 import { useToast } from '@/composables/useToast'
 
@@ -174,29 +175,7 @@ function normalizeBookField(value) {
 }
 
 function bookResultKey(book) {
-  return `${book.sourceId || ''}|${book.bookUrl || ''}|${normalizeBookField(book.name)}|${normalizeBookField(book.author)}`
-}
-
-function deduplicateSearchResults(items) {
-  const unique = new Map()
-  const coverKeys = new Map()
-  for (const book of items || []) {
-    if (!book) continue
-    const title = normalizeBookField(book.name)
-    const author = normalizeBookField(book.author)
-    const cover = normalizeBookField(book.coverUrl)
-    const sourceUrlKey = `${book.sourceId || ''}|${book.bookUrl || ''}`
-    const key = title && title !== '未知书名'
-      ? `title|${title}|${author}`
-      : cover ? `cover|${cover}|${author}` : `source|${sourceUrlKey}`
-    const canonicalKey = cover ? (coverKeys.get(`cover|${cover}|${author}`) || key) : key
-    const previous = unique.get(canonicalKey)
-    const quality = [book.name && book.name !== '未知书名', book.author, book.intro, book.coverUrl, book.bookUrl].filter(Boolean).length
-    const previousQuality = previous ? [previous.name && previous.name !== '未知书名', previous.author, previous.intro, previous.coverUrl, previous.bookUrl].filter(Boolean).length : -1
-    if (!previous || quality > previousQuality) unique.set(canonicalKey, book)
-    if (cover) coverKeys.set(`cover|${cover}|${author}`, canonicalKey)
-  }
-  return [...unique.values()]
+  return String(book.canonicalBookId || `${normalizeBookField(book.name)}|${normalizeBookField(book.author)}`)
 }
 
 // 生成显示页码（带省略号）
@@ -239,8 +218,14 @@ async function doSearch() {
   lastKeyword.value = q
   startProgress()
   try {
-    const res = await apiAggregateSearch(q)
-    const searchResults = deduplicateSearchResults(res ?? [])
+    const res = await apiAggregateCanonicalSearch(q)
+    const searchResults = (res ?? []).map(book => ({
+      ...book,
+      sourceId: book.preferredSource?.sourceId,
+      sourceName: book.preferredSource?.sourceName,
+      bookUrl: book.preferredSource?.bookUrl,
+      lastChapter: book.lastChapter || book.preferredSource?.lastChapter
+    }))
     results.value = searchResults
     // Book-source results are already usable. Knowledge status is optional metadata from
     // another service, so it must never hold the visible search response hostage.
@@ -613,6 +598,7 @@ onMounted(() => {
   font-size: 0.8125rem;
   color: var(--ink-3);
 }
+.source-count { display:inline-flex; width:max-content; margin-top:5px; border-radius:999px; padding:3px 7px; color:#456c57; background:#e8f0dd; font-size:.68rem; font-weight:800; }
 .book-intro {
   font-size: 0.8rem;
   color: var(--ink-4);

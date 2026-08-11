@@ -17,4 +17,5 @@ public interface FavoriteService {
 
     /** 检查某本书是否已收藏 */
     boolean isFavorited(long userId, String bookUrl);
+    boolean isFavorited(long userId, Long canonicalBookId, String bookUrl);
 }

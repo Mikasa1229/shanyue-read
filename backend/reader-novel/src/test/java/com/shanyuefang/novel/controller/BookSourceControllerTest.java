@@ -3,6 +3,7 @@ package com.shanyuefang.novel.controller;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.shanyuefang.novel.domain.entity.BookContentVersion;
 import com.shanyuefang.novel.domain.vo.SearchBookVO;
+import com.shanyuefang.novel.domain.vo.AggregatedBookVO;
 import com.shanyuefang.novel.mapper.BookContentVersionMapper;
 import com.shanyuefang.novel.messaging.KnowledgeIndexPublisher;
 import com.shanyuefang.novel.service.BookSourceService;
@@ -13,6 +14,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Map;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class BookSourceControllerTest {
@@ -76,6 +79,19 @@ class BookSourceControllerTest {
         assertThat(failed.getIndexStatus()).isEqualTo("PENDING");
         verify(versionMapper).updateById(failed);
         verify(publisher).publish(eq(88L), eq(4), eq("chapter content"), anyString());
+    }
+
+    @Test
+    void canonicalSearchUsesTheNewMirrorPreservingServiceContract() {
+        AggregatedBookVO work = new AggregatedBookVO();
+        work.setCanonicalBookId(88L);
+        work.setSourceCount(2);
+        when(bookSourceService.aggregateCanonicalSearch("剑来", 1)).thenReturn(List.of(work));
+
+        List<AggregatedBookVO> response = controller().aggregateCanonicalSearch("剑来", 1).getData();
+
+        assertThat(response).singleElement().extracting(AggregatedBookVO::getSourceCount).isEqualTo(2);
+        verify(bookSourceService).aggregateCanonicalSearch("剑来", 1);
     }
 
     private BookSourceController controller() {
