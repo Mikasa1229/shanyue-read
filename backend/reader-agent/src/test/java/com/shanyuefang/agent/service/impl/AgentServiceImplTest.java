@@ -114,6 +114,12 @@ class AgentServiceImplTest {
     }
 
     @Test
+    void keepsNativeBookSearchAvailableWithoutServerSideRecommendationPrefetch() {
+        // Recommendation routing belongs to the model's structured tool call, not keyword matching in Java.
+        assertTrue(AgentServiceImpl.recommendationSearchRequest("推荐几本悬疑小说", List.of()).contains("悬疑"));
+    }
+
+    @Test
     void mergesFunctionCallReferencesWithServerSideFallbackReferences() {
         BookReferenceVO first = new BookReferenceVO(1L, "剑来", "烽火戏诸侯", "", 2L, "book-url", "");
         BookReferenceVO second = new BookReferenceVO(3L, "诡秘之主", "爱潜水的乌贼", "", 4L, "other-url", "");
@@ -125,14 +131,6 @@ class AgentServiceImplTest {
     }
 
     @Test
-    void doesNotPrefetchAnOpenRecommendationBeforeNativeFunctionCalling() {
-        assertTrue(!AgentServiceImpl.shouldPrefetchBookSearch("推荐一本适合今晚读的书", true));
-        assertTrue(AgentServiceImpl.shouldPrefetchBookSearch("推荐一本适合今晚读的书", false));
-        assertTrue(AgentServiceImpl.shouldPrefetchBookSearch("搜索《诡秘之主》", true));
-        assertTrue(AgentServiceImpl.shouldPrefetchBookSearch("分析当前人物关系", true));
-    }
-
-    @Test
     void removesExplicitlyExcludedBooksFromClickableReferences() {
         List<BookReferenceVO> references = AgentServiceImpl.filterExcludedReferences("推荐一本，但不要《剑来》，不要从书架里找", List.of(
                 new BookReferenceVO(1L, "剑来", "烽火戏诸侯", "", 2L, "book-url", ""),
@@ -140,6 +138,16 @@ class AgentServiceImplTest {
 
         assertEquals(1, references.size());
         assertEquals("诡秘之主", references.get(0).getTitle());
+    }
+
+    @Test
+    void verifiedRecommendationFallbackDoesNotInventConstraintsForANewConversation() {
+        String answer = AgentServiceImpl.enforceVerifiedRecommendationAnswer("推荐《未核验作品》", "给我推荐几本悬疑小说", List.of(
+                new BookReferenceVO(1L, "已核验作品", "作者甲", "", 2L, "book-url", "")));
+
+        assertTrue(answer.contains("已核验作品"));
+        assertTrue(!answer.contains("排除本轮"));
+        assertTrue(!answer.contains("书架"));
     }
 
     private AgentMessage message(String role, String content) {

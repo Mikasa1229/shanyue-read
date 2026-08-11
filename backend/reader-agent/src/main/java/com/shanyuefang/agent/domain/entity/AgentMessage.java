@@ -17,6 +17,7 @@ public class AgentMessage {
     private String citationsJson;
     private String bookReferencesJson;
     private String toolTraceJson;
+    private String generationStatus;
     private LocalDateTime createdAt;
     private Boolean deleted;
 }

@@ -11,6 +11,9 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
 
 class InternalMcpControllerTest {
     private InternalMcpController controller() {
@@ -40,7 +43,8 @@ class InternalMcpControllerTest {
         Map<?, ?> schema = (Map<?, ?>) search.get("inputSchema");
         Map<?, ?> properties = (Map<?, ?>) schema.get("properties");
         assertEquals("string", ((Map<?, ?>) properties.get("query")).get("type"));
-        assertEquals(List.of("query"), schema.get("required"));
+        assertEquals("array", ((Map<?, ?>) properties.get("queries")).get("type"));
+        assertEquals(List.of(), schema.get("required"));
     }
 
     @Test
@@ -59,11 +63,16 @@ class InternalMcpControllerTest {
     }
 
     @Test
-    void rejectsMissingRequiredArgumentsBeforeCallingTool() {
-        Map<String, Object> result = controller().handle("private-test-token", 42L, Map.of(
+    void acceptsTheQueriesArrayAsTheStructuredSearchArgument() {
+        AgentProperties properties = new AgentProperties();
+        properties.setInternalToken("private-test-token");
+        McpReadOnlyToolService toolService = mock(McpReadOnlyToolService.class);
+        when(toolService.call(eq(42L), eq("book.search"), anyMap())).thenReturn(List.of());
+        InternalMcpController controller = new InternalMcpController(new AgentInternalAccess(properties), toolService);
+        Map<String, Object> result = controller.handle("private-test-token", 42L, Map.of(
                 "jsonrpc", "2.0", "id", "request-4", "method", "tools/call",
-                "params", Map.of("name", "book.search", "arguments", Map.of())));
-        assertEquals(-32000, ((Map<?, ?>) result.get("error")).get("code"));
+                "params", Map.of("name", "book.search", "arguments", Map.of("queries", List.of("剑来", "诡秘之主")))));
+        assertEquals(null, result.get("error"));
     }
 
     @Test

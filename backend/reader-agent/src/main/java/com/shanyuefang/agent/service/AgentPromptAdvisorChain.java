@@ -34,6 +34,8 @@ public class AgentPromptAdvisorChain {
         result.add("输出规则：使用规范 Markdown。标题必须独占一行，标题标记 # 后必须有一个空格；"
                 + "列表的每一项必须独占一行并以 `- ` 开头；不同段落之间保留一个空行。"
                 + "不要把标题、列表项或分隔线连续拼接在同一行；不要输出转义的 Markdown 符号。");
+        result.add("对话规则：只回答用户本轮真正提出的内容，不得代替用户补写问题、追问或多轮对话。"
+                + "进行角色访谈时尤其不得自问自答、伪造“问：/答：”采访稿；用户尚未提问时，只以角色身份简短等待提问。");
         if (dto.getCanonicalBookId() != null && dto.getCurrentChapter() != null) result.add("剧透规则：只能使用第 " + dto.getCurrentChapter() + " 章及之前的证据。");
         if (preference != null && StringUtils.hasText(preference.getSpoilerLevel())) result.add("用户偏好：当前剧透等级为 " + preference.getSpoilerLevel() + "。");
         String request = dto == null || dto.getContent() == null ? "" : dto.getContent();

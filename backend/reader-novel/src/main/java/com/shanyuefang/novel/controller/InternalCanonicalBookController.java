@@ -65,11 +65,6 @@ public class InternalCanonicalBookController {
                 .filter(entry -> entry.getValue() > 0)
                 .sorted(Map.Entry.<CanonicalBook, Integer>comparingByValue().reversed())
                 .map(Map.Entry::getKey), boundedLimit);
-        // Natural-language recommendation constraints rarely match a title literally. In that case
-        // return real readable catalog candidates and let the Agent disclose metadata limitations.
-        if (matched.isEmpty() && isRecommendationRequest(value)) {
-            matched = readableSearchResults(catalog.stream().filter(book -> !isExcluded(book, exclusions)), boundedLimit);
-        }
         // A function call must be able to discover works that have not entered the local
         // canonical catalog yet. Source search resolves every result to a canonical work.
         if (matched.isEmpty()) {
@@ -127,13 +122,6 @@ public class InternalCanonicalBookController {
                     result.put("sourceBookUrl", book.getSourceBookUrl());
                     return result;
                 }).limit(limit).toList();
-    }
-
-    private boolean isRecommendationRequest(String value) {
-        return value.contains("推荐") || value.contains("找书") || value.contains("看什么") || value.contains("读什么")
-                || value.contains("换一本") || value.contains("换个") || value.contains("热门")
-                || value.contains("点击") || value.contains("引用") || value.contains("链接")
-                || value.toLowerCase(java.util.Locale.ROOT).contains("recommend");
     }
 
     private List<String> searchTerms(String request) {

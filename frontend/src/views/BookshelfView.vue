@@ -69,11 +69,13 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { apiGetMyShelf, apiRemoveFromShelf } from '@/api/bookshelf'
 import { apiGetAgentShelfGroups, apiGetBookKnowledgeStatuses } from '@/api/agent'
 
 const router = useRouter()
 const { show } = useToast()
+const { confirm } = useConfirmDialog()
 
 const books = ref([])
 const loading = ref(false)
@@ -136,7 +138,12 @@ function goChapters(book) {
 }
 
 async function removeBook(book) {
-  if (!confirm(`确认将「${book.bookName}」移出书架？`)) return
+  if (!await confirm({
+    title: '移出书架',
+    message: `确定将「${book.bookName}」移出书架吗？你仍可在书源中重新添加这部作品。`,
+    confirmText: '移出书架',
+    tone: 'danger'
+  })) return
   try {
     await apiRemoveFromShelf(book)
     show('已移出书架')

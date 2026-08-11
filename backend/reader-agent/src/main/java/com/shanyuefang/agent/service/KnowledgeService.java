@@ -39,6 +39,13 @@ public interface KnowledgeService {
     void buildGraphRange(long canonicalBookId, int startChapter, int endChapter,
                          StructuredGraphExtractor.ModelConfig modelConfig,
                          java.util.function.IntConsumer chapterProgress);
+    /** Extracts a range while reporting every real model and projection phase. */
+    default void buildGraphRangeWithProgress(long canonicalBookId, int startChapter, int endChapter,
+                                             StructuredGraphExtractor.ModelConfig modelConfig,
+                                             GraphBuildProgressListener progressListener) {
+        GraphBuildProgressListener listener = progressListener == null ? GraphBuildProgressListener.NOOP : progressListener;
+        buildGraphRange(canonicalBookId, startChapter, endChapter, modelConfig, listener::chapterExtracted);
+    }
     /** Atomically replaces graph claims while retaining durable documents and chunks. */
     void replaceGraphRange(long canonicalBookId, int startChapter, int endChapter,
                            StructuredGraphExtractor.ModelConfig modelConfig,

@@ -195,6 +195,7 @@ import { apiUpdatePassword, apiUploadAvatar, apiGetMyLevel } from '@/api/user'
 import { apiGetMyNovels, apiDeleteNovel } from '@/api/novel'
 import { apiGetMyFavorites, apiRemoveFavorite } from '@/api/favorite'
 import { useToast } from '@/composables/useToast'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import CheckinCalendar from '@/components/CheckinCalendar.vue'
 import NovelCard from '@/components/NovelCard.vue'
 import PublishNovelModal from '@/components/PublishNovelModal.vue'
@@ -202,6 +203,7 @@ import PublishNovelModal from '@/components/PublishNovelModal.vue'
 const userStore = useUserStore()
 const router = useRouter()
 const { show } = useToast()
+const { confirm } = useConfirmDialog()
 
 const userInfo = computed(() => userStore.userInfo)
 const levelInfo = ref(null)
@@ -300,7 +302,12 @@ async function loadMyNovels(page = 1) {
 }
 
 async function handleDeleteNovel(id) {
-  if (!confirm('确认删除该小说？')) return
+  if (!await confirm({
+    title: '删除小说',
+    message: '确定删除这部已发布的小说吗？小说详情、内容及互动记录将无法恢复。',
+    confirmText: '删除小说',
+    tone: 'danger'
+  })) return
   try {
     await apiDeleteNovel(id)
     show('已删除')

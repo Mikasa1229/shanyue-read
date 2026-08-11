@@ -35,6 +35,7 @@ import com.shanyuefang.agent.mapper.KnowledgeClueGraphLinkMapper;
 import com.shanyuefang.agent.mapper.LightRagCommunityMapper;
 import com.shanyuefang.agent.service.EmbeddingService;
 import com.shanyuefang.agent.service.KnowledgeService;
+import com.shanyuefang.agent.service.GraphBuildProgressListener;
 import com.shanyuefang.agent.service.GraphKnowledgeStore;
 import com.shanyuefang.agent.service.StructuredGraphExtractor;
 import com.shanyuefang.agent.service.ProfileVectorService;
@@ -882,6 +883,19 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     public void buildGraphRange(long canonicalBookId, int startChapter, int endChapter,
                                 StructuredGraphExtractor.ModelConfig modelConfig,
                                 java.util.function.IntConsumer chapterProgress) {
+        buildGraphRangeWithProgress(canonicalBookId, startChapter, endChapter, modelConfig, new GraphBuildProgressListener() {
+            @Override public void chapterExtracted(int completedChapters) {
+                chapterProgress.accept(completedChapters);
+            }
+        });
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void buildGraphRangeWithProgress(long canonicalBookId, int startChapter, int endChapter,
+                                            StructuredGraphExtractor.ModelConfig modelConfig,
+                                            GraphBuildProgressListener progressListener) {
+        GraphBuildProgressListener listener = progressListener == null ? GraphBuildProgressListener.NOOP : progressListener;
         if (modelConfig == null || !StringUtils.hasText(modelConfig.apiKey())) {
             throw new IllegalArgumentException("A model configuration is required to build a knowledge graph");
         }
@@ -902,19 +916,34 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         RebuildContext context = new RebuildContext();
         rebuildContext.set(context);
         try {
+            listener.stageStarted(GraphBuildProgressListener.Stage.EXTRACT);
             int processed = 0;
             for (Map.Entry<Integer, StringBuilder> entry : chapters.entrySet()) {
                 extractGraph(canonicalBookId, entry.getKey(), entry.getValue().toString(), modelConfig);
-                chapterProgress.accept(++processed);
+                listener.chapterExtracted(++processed);
             }
+            listener.stageCompleted(GraphBuildProgressListener.Stage.EXTRACT);
+            listener.stageStarted(GraphBuildProgressListener.Stage.CHARACTER_CALIBRATION);
             calibrateCharacterKnowledge(canonicalBookId, chapters, modelConfig);
+            listener.stageCompleted(GraphBuildProgressListener.Stage.CHARACTER_CALIBRATION);
+            listener.stageStarted(GraphBuildProgressListener.Stage.STORY_EVENTS);
             synthesizeStoryEvents(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
+            listener.stageCompleted(GraphBuildProgressListener.Stage.STORY_EVENTS);
+            listener.stageStarted(GraphBuildProgressListener.Stage.CLUE_SYNTHESIS);
             synthesizeClues(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
+            listener.stageCompleted(GraphBuildProgressListener.Stage.CLUE_SYNTHESIS);
+            listener.stageStarted(GraphBuildProgressListener.Stage.CLUE_LIFECYCLE);
             reconcileClueLifecycle(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
+            listener.stageCompleted(GraphBuildProgressListener.Stage.CLUE_LIFECYCLE);
+            listener.stageStarted(GraphBuildProgressListener.Stage.RAG_REFRESH);
             refreshBookProfile(canonicalBookId);
+            listener.stageProgress(GraphBuildProgressListener.Stage.RAG_REFRESH, 1, 2);
             lightRagService.refresh(canonicalBookId);
+            listener.stageCompleted(GraphBuildProgressListener.Stage.RAG_REFRESH);
             // The relational graph is authoritative; projection refresh keeps Neo4j complete after merging a range.
+            listener.stageStarted(GraphBuildProgressListener.Stage.GRAPH_PROJECTION);
             reprojectGraph(canonicalBookId);
+            listener.stageCompleted(GraphBuildProgressListener.Stage.GRAPH_PROJECTION);
         } finally {
             rebuildContext.remove();
         }

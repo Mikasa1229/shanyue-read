@@ -22,6 +22,7 @@ import com.shanyuefang.agent.mapper.UserModelConfigMapper;
 import com.shanyuefang.agent.service.ApiKeyCipher;
 import com.shanyuefang.agent.service.BookKnowledgeBuildService;
 import com.shanyuefang.agent.service.BookKnowledgeBuildProgressService;
+import com.shanyuefang.agent.service.GraphBuildProgressListener;
 import com.shanyuefang.agent.service.KnowledgeService;
 import com.shanyuefang.agent.service.StructuredGraphExtractor;
 import com.shanyuefang.common.exception.BusinessException;
@@ -153,6 +154,7 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         task.setIsPublic(!Boolean.FALSE.equals(dto.getSharePublic())); task.setStatus("QUEUED");
         task.setStartChapter(range.startChapter()); task.setEndChapter(range.endChapter());
         task.setTotalChapters(estimate.chapters()); task.setCompletedChapters(0);
+        task.setCurrentStage("EXTRACT"); task.setStageCompletedUnits(0); task.setStageTotalUnits(estimate.chapters()); task.setOverallProgress(0);
         task.setEstimatedInputTokens(estimate.inputTokens()); task.setEstimatedOutputTokens(estimate.outputTokens());
         task.setEstimatedCredits(PLATFORM.equals(mode) ? estimate.credits() : 0); task.setChargedCredits(0);
         task.setMessage("等待开始"); task.setCreatedAt(LocalDateTime.now()); task.setUpdatedAt(LocalDateTime.now()); taskMapper.insert(task);
@@ -331,17 +333,18 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         BookKnowledgeBuildTask task = taskMapper.selectById(taskId);
         if (task == null) return false;
         try {
-            task.setStatus("RUNNING"); task.setMessage("正在分析第 " + task.getStartChapter() + " 章并提取实体关系"); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "RUNNING", 0, null);
+            task.setStatus("RUNNING"); task.setMessage("正在准备章节实体与关系抽取"); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "RUNNING", 0, null);
             if (PLATFORM.equals(task.getModelMode())) freeze(task);
             StructuredGraphExtractor.ModelConfig config = modelConfig(task);
-            AtomicInteger completed = new AtomicInteger();
-            knowledgeService.buildGraphRange(task.getCanonicalBookId(), task.getStartChapter(), task.getEndChapter(), config,
-                    count -> updateProgress(task, completed.incrementAndGet()));
+            knowledgeService.buildGraphRangeWithProgress(task.getCanonicalBookId(), task.getStartChapter(), task.getEndChapter(), config,
+                    progressListener(task));
+            recordStage(task, GraphBuildProgressListener.Stage.FINALIZE, 0, 1, "正在核验图谱结果并保存构建记录");
             synchronizeCompletedRange(task.getCanonicalBookId(), task.getStartChapter(), task.getEndChapter(), false);
             long graphClaims = nodeMapper.selectCount(Wrappers.<com.shanyuefang.agent.domain.entity.KnowledgeGraphNode>lambdaQuery()
                     .eq(com.shanyuefang.agent.domain.entity.KnowledgeGraphNode::getCanonicalBookId, task.getCanonicalBookId()));
             if (graphClaims == 0) throw new IllegalStateException("模型未返回可验证的实体或关系，未发布空知识图谱");
-            task.setStatus("COMPLETED"); task.setCompletedChapters(task.getTotalChapters()); task.setMessage("知识图谱已构建完成"); task.setCompletedAt(LocalDateTime.now()); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task);
+            task.setStatus("COMPLETED"); task.setCompletedChapters(task.getTotalChapters()); task.setCurrentStage("FINALIZE");
+            task.setStageCompletedUnits(1); task.setStageTotalUnits(1); task.setOverallProgress(100); task.setMessage("知识图谱已构建完成"); task.setCompletedAt(LocalDateTime.now()); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task);
             if (PLATFORM.equals(task.getModelMode())) settle(task);
             if (Boolean.TRUE.equals(task.getIsPublic())) publishShare(task);
         } catch (Exception exception) {
@@ -367,6 +370,8 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         String message = completed >= task.getTotalChapters()
                 ? "已完成 " + completed + " / " + task.getTotalChapters() + " 章的大模型关系抽取"
                 : "已完成 " + completed + " / " + task.getTotalChapters() + " 章，正在分析第 " + (task.getStartChapter() + completed) + " 章";
+        task.setCurrentStage("EXTRACT"); task.setStageCompletedUnits(completed); task.setStageTotalUnits(task.getTotalChapters());
+        task.setOverallProgress(Math.min(70, Math.round(completed * 70f / Math.max(1, task.getTotalChapters()))));
         task.setMessage(message); task.setUpdatedAt(LocalDateTime.now());
         // buildGraphRange holds one transaction for graph consistency. Persist this small task update in
         // an independent transaction so the two-second UI poll does not wait for every chapter to finish.
@@ -377,6 +382,83 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
             taskMapper.updateById(task);
             updateSpace(task, "RUNNING", completed, null);
         }
+    }
+
+    private GraphBuildProgressListener progressListener(BookKnowledgeBuildTask task) {
+        return new GraphBuildProgressListener() {
+            @Override public void chapterExtracted(int completedChapters) {
+                updateProgress(task, completedChapters);
+            }
+
+            @Override public void stageStarted(Stage stage) {
+                recordStage(task, stage, 0, stageUnits(stage, task), stageMessage(stage));
+            }
+
+            @Override public void stageProgress(Stage stage, int completedUnits, int totalUnits) {
+                recordStage(task, stage, completedUnits, totalUnits, stageMessage(stage));
+            }
+
+            @Override public void stageCompleted(Stage stage) {
+                recordStage(task, stage, stageUnits(stage, task), stageUnits(stage, task), stageCompletedMessage(stage));
+            }
+        };
+    }
+
+    private void recordStage(BookKnowledgeBuildTask task, GraphBuildProgressListener.Stage stage,
+                             int completedUnits, int totalUnits, String message) {
+        task.setCurrentStage(stage.name()); task.setStageCompletedUnits(completedUnits); task.setStageTotalUnits(totalUnits);
+        task.setOverallProgress(stageProgress(stage, completedUnits, totalUnits));
+        task.setMessage(message); task.setUpdatedAt(LocalDateTime.now());
+        if (progressService != null) {
+            progressService.recordStage(task.getId(), stage.name(), completedUnits, totalUnits, message);
+        } else {
+            taskMapper.updateById(task);
+        }
+    }
+
+    private int stageUnits(GraphBuildProgressListener.Stage stage, BookKnowledgeBuildTask task) {
+        return stage == GraphBuildProgressListener.Stage.EXTRACT ? Math.max(1, task.getTotalChapters())
+                : stage == GraphBuildProgressListener.Stage.RAG_REFRESH ? 2 : 1;
+    }
+
+    private int stageProgress(GraphBuildProgressListener.Stage stage, int completedUnits, int totalUnits) {
+        int ratio = Math.min(100, Math.round(Math.max(0, completedUnits) * 100f / Math.max(1, totalUnits)));
+        return switch (stage) {
+            case EXTRACT -> Math.round(ratio * .70f);
+            case CHARACTER_CALIBRATION -> 70 + Math.round(ratio * .08f);
+            case STORY_EVENTS -> 78 + Math.round(ratio * .06f);
+            case CLUE_SYNTHESIS -> 84 + Math.round(ratio * .05f);
+            case CLUE_LIFECYCLE -> 89 + Math.round(ratio * .04f);
+            case RAG_REFRESH -> 93 + Math.round(ratio * .04f);
+            case GRAPH_PROJECTION -> 97 + Math.round(ratio * .02f);
+            case FINALIZE -> 99;
+        };
+    }
+
+    private String stageMessage(GraphBuildProgressListener.Stage stage) {
+        return switch (stage) {
+            case EXTRACT -> "正在提取章节中的实体与关系";
+            case CHARACTER_CALIBRATION -> "正在校准人物身份与关系";
+            case STORY_EVENTS -> "正在归纳剧情事件脉络";
+            case CLUE_SYNTHESIS -> "正在识别并关联故事线索";
+            case CLUE_LIFECYCLE -> "正在核对线索的推进与揭晓状态";
+            case RAG_REFRESH -> "正在刷新作品画像与检索索引";
+            case GRAPH_PROJECTION -> "正在同步知识图谱展示数据";
+            case FINALIZE -> "正在核验图谱结果并保存构建记录";
+        };
+    }
+
+    private String stageCompletedMessage(GraphBuildProgressListener.Stage stage) {
+        return switch (stage) {
+            case EXTRACT -> "章节实体与关系抽取完成，开始整合图谱";
+            case CHARACTER_CALIBRATION -> "人物身份与关系校准完成";
+            case STORY_EVENTS -> "剧情事件脉络归纳完成";
+            case CLUE_SYNTHESIS -> "故事线索识别完成";
+            case CLUE_LIFECYCLE -> "线索生命周期核对完成";
+            case RAG_REFRESH -> "作品画像与检索索引刷新完成";
+            case GRAPH_PROJECTION -> "知识图谱展示数据同步完成";
+            case FINALIZE -> "图谱结果核验完成";
+        };
     }
     private void recordCoverage(long canonicalBookId, List<Integer> chapterIndexes) {
         for (Integer chapterIndex : chapterIndexes) {

@@ -76,6 +76,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Service
@@ -178,7 +179,8 @@ public class AgentServiceImpl implements AgentService {
         return messageMapper.selectList(Wrappers.<AgentMessage>lambdaQuery()
                         .eq(AgentMessage::getSessionId, sessionId)
                         .eq(AgentMessage::getDeleted, false)
-                        .orderByAsc(AgentMessage::getCreatedAt))
+                        .orderByAsc(AgentMessage::getCreatedAt)
+                        .orderByAsc(AgentMessage::getId))
                 .stream().map(this::toMessageVO).toList();
     }
 
@@ -251,14 +253,15 @@ public class AgentServiceImpl implements AgentService {
         if (retainConversations && !Boolean.TRUE.equals(dto.getReuseExistingUserMessage())) {
             saveMessage(sessionId, "USER", content, null, null, null);
         }
+        // Establish a durable placeholder before any model preparation can block the request.
+        AgentMessage streamingMessage = retainConversations
+                ? saveMessage(sessionId, "ASSISTANT", "", null, null, null, "GENERATING") : null;
         String requestId = UUID.randomUUID().toString().replace("-", "");
         ModelSelection selection = selectModel(userId, dto);
         if (PLATFORM.equals(selection.mode())) rateLimiter.checkPlatformCircuit();
         int estimatedTokens = estimateTokens(content);
         if (PLATFORM.equals(selection.mode())) rateLimiter.reservePlatformBudget(estimatedTokens);
-        String searchRequest = recommendationSearchRequest(sessionId, content);
-        boolean prefetchBookSearch = shouldPrefetchBookSearch(content, properties.isNativeToolCallingEnabled());
-        AgentReadOnlyToolService.ToolResult toolResult = readOnlyToolService.execute(userId, dto, content, searchRequest, prefetchBookSearch);
+        AgentReadOnlyToolService.ToolResult toolResult = readOnlyToolService.execute(userId, dto, content);
         PromptAssembly prompt = buildPrompt(session, dto, content, toolResult, userId);
         ModelCallResult modelResult;
         boolean degraded = false;
@@ -295,7 +298,7 @@ public class AgentServiceImpl implements AgentService {
                 referencedBooks(answer, modelResult.bookReferences()));
         answer = enforceVerifiedRecommendationAnswer(answer, content, bookReferences);
         answer = appendBookReferenceEvidence(enforceBookSearchEvidence(answer, content, toolResult, bookReferences), bookReferences);
-        if (retainConversations) saveMessage(sessionId, "ASSISTANT", answer, writeCitations(citations), writeBookReferences(bookReferences), toolResult.traceJson());
+        if (streamingMessage != null) completeStreamingMessage(streamingMessage, answer, citations, bookReferences, toolResult.traceJson());
         touchSession(session, retainConversations, content);
         saveUsage(userId, sessionId, selection, requestId, prompt, modelResult, degraded ? "DEGRADED" : "SUCCESS");
         agentMetrics.recordModelCall(selection.mode(), degraded, startedAtNanos);
@@ -316,14 +319,18 @@ public class AgentServiceImpl implements AgentService {
         if (retainConversations && !Boolean.TRUE.equals(dto.getReuseExistingUserMessage())) {
             saveMessage(sessionId, "USER", content, null, null, null);
         }
+        // Persist before any retrieval or model call.  A browser can leave this SSE stream at
+        // any time, but the completed answer must remain recoverable from the same session.
+        AgentMessage streamingMessage = retainConversations
+                ? saveMessage(sessionId, "ASSISTANT", "", null, null, null, "GENERATING") : null;
+        // Make the session discoverable immediately instead of waiting for the model's final token.
+        touchSession(session, retainConversations, content);
         String requestId = UUID.randomUUID().toString().replace("-", "");
         ModelSelection selection = selectModel(userId, dto);
         if (PLATFORM.equals(selection.mode())) rateLimiter.checkPlatformCircuit();
         int estimatedTokens = estimateTokens(content);
         if (PLATFORM.equals(selection.mode())) rateLimiter.reservePlatformBudget(estimatedTokens);
-        String searchRequest = recommendationSearchRequest(sessionId, content);
-        boolean prefetchBookSearch = shouldPrefetchBookSearch(content, properties.isNativeToolCallingEnabled());
-        AgentReadOnlyToolService.ToolResult toolResult = readOnlyToolService.execute(userId, dto, content, searchRequest, prefetchBookSearch);
+        AgentReadOnlyToolService.ToolResult toolResult = readOnlyToolService.execute(userId, dto, content);
         boolean frozen = false;
         boolean degraded = false;
         PromptAssembly prompt = buildPrompt(session, dto, content, toolResult, userId);
@@ -336,7 +343,10 @@ public class AgentServiceImpl implements AgentService {
             // Spring AI resumes the same stream after a native tool call. Do not turn
             // recommendations into a blocking request just because book_search is available.
             modelResult = agentMetrics.observeModelCall(selection.mode(), selection.provider(), () ->
-                    callModelStreaming(userId, selection, dto, prompt, onDelta));
+                    callModelStreaming(userId, selection, dto, prompt, delta -> {
+                        onDelta.accept(delta);
+                        appendStreamingContent(streamingMessage, delta);
+                    }));
             if (PLATFORM.equals(selection.mode())) rateLimiter.recordPlatformSuccess();
             if (frozen) credit("settle", userId, requestId, "Platform agent request");
         } catch (Exception exception) {
@@ -350,6 +360,7 @@ public class AgentServiceImpl implements AgentService {
             modelResult = ModelCallResult.estimated(localFallback(dto), List.of());
             String answer = modelResult.content();
             onDelta.accept(answer);
+            appendStreamingContent(streamingMessage, answer);
             degraded = true;
         }
         String answer = modelResult.content();
@@ -358,7 +369,7 @@ public class AgentServiceImpl implements AgentService {
                 referencedBooks(answer, modelResult.bookReferences()));
         answer = enforceVerifiedRecommendationAnswer(answer, content, bookReferences);
         answer = appendBookReferenceEvidence(enforceBookSearchEvidence(answer, content, toolResult, bookReferences), bookReferences);
-        if (retainConversations) saveMessage(sessionId, "ASSISTANT", answer, writeCitations(citations), writeBookReferences(bookReferences), toolResult.traceJson());
+        if (streamingMessage != null) completeStreamingMessage(streamingMessage, answer, citations, bookReferences, toolResult.traceJson());
         touchSession(session, retainConversations, content);
         saveUsage(userId, sessionId, selection, requestId, prompt, modelResult, degraded ? "DEGRADED" : "SUCCESS");
         agentMetrics.recordModelCall(selection.mode(), degraded, startedAtNanos);
@@ -556,6 +567,7 @@ public class AgentServiceImpl implements AgentService {
         }
         List<AgentMessage> history = messageMapper.selectList(Wrappers.<AgentMessage>lambdaQuery()
                 .eq(AgentMessage::getSessionId, session.getId()).eq(AgentMessage::getDeleted, false)
+                .eq(AgentMessage::getGenerationStatus, "COMPLETED")
                 .orderByDesc(AgentMessage::getCreatedAt).orderByDesc(AgentMessage::getId).last("LIMIT 13"));
         java.util.Collections.reverse(history);
         removeCurrentUserMessage(history, content);
@@ -580,6 +592,11 @@ public class AgentServiceImpl implements AgentService {
                     + "不得编造内心想法、后续知识或未出现的背景；没有证据时必须说无法判断。");
             system.add("角色访谈输出格式：必须使用以下三个可见部分：原文事实、基于事实的推断、不足以判断。"
                     + "不得把推断内容放入原文事实部分。");
+            if (Boolean.TRUE.equals(dto.getInterviewOpening())) {
+                system.add("角色访谈开场：读者刚刚选定角色，尚未提出第一个问题。"
+                        + "只用该角色第一人称写一至两句自然的就位回应，并邀请读者提问。"
+                        + "不要输出原文事实/推断/未知三个部分；不要自拟任何问题、答案、采访稿或剧情总结。");
+            }
         }
         budget.add("system", String.join("\n", system.stream().filter(value -> !value.startsWith("__HISTORY__")).toList()));
 
@@ -616,9 +633,10 @@ public class AgentServiceImpl implements AgentService {
         String basePolicy = "你是善阅坊的中文小说阅读助手。请使用自然的简体中文回答，表达简洁、友好、诚实。"
                 + "不得编造小说事实；没有可靠证据时必须明确说明；不得透露用户尚未阅读的剧情。"
                 + "用户本轮的新要求优先于历史偏好；含有‘不要、排除、不看、改成’的条件会覆盖冲突的旧条件。"
-                + "推荐、找书或确认平台是否可读时，不要先用用户整句话进行宽泛搜索。先在内部根据需求规划3至5个具体候选书名和作者，"
-                + "再针对每个具体候选调用 book_search（查询应包含书名、作者和最新排除条件）逐本核验；最后只能从工具验证成功的候选中作答。"
-                + "候选规划和工具调用过程必须保持内部不可见，不要输出‘让我先规划’、候选清单、搜索过程或工具错误细节；用户只应看到核验完成后的最终推荐。"
+                + "推荐、找书或确认平台是否可读时，调用一次 book_search。由你根据语义在结构化参数中给出 query 或 queries："
+                + "单一题材或书名使用 query；多个明确独立书名使用 queries，服务端会并行核验。"
+                + "只能推荐工具返回的已核验作品；若工具没有相关候选，应如实说明，不能用无关作品凑数。"
+                + "工具调用过程必须保持内部不可见，不要输出搜索过程或工具错误细节；用户只应看到核验完成后的最终推荐。"
                 + "候选规划不是事实引用，不得把未经 book_search 验证的候选展示给用户；不得只查书架，也不得凭记忆宣称平台可读。"
                 + "用户要求直接推荐时，应结合其最新排除条件给出明确选择和理由，不要反复追问已经回答过的偏好。"
                 + "候选资料没有明确给出篇幅、完结状态或类型时，不得自行断言这些条件已满足，应如实说明尚无法核实。";
@@ -678,17 +696,6 @@ public class AgentServiceImpl implements AgentService {
         return selected;
     }
 
-    private String recommendationSearchRequest(long sessionId, String content) {
-        if (!AgentReadOnlyToolService.asksForBookSearch(content == null ? "" : content.toLowerCase(Locale.ROOT))) return content;
-        List<AgentMessage> recent = messageMapper.selectList(Wrappers.<AgentMessage>lambdaQuery()
-                .eq(AgentMessage::getSessionId, sessionId)
-                .eq(AgentMessage::getRole, "USER")
-                .eq(AgentMessage::getDeleted, false)
-                .orderByDesc(AgentMessage::getCreatedAt).orderByDesc(AgentMessage::getId).last("LIMIT 6"));
-        java.util.Collections.reverse(recent);
-        return recommendationSearchRequest(content, recent.stream().map(AgentMessage::getContent).toList());
-    }
-
     static String recommendationSearchRequest(String content, List<String> recentUserMessages) {
         String current = content == null ? "" : content.trim();
         List<String> constraints = new ArrayList<>();
@@ -700,17 +707,6 @@ public class AgentServiceImpl implements AgentService {
         }
         if (constraints.isEmpty()) return current;
         return current + "。本会话最近约束：" + String.join("；", constraints.stream().skip(Math.max(0, constraints.size() - 4)).toList());
-    }
-
-    static boolean shouldPrefetchBookSearch(String content, boolean nativeToolCallingEnabled) {
-        if (!nativeToolCallingEnabled) return true;
-        String normalized = content == null ? "" : content.toLowerCase(Locale.ROOT);
-        boolean exactLookup = (normalized.contains("搜索") || normalized.contains("搜书") || normalized.contains("查找"))
-                && !normalized.contains("推荐") && !normalized.contains("看什么") && !normalized.contains("读什么");
-        if (exactLookup) return true;
-        // With native tools the model must first plan concrete candidates. Server-side
-        // prefetch remains only as a compatibility path for providers without tool calls.
-        return !AgentReadOnlyToolService.asksForBookSearch(normalized);
     }
 
     static String currentConstraintSummary(String content) {
@@ -753,7 +749,7 @@ public class AgentServiceImpl implements AgentService {
         return values.stream().distinct().limit(8).toList();
     }
 
-    private String enforceVerifiedRecommendationAnswer(String answer, String request, List<BookReferenceVO> references) {
+    static String enforceVerifiedRecommendationAnswer(String answer, String request, List<BookReferenceVO> references) {
         if (!AgentReadOnlyToolService.asksForBookSearch(request == null ? "" : request.toLowerCase(Locale.ROOT))
                 || references == null || references.isEmpty()) return answer;
         java.util.Set<String> verified = references.stream().map(BookReferenceVO::getTitle)
@@ -765,12 +761,14 @@ public class AgentServiceImpl implements AgentService {
                 .filter(title -> exclusions.stream().noneMatch(term -> title.toLowerCase(Locale.ROOT).contains(term)))
                 .anyMatch(title -> !verified.contains(title));
         if (!containsUnverifiedRecommendation) return answer;
-        BookReferenceVO choice = references.get(0);
-        StringBuilder safe = new StringBuilder("今晚推荐你读 **《").append(choice.getTitle()).append("》**");
-        if (StringUtils.hasText(choice.getAuthor())) safe.append("，作者").append(choice.getAuthor().replaceFirst("^作者[:：]", ""));
-        safe.append("。这部作品已经通过平台书源核验，可以直接打开阅读。");
-        if (StringUtils.hasText(choice.getSummary())) safe.append("\n\n平台简介：").append(choice.getSummary());
-        safe.append("\n\n我已排除本轮明确不要的作品，也没有使用你的书架作为候选来源。");
+        StringBuilder safe = new StringBuilder("以下是已通过平台书源核验、可直接打开阅读的候选：\n");
+        references.stream().limit(3).forEach(book -> {
+            safe.append("- **《").append(book.getTitle()).append("》**");
+            if (StringUtils.hasText(book.getAuthor())) safe.append("（").append(book.getAuthor().replaceFirst("^作者[:：]", "")).append("）");
+            if (StringUtils.hasText(book.getSummary())) safe.append("：").append(book.getSummary());
+            safe.append("\n");
+        });
+        if (!exclusions.isEmpty()) safe.append("\n已按本轮明确排除条件过滤候选：").append(String.join("、", exclusions)).append("。");
         return safe.toString();
     }
 
@@ -887,8 +885,29 @@ public class AgentServiceImpl implements AgentService {
         }
     }
 
+    private void appendStreamingContent(AgentMessage message, String delta) {
+        if (message == null || !StringUtils.hasText(delta)) return;
+        message.setContent(message.getContent() + delta);
+        messageMapper.updateById(message);
+    }
+
+    private void completeStreamingMessage(AgentMessage message, String content, List<CitationVO> citations,
+                                          List<BookReferenceVO> bookReferences, String toolTrace) {
+        message.setContent(content);
+        message.setCitationsJson(writeCitations(citations));
+        message.setBookReferencesJson(writeBookReferences(bookReferences));
+        message.setToolTraceJson(toolTrace);
+        message.setGenerationStatus("COMPLETED");
+        messageMapper.updateById(message);
+    }
+
     private void saveMessage(long sessionId, String role, String content, String citations,
                              String bookReferences, String toolTrace) {
+        saveMessage(sessionId, role, content, citations, bookReferences, toolTrace, "COMPLETED");
+    }
+
+    private AgentMessage saveMessage(long sessionId, String role, String content, String citations,
+                                     String bookReferences, String toolTrace, String generationStatus) {
         AgentMessage message = new AgentMessage();
         message.setId(SnowflakeIdUtil.next());
         message.setSessionId(sessionId);
@@ -897,7 +916,9 @@ public class AgentServiceImpl implements AgentService {
         message.setCitationsJson(citations);
         message.setBookReferencesJson(bookReferences);
         message.setToolTraceJson(toolTrace);
+        message.setGenerationStatus(generationStatus);
         messageMapper.insert(message);
+        return message;
     }
 
     private void saveUsage(long userId, long sessionId, ModelSelection selection, String requestId,
@@ -947,17 +968,22 @@ public class AgentServiceImpl implements AgentService {
     private void configureNativeTools(OpenAiChatOptions options, long userId, ChatMessageDTO dto,
                                       List<BookReferenceVO> functionReferences) {
         if (!properties.isNativeToolCallingEnabled()) return;
-        options.setFunctionCallbacks(List.of(
-                nativeTool("bookshelf_read", "仅当用户明确要求从自己的书架挑选时，读取当前用户自己的书架", userId, dto, functionReferences),
-                nativeTool("book_search", "推荐或找书时必须调用。请先规划候选，再用具体书名、作者和排除条件逐本搜索；不要把整句宽泛需求直接作为查询。返回平台已验证且可直接阅读的作品", userId, dto, functionReferences),
-                nativeTool("book_detail", "读取当前作品已验证的书籍信息", userId, dto, functionReferences),
-                nativeTool("knowledge_graph_read", "只读取当前阅读章节以内的作品关系图", userId, dto, functionReferences)));
+        AtomicInteger bookSearchCalls = new AtomicInteger();
+        List<FunctionCallback> callbacks = new ArrayList<>(List.of(
+                nativeTool("bookshelf_read", "仅当用户明确要求从自己的书架挑选时，读取当前用户自己的书架", userId, dto, functionReferences, bookSearchCalls),
+                nativeTool("book_detail", "读取当前作品已验证的书籍信息", userId, dto, functionReferences, bookSearchCalls),
+                nativeTool("knowledge_graph_read", "只读取当前阅读章节以内的作品关系图", userId, dto, functionReferences, bookSearchCalls),
+                nativeTool("book_search", "推荐或找书时调用一次。单一题材或书名传 query；多个独立书名传 queries（最多3个），服务端并行核验。只能推荐工具返回的已核验作品", userId, dto, functionReferences, bookSearchCalls)));
+        options.setFunctionCallbacks(callbacks);
     }
 
     private FunctionCallback nativeTool(String name, String description, long userId, ChatMessageDTO dto,
-                                        List<BookReferenceVO> functionReferences) {
+                                        List<BookReferenceVO> functionReferences, AtomicInteger bookSearchCalls) {
         return FunctionCallbackWrapper.<NativeToolInput, Object>builder(input -> {
             try {
+                if ("book_search".equals(name) && bookSearchCalls.incrementAndGet() > 1) {
+                    return Map.of("error", "本轮书源核验已完成，请基于已返回的候选作答");
+                }
                 Object result = callReadOnlyToolOffEventLoop(name, userId, dto, input);
                 if ("book_search".equals(name) && result instanceof List<?> values) {
                     List<BookReferenceVO> filtered = filterExcludedReferences(dto.getContent(), bookReferencesFromToolResult(values));
@@ -976,12 +1002,12 @@ public class AgentServiceImpl implements AgentService {
     private Object callReadOnlyToolOffEventLoop(String name, long userId, ChatMessageDTO dto, NativeToolInput input) throws Exception {
         return CompletableFuture.supplyAsync(() -> switch (name) {
                     case "bookshelf_read" -> mcpReadOnlyToolService.call(userId, "bookshelf.list", Map.of());
-                    case "book_search" -> mcpReadOnlyToolService.call(userId, "book.search", Map.of("query", input.query() == null ? "" : input.query()));
+                    case "book_search" -> mcpReadOnlyToolService.call(userId, "book.search", Map.of("query", input.query() == null ? "" : input.query(), "queries", input.queries() == null ? List.of() : input.queries()));
                     case "book_detail" -> activeBookTool(userId, dto, "book.detail", input);
                     case "knowledge_graph_read" -> activeBookTool(userId, dto, "knowledge_graph.query", input);
                     default -> Map.of("error", "工具不在只读白名单中");
                 }, READ_ONLY_TOOL_EXECUTOR)
-                .get(25, TimeUnit.SECONDS);
+                .get(12, TimeUnit.SECONDS);
     }
 
     private Object activeBookTool(long userId, ChatMessageDTO dto, String name, NativeToolInput input) {
@@ -1025,7 +1051,7 @@ public class AgentServiceImpl implements AgentService {
     private record PromptAssembly(String text, PromptContextBudget budget, String retrievalTraceJson,
                                   List<CitationVO> citations, List<Message> messages,
                                   List<BookReferenceVO> bookReferences) { }
-    public record NativeToolInput(String query, Long canonicalBookId, Integer currentChapter) { }
+    public record NativeToolInput(String query, List<String> queries, Long canonicalBookId, Integer currentChapter) { }
 
     private void credit(String operation, long userId, String requestId, String reason) {
         CreditOperationRequest request = new CreditOperationRequest();
@@ -1067,6 +1093,7 @@ public class AgentServiceImpl implements AgentService {
         vo.setContent(entity.getContent());
         vo.setCitations(readCitations(entity.getCitationsJson()));
         vo.setBookReferences(readBookReferences(entity.getBookReferencesJson()));
+        vo.setGenerationStatus(entity.getGenerationStatus());
         vo.setCreatedAt(entity.getCreatedAt());
         return vo;
     }

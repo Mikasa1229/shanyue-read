@@ -23,6 +23,12 @@ class AgentPromptAdvisorChainTest {
     }
 
     @Test
+    void forbidsTheModelFromWritingBothSidesOfAnInterview() {
+        assertThat(chain.instructions(new com.shanyuefang.agent.domain.dto.ChatMessageDTO(), null))
+                .anyMatch(value -> value.contains("不得自问自答") && value.contains("伪造“问：/答：”采访稿"));
+    }
+
+    @Test
     void instructsShelfPlansToUseParseableMarkdownInsteadOfInlineFormatting() {
         com.shanyuefang.agent.domain.dto.ChatMessageDTO dto = new com.shanyuefang.agent.domain.dto.ChatMessageDTO();
         dto.setContent("请读取我的书架，整理并分类作品");

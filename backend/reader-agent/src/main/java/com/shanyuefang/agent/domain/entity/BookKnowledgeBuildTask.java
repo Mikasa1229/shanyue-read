@@ -25,6 +25,10 @@ public class BookKnowledgeBuildTask {
     private Integer endChapter;
     private Integer totalChapters;
     private Integer completedChapters;
+    private String currentStage;
+    private Integer stageCompletedUnits;
+    private Integer stageTotalUnits;
+    private Integer overallProgress;
     private Long estimatedInputTokens;
     private Long estimatedOutputTokens;
     private Integer estimatedCredits;

@@ -18,5 +18,7 @@ public class ChatMessageDTO {
     private String currentBookTitle;
     @Size(max = 64)
     private String interviewCharacter;
+    /** The reader has just chosen a role and has not asked the first interview question yet. */
+    private Boolean interviewOpening = false;
     private Boolean reuseExistingUserMessage = false;
 }

@@ -44,6 +44,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @RestController
 @RequestMapping("/api/agent")
@@ -119,43 +120,42 @@ public class AgentController {
                              @RequestHeader(value = "X-Agent-Client-Ip", required = false) String clientIp,
                              @PathVariable Long sessionId,
                              @Valid @RequestBody ChatMessageDTO dto) {
-        SseEmitter emitter = new SseEmitter(90_000L);
+        // A model may need one verified book-search call before producing the first token.
+        // Keep the transport alive longer than that bounded preparation without altering the model budget.
+        SseEmitter emitter = new SseEmitter(120_000L);
         CompletableFuture.runAsync(() -> {
             if (!agentService.acquireConversationSlot(userId, sessionId, clientIp)) {
-                try { emitter.send(SseEmitter.event().name("error").data(Map.of("message", "This conversation is already generating a reply"))); }
+                try { emitter.send(SseEmitter.event().name("error").data(Map.of("message", "这段对话仍在生成回答，页面会自动恢复已生成内容"))); }
                 catch (IOException ignored) { }
                 emitter.complete();
                 return;
             }
+            AtomicBoolean clientConnected = new AtomicBoolean(true);
             try {
-                emitter.send(SseEmitter.event().name("meta").data(Map.of("sessionId", sessionId)));
-                emitter.send(SseEmitter.event().name("tool_status").data(Map.of("status", "thinking")));
+                sendIfConnected(emitter, clientConnected, "meta", Map.of("sessionId", sessionId));
+                sendIfConnected(emitter, clientConnected, "tool_status", Map.of("status", "thinking"));
                 AgentReplyVO reply = agentService.streamChat(userId, sessionId, dto, delta -> {
-                    try {
-                        emitter.send(SseEmitter.event().name("delta").data(delta));
-                    } catch (IOException exception) {
-                        throw new IllegalStateException("SSE client disconnected", exception);
-                    }
+                    sendIfConnected(emitter, clientConnected, "delta", delta);
                 });
                 // Structured UI data stays outside model prose; optional previews cannot fail an answered chat.
-                try {
+                if (clientConnected.get()) try {
                     String request = dto.getContent() == null ? "" : dto.getContent();
                     boolean excludesShelf = request.contains("不要从书架") || request.contains("不从书架")
                             || request.contains("别从书架") || request.contains("不用书架");
-                    emitter.send(SseEmitter.event().name("recommendations").data(excludesShelf
-                            ? List.of() : recommendationService.dynamicShelf(userId).stream().limit(3).toList()));
+                    sendIfConnected(emitter, clientConnected, "recommendations", excludesShelf
+                            ? List.of() : recommendationService.dynamicShelf(userId).stream().limit(3).toList());
                     if (dto.getCanonicalBookId() != null && dto.getCurrentChapter() != null) {
                         int boundary = spoilerBoundaryService.clamp(userId, dto.getCanonicalBookId(), dto.getCurrentChapter());
-                        emitter.send(SseEmitter.event().name("graph").data(knowledgeService.graph(dto.getCanonicalBookId(), boundary)));
+                        sendIfConnected(emitter, clientConnected, "graph", knowledgeService.graph(dto.getCanonicalBookId(), boundary));
                     }
                 } catch (Exception previewException) {
                     log.debug("Agent structured SSE preview unavailable for sessionId={}", sessionId);
                 }
-                emitter.send(SseEmitter.event().name("done").data(reply));
-                emitter.complete();
+                sendIfConnected(emitter, clientConnected, "done", reply);
+                if (clientConnected.get()) emitter.complete();
             } catch (Exception e) {
                 try {
-                    emitter.send(SseEmitter.event().name("error").data(Map.of("message", "Agent request failed")));
+                    emitter.send(SseEmitter.event().name("error").data(Map.of("message", "Agent 请求失败，请稍后重试")));
                 } catch (IOException ignored) {
                     // The browser has already closed the stream.
                 }
@@ -165,6 +165,17 @@ public class AgentController {
             }
         });
         return emitter;
+    }
+
+    private void sendIfConnected(SseEmitter emitter, AtomicBoolean clientConnected, String event, Object data) {
+        if (!clientConnected.get()) return;
+        try {
+            emitter.send(SseEmitter.event().name(event).data(data));
+        } catch (IOException exception) {
+            // A page refresh closes only this response stream; the persisted generation must continue.
+            clientConnected.set(false);
+            log.debug("Agent SSE client disconnected while generating");
+        }
     }
 
     @GetMapping("/models")

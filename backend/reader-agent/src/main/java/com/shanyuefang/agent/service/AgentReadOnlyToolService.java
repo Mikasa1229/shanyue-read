@@ -17,6 +17,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Controlled compatibility layer for Spring AI 0.8.x: only a fixed allowlist of
@@ -43,6 +45,11 @@ public class AgentReadOnlyToolService {
 
     public ToolResult execute(long userId, ChatMessageDTO dto, String request, String bookSearchRequest,
                               boolean prefetchBookSearch) {
+        return execute(userId, dto, request, List.of(bookSearchRequest), prefetchBookSearch);
+    }
+
+    public ToolResult execute(long userId, ChatMessageDTO dto, String request, List<String> bookSearchRequests,
+                              boolean prefetchBookSearch) {
         String normalized = request == null ? "" : request.toLowerCase(Locale.ROOT);
         List<String> context = new ArrayList<>();
         List<String> tools = new ArrayList<>();
@@ -57,7 +64,7 @@ public class AgentReadOnlyToolService {
             context.add(readBookDetail(dto.getCanonicalBookId()));
         } else if (prefetchBookSearch && asksForBookSearch(normalized)) {
             tools.add("book.search.read");
-            SearchResult searchResult = searchBooks(bookSearchRequest);
+            SearchResult searchResult = searchBooks(bookSearchRequests);
             context.add(searchResult.context());
             bookReferences.addAll(searchResult.bookReferences());
         }
@@ -110,6 +117,32 @@ public class AgentReadOnlyToolService {
                     + "；" + String.valueOf(book.getOrDefault("summary", "暂无已验证简介。"));
         } catch (Exception ignored) { return "作品详情：暂时不可用。"; }
     }
+    private SearchResult searchBooks(List<String> requests) {
+        List<String> queries = requests == null ? List.of() : requests.stream()
+                .filter(query -> query != null && !query.isBlank()).distinct().limit(3).toList();
+        if (queries.isEmpty()) return new SearchResult("平台书源搜索没有找到可直接阅读的作品。", List.of());
+        List<CompletableFuture<SearchResult>> futures = queries.stream()
+                .map(query -> CompletableFuture.supplyAsync(() -> searchBooks(query))).toList();
+        try { CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).get(12, TimeUnit.SECONDS); }
+        catch (Exception ignored) { /* Keep completed queries; one slow book source must not block the batch. */ }
+        List<BookReferenceVO> references = new ArrayList<>();
+        for (CompletableFuture<SearchResult> future : futures) {
+            SearchResult result = future.getNow(null);
+            if (result != null) references.addAll(result.bookReferences());
+        }
+        Map<String, BookReferenceVO> unique = new LinkedHashMap<>();
+        for (BookReferenceVO reference : references) {
+            if (reference.getCanonicalBookId() != null) unique.putIfAbsent(String.valueOf(reference.getCanonicalBookId()), reference);
+        }
+        List<BookReferenceVO> merged = unique.values().stream().limit(8).toList();
+        String context = merged.isEmpty() ? "平台书源搜索没有找到可直接阅读的作品。"
+                : "平台书源已验证候选（只能从下列作品中推荐；不得补充列表外作品）：\n" + merged.stream()
+                .map(book -> "- 《" + book.getTitle() + "》 / " + book.getAuthor()
+                        + (book.getSummary() == null || book.getSummary().isBlank() ? "" : " / " + book.getSummary()))
+                .reduce((a, b) -> a + "\n" + b).orElse("");
+        return new SearchResult(context, merged);
+    }
+
     private SearchResult searchBooks(String request) {
         try {
             R<List<Map<String, Object>>> response = canonicalBookClient.search(properties.getInternalToken(), request.trim(), 12);

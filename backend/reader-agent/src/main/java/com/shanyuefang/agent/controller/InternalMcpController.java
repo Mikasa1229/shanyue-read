@@ -60,8 +60,9 @@ public class InternalMcpController {
         return TOOLS.entrySet().stream().map(entry -> tool(entry.getKey(), entry.getValue())).toList();
     }
     private Map<String, Object> tool(String name, ToolSpec spec) {
-        Map<String, Map<String, String>> schemaProperties = new java.util.LinkedHashMap<>();
-        spec.properties().forEach((key, type) -> schemaProperties.put(key, Map.of("type", type)));
+        Map<String, Map<String, Object>> schemaProperties = new java.util.LinkedHashMap<>();
+        spec.properties().forEach((key, type) -> schemaProperties.put(key,
+                "string-array".equals(type) ? Map.of("type", "array", "items", Map.of("type", "string")) : Map.of("type", type)));
         return Map.of("name", name, "description", spec.description(), "inputSchema", Map.of("type", "object", "properties", schemaProperties,
                 "required", spec.required(), "additionalProperties", false));
     }
@@ -76,6 +77,7 @@ public class InternalMcpController {
             Object value = arguments.get(property.getKey());
             if (value == null) continue;
             boolean valid = "string".equals(property.getValue()) ? value instanceof String
+                    : "string-array".equals(property.getValue()) ? value instanceof List<?> values && values.stream().allMatch(String.class::isInstance)
                     : value instanceof Number && Math.floor(((Number) value).doubleValue()) == ((Number) value).doubleValue();
             if (!valid) throw new IllegalArgumentException("MCP tool argument has invalid type: " + property.getKey());
         }
@@ -83,7 +85,8 @@ public class InternalMcpController {
     private static Map<String, ToolSpec> toolSpecs() {
         Map<String, ToolSpec> specs = new LinkedHashMap<>();
         specs.put("bookshelf.list", new ToolSpec("Read the requesting user's bookshelf", Map.of(), List.of()));
-        specs.put("book.search", new ToolSpec("Search canonical books", Map.of("query", "string"), List.of("query")));
+        specs.put("book.search", new ToolSpec("Search canonical books. Use query for one target or queries for up to three independent targets.",
+                Map.of("query", "string", "queries", "string-array"), List.of()));
         specs.put("book.detail", new ToolSpec("Read canonical book metadata", Map.of("canonicalBookId", "integer"), List.of("canonicalBookId")));
         specs.put("reading.state", new ToolSpec("Read spoiler-bounded timeline", Map.of("canonicalBookId", "integer", "currentChapter", "integer"), List.of("canonicalBookId", "currentChapter")));
         specs.put("knowledge_graph.query", new ToolSpec("Read spoiler-bounded graph", Map.of("canonicalBookId", "integer", "currentChapter", "integer"), List.of("canonicalBookId", "currentChapter")));

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="agent-center page" :class="{ 'is-workspace': activeTab !== 'overview', 'is-chat-workspace': activeTab === 'chats' }">
     <div class="container">
       <p v-if="loadNotice" class="agent-load-notice">{{ loadNotice }}</p>
@@ -43,7 +43,7 @@
                 <span class="dashboard-label">最近知识图谱任务</span>
                 <strong>{{ buildTasks[0].status === 'COMPLETED' ? '最近任务已完成' : buildTasks[0].status === 'FAILED' ? '最近任务需要处理' : '正在构建知识图谱' }}</strong>
                 <p>{{ buildTasks[0].message || buildTasks[0].errorMessage || '等待任务状态更新' }}</p>
-                <div class="task-progress"><i :style="{ width: `${Math.min(100, Math.round((buildTasks[0].completedChapters || 0) / Math.max(1, buildTasks[0].totalChapters || 1) * 100))}%` }" /></div>
+                <div class="task-progress"><i :style="{ width: `${taskProgressPercent(buildTasks[0])}%` }" /></div>
                 <button type="button" @click="selectTab('tasks')">查看任务进度 →</button>
               </template>
               <template v-else>
@@ -78,13 +78,16 @@
             <div class="chat-header"><div class="chat-title-block"><span class="agent-eyebrow">阅读对话</span><div class="conversation-title-row"><input v-if="editingSessionTitle" ref="sessionTitleInput" v-model="sessionTitleDraft" class="conversation-title-input" maxlength="80" @keydown.enter.prevent="saveSessionTitle" @keydown.esc.prevent="cancelSessionTitle" @blur="saveSessionTitle" /><strong v-else>{{ activeSession.title || '未命名对话' }}</strong><button class="conversation-title-edit" type="button" :title="editingSessionTitle ? '保存标题' : '重命名对话'" @mousedown.prevent @click="editingSessionTitle ? saveSessionTitle() : startSessionTitleEdit()">{{ editingSessionTitle ? '保存' : '编辑标题' }}</button></div><small>{{ chatReferenceBook ? `围绕《${chatReferenceBook.bookName}》展开` : '尚未绑定书籍，你也可以随时开始闲聊' }}</small></div><div class="chat-actions"><span v-if="insightBookId" class="context-chip">安全边界 · 第 {{ insightChapter }} 章</span><button class="icon-action" title="导出对话" @click="exportConversation">导出</button><button class="icon-action danger" title="删除对话" @click="deleteConversation">删除</button></div></div>
             <div class="chat-history">
               <div v-if="!messages.length && !sending" class="chat-welcome"><span class="welcome-mark">阅</span><div><span class="agent-eyebrow">小说阅读，不只是提问</span><h2>从你读到的地方继续。</h2><p>把书架、知识图谱和已读章节都交给我。每个可核验回答都会带上它来自哪一章。</p><div class="starter-prompts"><button v-for="prompt in starterPrompts" :key="prompt" @click="useStarterPrompt(prompt)">{{ prompt }} <b>→</b></button></div></div></div>
-              <article v-for="message in messages" :key="message.id" :class="['center-message', message.role === 'USER' ? 'user' : 'assistant']">
+              <article v-for="message in displayedMessages" :key="message.id" :class="['center-message', message.role === 'USER' ? 'user' : 'assistant']">
                 <template v-if="message.role === 'USER' && editingMessageId === message.id">
                   <textarea v-model="editingMessageContent" class="message-editor" rows="3" @keydown.esc.prevent="cancelMessageEdit" @keydown.ctrl.enter.prevent="saveMessageEdit(message)" />
                   <div class="message-edit-actions"><button type="button" @click="cancelMessageEdit">取消</button><button type="button" :disabled="sending || !editingMessageContent.trim()" @click="saveMessageEdit(message)">保存并重新生成</button></div>
                 </template>
                 <template v-else>
-                  <div v-if="message.role === 'ASSISTANT'" class="message-markdown" v-html="renderMarkdown(message.content)" />
+                  <template v-if="message.role === 'ASSISTANT'">
+                    <div v-if="message.content" class="message-markdown" v-html="renderMarkdown(message.content)" />
+                    <div v-else-if="isMessageGenerating(message)" class="message-generating" role="status"><i aria-hidden="true" />正在生成回答，请耐心等待…</div>
+                  </template>
                   <span v-else>{{ message.content }}</span>
                   <button v-if="message.role === 'USER' && !String(message.id).startsWith('local-')" class="message-edit-button" type="button" title="编辑这条提问并重新生成后续回答" @click="startMessageEdit(message)"><span>✎</span> 编辑并重新生成</button>
                 </template>
@@ -125,7 +128,7 @@
                   <button v-if="!enabledModels.length" type="button" class="model-picker-manage" @click="selectTab('models'); showModelPicker = false">添加个人模型 →</button>
                 </div>
               </div>
-              <button class="send-button" :disabled="sending || !draft.trim()"><span>{{ sending ? '整理中' : '发送问题' }}</span><b>↗</b></button>
+              <button class="send-button" :disabled="sending || !draft.trim()"><span>{{ sending ? '正在生成' : '发送问题' }}</span><b>↗</b></button>
             </form>
           </template>
           <div v-else class="empty-state">创建一段对话，开始整理你的阅读世界。</div>
@@ -178,7 +181,12 @@
           <p v-if="!buildTasks.length" class="task-empty">还没有图谱构建任务。进入书籍洞察后，选择章节范围即可创建第一个任务。</p>
             <article v-for="task in buildTasks" :key="task.id" class="task-row">
               <div class="task-row-main"><span class="task-status" :class="task.status.toLowerCase()">{{ task.status === 'COMPLETED' ? '已完成' : task.status === 'FAILED' ? '失败' : task.status === 'RUNNING' ? '构建中' : '等待中' }}</span><strong>《{{ taskBookTitle(task) }}》</strong><small>构建范围：第 {{ task.startChapter || 1 }} 章至第 {{ task.endChapter || task.totalChapters || 1 }} 章 · {{ task.modelMode === 'BYOK' ? '个人模型' : `预计 ${task.estimatedCredits || 0} 积分` }}</small></div>
-              <div class="task-row-progress"><div class="task-progress-label"><b>{{ task.completedChapters || 0 }} / {{ task.totalChapters || 0 }} 章</b><small>{{ taskProgressPercent(task) }}%</small></div><div class="task-progress-track" :class="task.status.toLowerCase()"><i :style="{ width: `${taskProgressPercent(task)}%` }" /></div><small>{{ task.message || task.errorMessage || '等待任务状态更新' }}</small></div>
+              <details class="task-row-progress" :open="['RUNNING', 'FAILED'].includes(task.status)">
+                <summary><div class="task-progress-label"><b>整体构建进度</b><small>{{ taskProgressPercent(task) }}%</small></div><div class="task-progress-track" :class="task.status.toLowerCase()"><i :style="{ width: `${taskProgressPercent(task)}%` }" /></div><small>{{ task.message || task.errorMessage || '等待任务状态更新' }}</small><span class="task-stage-toggle">查看子任务 <i>⌄</i></span></summary>
+                <ol class="task-stage-list" aria-label="知识图谱构建子任务">
+                  <li v-for="stage in taskStages(task)" :key="stage.key" :class="stage.status.toLowerCase()"><div><b>{{ stage.label }}</b><small>{{ stage.status === 'COMPLETED' ? '已完成' : stage.status === 'RUNNING' ? stage.detail : stage.status === 'FAILED' ? '未完成' : '等待执行' }}</small></div><span>{{ stage.progress }}%</span><div class="task-stage-track"><i :style="{ width: `${stage.progress}%` }" /></div></li>
+                </ol>
+              </details>
               <button v-if="canDeleteBuildTask(task)" type="button" class="task-delete" @click="deleteBuildTask(task)">删除记录</button>
             </article>
         </div>
@@ -354,6 +362,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { renderMarkdown } from '@/utils/markdown'
 import { apiAddToShelf } from '@/api/bookshelf'
 import { apiGetMyShelf } from '@/api/bookshelf'
@@ -361,6 +370,7 @@ import { apiGetMyLevel } from '@/api/user'
   import { apiCreateAgentSession, apiDeleteAgentModel, apiDeleteAgentSession, apiDeleteBookKnowledgeTask, apiDeleteOwnedBookKnowledge, apiEraseAgentPersonalData, apiExportAgentSession, apiGetAgentCredits, apiGetAgentGraph, apiGetAgentClues, apiGetAgentInfrastructure, apiGetAgentMessages, apiGetAgentPreferences, apiGetAgentTimeline, apiGetAgentReadingMap, apiGetAgentReadingPlan, apiGetAgentReaderLink, apiGetAgentShelfGroups, apiGetPlotCapsule, apiGetQuickRecommendations, apiGetSimilarBooks, apiListAgentModels, apiRenameAgentSession, apiSaveAgentModel, apiSaveAgentPreferences, apiSaveAgentShelfGroup, apiSaveRecommendationFeedback, apiSetAgentModelEnabled, apiTestAgentModel, apiListAgentSessions, apiSearchAgentSessions, apiPrepareBookKnowledgeBuild, apiStartBookKnowledgeBuild, apiGetBookKnowledgeStatus, apiGetBookKnowledgeTasks, apiUpdateAgentMessage, apiUpdateBookKnowledgeSharing, streamAgentMessage } from '@/api/agent'
 
 const toast = useToast()
+const { confirm } = useConfirmDialog()
 const actionNotice = ref(null)
 function showActionNotice(type, message) { actionNotice.value = { type, message }; window.setTimeout(() => { actionNotice.value = null }, 3500) }
 const router = useRouter()
@@ -441,10 +451,21 @@ const showGraphDeleteConfirm = ref(false)
 const graphDeleting = ref(false)
 const buildForm = ref({ modelMode: 'PLATFORM', modelConfigId: '', sharePublic: true, startChapter: 1, endChapter: 1 })
 let taskPollTimer = null
+let conversationPollTimer = null
 let buildEstimateTimer = null
 const graphTypes = computed(() => ['ALL', ...new Set((graph.value.nodes || []).map(node => node.type).filter(Boolean))])
 const enabledModels = computed(() => models.value.filter(model => model.enabled))
 const selectedChatModelLabel = computed(() => enabledModels.value.find(model => String(model.id) === selectedModelConfigId.value)?.model || '平台模型')
+const displayedMessages = computed(() => {
+  // A message ID is the durable identity across SSE, polling, and session reloads.
+  // Keep only the newest representation if two transports briefly overlap.
+  const byId = new Map()
+  for (const message of messages.value) {
+    if (message?.id == null) continue
+    byId.set(String(message.id), message)
+  }
+  return [...byId.values()]
+})
 const usableShelfBooks = computed(() => shelfBooks.value.filter(book => book?.canonicalBookId && book.bookName))
 const selectedInsightBook = computed(() => usableShelfBooks.value.find(book => String(book.canonicalBookId) === String(insightBookId.value)) || null)
 const safeInsightChapter = computed(() => Math.max(1, Number(selectedInsightBook.value?.lastChapterIndex ?? 0) + 1))
@@ -1151,7 +1172,12 @@ async function loadBuildTasks () {
 
   async function deleteBuildTask (task) {
     if (!canDeleteBuildTask(task)) return
-    if (!window.confirm('删除这条构建记录？知识图谱数据不会被删除。')) return
+    if (!await confirm({
+      title: '删除构建记录',
+      message: '确定删除这条构建记录吗？知识图谱数据、向量索引和已保存章节不会被删除。',
+      confirmText: '删除记录',
+      tone: 'danger'
+    })) return
     try {
       await apiDeleteBookKnowledgeTask(task.id)
       toast.success('构建记录已删除')
@@ -1216,9 +1242,41 @@ function taskBookTitle (task) {
 
 function taskProgressPercent (task) {
   if (task?.status === 'COMPLETED') return 100
+  const persisted = Number(task?.overallProgress)
+  if (Number.isFinite(persisted) && persisted >= 0) return Math.min(99, Math.round(persisted))
   const total = Math.max(1, Number(task?.totalChapters || 0))
   const completed = Math.max(0, Number(task?.completedChapters || 0))
-  return Math.min(100, Math.round(completed / total * 100))
+  // Older task records have no persisted total progress. Chapter extraction is 70% of a full build.
+  return Math.min(99, Math.round(completed / total * 70))
+}
+
+const graphBuildStages = [
+  { key: 'EXTRACT', label: '章节实体与关系抽取' },
+  { key: 'CHARACTER_CALIBRATION', label: '人物身份与关系校准' },
+  { key: 'STORY_EVENTS', label: '剧情事件脉络归纳' },
+  { key: 'CLUE_SYNTHESIS', label: '故事线索识别与关联' },
+  { key: 'CLUE_LIFECYCLE', label: '线索推进与揭晓核对' },
+  { key: 'RAG_REFRESH', label: '作品画像与检索索引刷新' },
+  { key: 'GRAPH_PROJECTION', label: '图谱展示数据同步' },
+  { key: 'FINALIZE', label: '结果核验与任务收尾' }
+]
+
+function taskStages (task) {
+  const currentIndex = graphBuildStages.findIndex(stage => stage.key === task?.currentStage)
+  return graphBuildStages.map((stage, index) => {
+    if (task?.status === 'COMPLETED') return { ...stage, status: 'COMPLETED', progress: 100, detail: '已完成' }
+    if (currentIndex < 0) return { ...stage, status: task?.status === 'FAILED' ? 'PENDING' : 'PENDING', progress: 0, detail: '等待开始' }
+    if (index < currentIndex) return { ...stage, status: 'COMPLETED', progress: 100, detail: '已完成' }
+    if (index > currentIndex) return { ...stage, status: 'PENDING', progress: 0, detail: '等待执行' }
+    const total = Math.max(1, Number(task?.stageTotalUnits || 1))
+    const completed = Math.max(0, Number(task?.stageCompletedUnits || 0))
+    return {
+      ...stage,
+      status: task?.status === 'FAILED' ? 'FAILED' : 'RUNNING',
+      progress: Math.min(100, Math.round(completed / total * 100)),
+      detail: `${completed} / ${total} ${stage.key === 'EXTRACT' ? '章' : '项'}`
+    }
+  })
 }
 
 async function startKnowledgeBuild () {
@@ -1271,8 +1329,64 @@ async function selectSession(session) {
   clearReadingContext()
   showChatPlugins.value = false
   activeSession.value = session
-  messages.value = await apiGetAgentMessages(session.id)
+  const selectedSessionId = String(session.id)
+  if (String(route.query.sessionId || '') !== selectedSessionId) {
+    router.replace({ query: { ...route.query, sessionId: selectedSessionId } })
+  }
+  const loadedMessages = await apiGetAgentMessages(session.id)
+  // Two session requests can finish out of order when the reader clicks quickly.
+  // Never let the older request replace the messages for the newly selected session.
+  if (String(activeSession.value?.id) !== selectedSessionId) return
+  messages.value = uniqueMessages(loadedMessages)
+  syncConversationGeneration(session.id)
   restoreSessionContext(session)
+}
+
+function isMessageGenerating(message) {
+  return message?.role === 'ASSISTANT' && message?.generationStatus === 'GENERATING'
+}
+
+function hasGeneratingMessage(sessionId = activeSession.value?.id) {
+  return String(sessionId || '') === String(activeSession.value?.id || '')
+    && messages.value.some(isMessageGenerating)
+}
+
+function stopConversationPoll() {
+  if (conversationPollTimer) clearTimeout(conversationPollTimer)
+  conversationPollTimer = null
+}
+
+async function refreshGeneratingConversation(sessionId) {
+  if (String(activeSession.value?.id) !== String(sessionId)) return
+  try {
+    messages.value = uniqueMessages(await apiGetAgentMessages(sessionId))
+    if (hasGeneratingMessage(sessionId)) {
+      conversationPollTimer = setTimeout(() => refreshGeneratingConversation(sessionId), 900)
+    } else {
+      sending.value = false
+      stopConversationPoll()
+      credits.value = await apiGetAgentCredits()
+    }
+  } catch (_) {
+    // Keep the current content visible; a temporary polling failure must not erase it.
+    conversationPollTimer = setTimeout(() => refreshGeneratingConversation(sessionId), 1800)
+  }
+}
+
+function syncConversationGeneration(sessionId) {
+  stopConversationPoll()
+  if (!hasGeneratingMessage(sessionId)) return
+  sending.value = true
+  conversationPollTimer = setTimeout(() => refreshGeneratingConversation(sessionId), 600)
+}
+
+function uniqueMessages (items) {
+  const byId = new Map()
+  for (const item of Array.isArray(items) ? items : []) {
+    if (item?.id == null) continue
+    byId.set(String(item.id), item)
+  }
+  return [...byId.values()]
 }
 function startSessionTitleEdit() {
   if (!activeSession.value || sending.value) return
@@ -1323,7 +1437,13 @@ async function exportConversation() {
   } catch (error) { toast.error(error.message) }
 }
 async function deleteConversation() {
-  if (!activeSession.value || !window.confirm('确定删除这段对话及其消息吗？')) return
+  if (!activeSession.value) return
+  if (!await confirm({
+    title: '删除对话',
+    message: '确定删除这段对话及其全部消息吗？删除后无法恢复。',
+    confirmText: '删除对话',
+    tone: 'danger'
+  })) return
   try {
     const deletedId = activeSession.value.id
     await apiDeleteAgentSession(deletedId)
@@ -1339,10 +1459,17 @@ async function send(requestContext = {}, contentOverride = '') {
   const content = (contentOverride || draft.value).trim()
   if (!activeSession.value || !content || sending.value) return
   if (!contentOverride) draft.value = ''
+  const sessionId = activeSession.value.id
   const localMessageId = Date.now()
+  const localAssistant = { id: `local-assistant-${localMessageId}`, role: 'ASSISTANT', content: '', generationStatus: 'GENERATING' }
   if (!requestContext.reuseExistingUserMessage) messages.value.push({ id: `local-user-${localMessageId}`, role: 'USER', content })
-  messages.value.push({ id: `local-assistant-${localMessageId}`, role: 'ASSISTANT', content: '' })
+  messages.value.push(localAssistant)
   sending.value = true
+  // The list is normally refreshed only after completion. Keep the selected session in
+  // the URL now, so a reload during retrieval can restore this exact conversation.
+  if (String(route.query.sessionId || '') !== String(sessionId)) {
+    router.replace({ query: { ...route.query, sessionId: String(sessionId) } })
+  }
   let answer = ''
   try {
     const modelRequest = selectedModelConfigId.value
@@ -1351,20 +1478,30 @@ async function send(requestContext = {}, contentOverride = '') {
     const readingContext = insightBookId.value && insightChapter.value >= 1
       ? { canonicalBookId: String(insightBookId.value), currentChapter: Number(insightChapter.value) - 1, currentBookTitle: selectedInsightBook.value?.bookName || chatReferenceBook.value?.bookName }
       : {}
-    await streamAgentMessage(activeSession.value.id, { content, ...modelRequest, ...readingContext, ...requestContext }, {
-      onDelta: (delta) => { answer += delta; messages.value[messages.value.length - 1].content = answer },
+    await streamAgentMessage(sessionId, { content, ...modelRequest, ...readingContext, ...requestContext }, {
+      onDelta: (delta) => { answer += delta; localAssistant.content = answer },
       onRecommendations: (data) => { if (Array.isArray(data)) shelfRecommendations.value = data },
       onDone: (reply) => {
-        const message = messages.value[messages.value.length - 1]
-        if (reply?.content) message.content = reply.content
-        message.citations = reply?.citations || []
-        message.bookReferences = reply?.bookReferences || []
+        if (reply?.content) localAssistant.content = reply.content
+        localAssistant.citations = reply?.citations || []
+        localAssistant.bookReferences = reply?.bookReferences || []
+        localAssistant.generationStatus = 'COMPLETED'
       },
       onError: (data) => { throw new Error(data?.message || '本次回答生成失败，请稍后重试。') }
     })
     credits.value = await apiGetAgentCredits()
-  } catch (error) { messages.value[messages.value.length - 1].content = error.message }
-  finally { sending.value = false }
+  } catch (error) { localAssistant.content = error.message; localAssistant.generationStatus = 'COMPLETED' }
+  finally {
+    sending.value = false
+    // Refresh only the session that produced this reply.  If the user has switched away,
+    // the in-memory view of the other conversation must not be overwritten.
+    if (String(activeSession.value?.id) === String(sessionId)) {
+      messages.value = uniqueMessages(await apiGetAgentMessages(sessionId))
+      sessions.value = await apiListAgentSessions()
+      const refreshed = sessions.value.find(item => String(item.id) === String(sessionId))
+      if (refreshed) activeSession.value = refreshed
+    }
+  }
 }
 function startMessageEdit(message) {
   if (message?.role !== 'USER' || sending.value) return
@@ -1422,7 +1559,14 @@ async function savePreferences() {
   } catch (error) { toast.error(error.message) }
 }
 async function erasePersonalData() {
-  if (!window.confirm('确定清除 Agent 偏好设置和选中的个人记录吗？此操作无法撤销。')) return
+  if (!await confirm({
+    title: '清除 Agent 数据',
+    message: eraseConversations.value
+      ? '确定清除阅读偏好、个人记录和全部对话吗？此操作无法撤销。'
+      : '确定清除阅读偏好和个人记录吗？已保存的对话不会被删除。',
+    confirmText: '确认清除',
+    tone: 'danger'
+  })) return
   try {
     await apiEraseAgentPersonalData(eraseConversations.value)
     preferences.value = { preferredGenres: [], avoidedThemes: [], spoilerLevel: 'STRICT', personalizationEnabled: true, retainConversations: true }
@@ -1432,7 +1576,12 @@ async function erasePersonalData() {
   } catch (error) { toast.error(error.message) }
 }
 async function confirmAddToShelf (item) {
-  if (!item?.canonicalBookId || !window.confirm(`确定将《${item.title}》加入书架吗？`)) return
+  if (!item?.canonicalBookId) return
+  if (!await confirm({
+    title: '加入书架',
+    message: `确定将《${item.title}》加入书架吗？`,
+    confirmText: '加入书架'
+  })) return
   try {
     const detail = await apiGetAgentReaderLink(item.canonicalBookId)
     if (!detail?.sourceId || !detail?.sourceBookUrl) throw new Error('这部作品暂时没有可用书源。')
@@ -1495,8 +1644,8 @@ async function startCharacterInterview(node) {
   if (!insightBookId.value || insightChapter.value < 1) return
   if (!activeSession.value) await newSession()
   selectTab('chats')
-  draft.value = `请以${node.name}的第一人称进行角色访谈。只使用我已经读过的章节，不要透露后续剧情，也不要编造事实。先说说此刻对你最重要的事情。`
-  await send({ canonicalBookId: String(insightBookId.value), currentChapter: Number(insightChapter.value) - 1, interviewCharacter: node.name })
+  draft.value = `我想采访${node.name}。`
+  await send({ canonicalBookId: String(insightBookId.value), currentChapter: Number(insightChapter.value) - 1, interviewCharacter: node.name, interviewOpening: true })
 }
 async function saveRecommendationFeedback(item, action) {
   try {
@@ -1650,6 +1799,7 @@ onBeforeUnmount(() => {
   if (globeRenderFrame) window.cancelAnimationFrame(globeRenderFrame)
   clearTimeout(taskPollTimer)
   clearTimeout(buildEstimateTimer)
+  stopConversationPoll()
 })
 </script>
 
@@ -1742,7 +1892,7 @@ onBeforeUnmount(() => {
 .session-list { min-height: 0; padding: 14px; border: 0!important; color: rgba(247,242,233,.8); background: var(--agent-ink)!important; }.session-list-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 3px 15px; color: var(--agent-lime); font-size: .66rem; font-weight: 800; letter-spacing: .16em; }.session-list .new-session { padding: 6px 9px; border: 1px solid rgba(184,214,125,.55); border-radius: 8px; background: transparent; color: var(--agent-lime); font-size: .66rem; font-weight: 800; letter-spacing: .04em; }.session-search-wrap { display: grid; gap: 5px; margin-bottom: 11px; color: rgba(247,242,233,.52); font-size: .62rem; letter-spacing: .1em; }.session-search { border: 1px solid rgba(247,242,233,.16); border-radius: 9px; padding: 9px 10px; color: #fffaf0; background: rgba(247,242,233,.07); }.session-search::placeholder { color: rgba(247,242,233,.36); }.session-scroll { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 3px; overflow: auto; }.session-list button:not(.new-session) { display: flex; align-items: center; gap: 9px; padding: 10px 8px; border-radius: 9px; color: rgba(247,242,233,.68); font-size: .78rem; line-height: 1.35; }.session-list button.selected { color: var(--agent-ink); background: var(--agent-lime); }.session-bullet { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; opacity: .7; }.session-empty { color: rgba(247,242,233,.52); }.session-list-foot { display: flex; justify-content: space-between; padding: 13px 3px 1px; border-top: 1px solid rgba(247,242,233,.12); color: rgba(247,242,233,.42); font-size: .58rem; letter-spacing: .05em; }
 .chat-pane { min-width: 0; border: 0!important; border-radius: 20px!important; background: rgba(255,253,247,.92)!important; }.chat-header { padding: 21px 24px; border-bottom: 1px solid rgba(16,44,50,.1); }.chat-title-block strong { margin: 5px 0 2px; font-family: var(--font-serif); font-size: 1.42rem; letter-spacing: -.03em; }.chat-title-block small { color: var(--ink-4); font-size: .72rem; }.chat-actions { gap: 7px; }.context-chip { border: 1px solid rgba(184,214,125,.8); padding: 6px 9px; background: rgba(184,214,125,.24); color: var(--agent-ink); font-size: .64rem; font-weight: 700; }.icon-action { border: 1px solid rgba(16,44,50,.13); border-radius: 8px; padding: 6px 8px; background: transparent; color: var(--agent-ink-soft); cursor: pointer; font: inherit; font-size: .68rem; }.icon-action:hover { border-color: var(--agent-ink); color: var(--agent-ink); }.icon-action.danger:hover { border-color: var(--agent-coral); color: var(--agent-coral); }
 .chat-history { min-height: 420px; padding: 34px clamp(20px, 4vw, 48px); gap: 18px; background: linear-gradient(180deg, rgba(244,239,229,.44), transparent 38%); }.chat-welcome { display: grid; grid-template-columns: 75px minmax(0, 1fr); align-items: start; max-width: 680px; margin: auto; padding: 24px 0; text-align: left; }.welcome-mark { width: 58px; height: 58px; margin: 0; border-radius: 17px 17px 17px 4px; background: var(--agent-coral); box-shadow: 6px 6px 0 rgba(16,44,50,.1); font-size: 1.85rem; }.chat-welcome h2 { margin: 8px 0 10px; font-family: var(--font-serif); font-size: clamp(1.8rem, 4vw, 2.8rem); letter-spacing: -.06em; }.chat-welcome p { max-width: 500px; margin: 0 0 18px; font-size: .88rem; line-height: 1.8; }.starter-prompts { justify-content: flex-start; }.starter-prompts button { display: inline-flex; align-items: center; gap: 9px; border-color: rgba(16,44,50,.12); padding: 8px 10px; color: var(--agent-ink-soft); background: rgba(255,253,247,.72); }.starter-prompts button b { color: var(--agent-coral); font-size: 1rem; line-height: 1; }.starter-prompts button:hover { border-color: var(--agent-coral); color: var(--agent-ink); transform: translateY(-1px); }
-.center-message { max-width: min(79%, 680px); padding: 13px 15px; border-radius: 15px 15px 15px 3px; line-height: 1.75; box-shadow: 0 5px 14px rgba(16,44,50,.04); }.center-message.assistant { border: 1px solid rgba(16,44,50,.09); background: #fffdf7; color: var(--agent-ink); }.center-message.user { border-radius: 15px 15px 3px 15px; background: var(--agent-ink); color: #fffaf0; }.citation-list { border-top-color: rgba(16,44,50,.1); }.citation-link { color: #54796d; font-size: .7rem; }.center-message.user .citation-link { color: var(--agent-lime); }
+.center-message { max-width: min(79%, 680px); padding: 13px 15px; border-radius: 15px 15px 15px 3px; line-height: 1.75; box-shadow: 0 5px 14px rgba(16,44,50,.04); }.center-message.assistant { border: 1px solid rgba(16,44,50,.09); background: #fffdf7; color: var(--agent-ink); }.center-message.user { border-radius: 15px 15px 3px 15px; background: var(--agent-ink); color: #fffaf0; }.citation-list { border-top-color: rgba(16,44,50,.1); }.citation-link { color: #54796d; font-size: .7rem; }.center-message.user .citation-link { color: var(--agent-lime); }.message-generating { display:flex; align-items:center; gap:8px; min-height:28px; color:var(--agent-ink-soft); font-size:.76rem; font-weight:700; }.message-generating i { width:7px; height:7px; border-radius:50%; background:var(--agent-coral); box-shadow:0 0 0 4px rgba(212,97,69,.14); animation:message-generating-pulse 1.15s ease-in-out infinite; } @keyframes message-generating-pulse { 50% { opacity:.35; transform:scale(.72); } }
 .center-input { gap: 10px; padding: 14px 18px 18px; border-top: 1px solid rgba(16,44,50,.11); background: #fffdf7; }.context-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 0; border-radius: 9px; background: rgba(184,214,125,.25); color: var(--agent-ink); }.context-orbit { width: 8px; height: 8px; border-radius: 50%; background: var(--agent-coral); box-shadow: 0 0 0 3px rgba(212,97,69,.13); }.context-bar b { font-weight: 800; }.context-bar button { margin-left: auto; float: none; color: var(--agent-coral); }.chat-tools { gap: 6px; }.chat-tool,.plugin-action { border-color: rgba(16,44,50,.12); padding: 6px 9px; color: var(--agent-ink-soft); background: #fffdf7; font-size: .67rem; }.chat-tool.primary-tool { color: #fffaf0; background: var(--agent-ink); }.chat-tool.primary-tool.active { border-color: var(--agent-ink); background: var(--agent-coral); }.chat-tool.protected { border-color: rgba(184,214,125,.75); color: #47612f; background: rgba(184,214,125,.21); cursor: default; }.chat-reference { margin-left: 2px; color: var(--agent-coral); font-size: .72rem; font-weight: 700; }.chat-plugin-panel { gap: 7px; border-color: rgba(16,44,50,.11); border-radius: 11px; padding: 10px; background: var(--agent-sand); }.chat-plugin-panel label { color: var(--agent-ink); font-weight: 700; }.chat-plugin-panel select { border-color: rgba(16,44,50,.14); background: #fffdf7; }.plugin-divider { width: 1px; height: 23px; background: rgba(16,44,50,.12); }.plugin-action:hover { border-color: var(--agent-coral); color: var(--agent-coral); }.center-input textarea { min-height: 62px; border-color: rgba(16,44,50,.14); border-radius: 12px; padding: 12px; color: var(--agent-ink); background: #fffefa; }.center-input textarea:focus { outline: 2px solid rgba(212,97,69,.18); border-color: var(--agent-coral); }.chat-model-select { flex-basis: 158px; justify-content: end; color: var(--agent-ink-soft); font-size: .62rem; font-weight: 700; letter-spacing: .05em; }.chat-model-select select { border-color: rgba(16,44,50,.14); background: #fffefa; color: var(--agent-ink); }.send-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-width: 112px; border: 0; border-radius: 12px; padding: 0 14px; color: #fffaf0; background: var(--agent-coral); box-shadow: 0 7px 14px rgba(212,97,69,.19); cursor: pointer; font: inherit; font-size: .76rem; font-weight: 800; }.send-button b { font-size: 1.1rem; }.send-button:disabled { opacity: .48; cursor: not-allowed; box-shadow: none; }
 .workspace-notes { display: flex; flex-direction: column; gap: 16px; }.workspace-notes .card { padding: 19px; background: rgba(255,253,247,.78); }.note-index { color: var(--agent-coral); font-size: .58rem; font-weight: 800; letter-spacing: .13em; }.workspace-notes h3 { margin: 8px 0 13px; color: var(--agent-ink); font-family: var(--font-serif); font-size: 1.2rem; letter-spacing: -.03em; }.context-card strong { color: var(--agent-ink); font-size: .9rem; }.context-card p { margin: 5px 0 13px; color: var(--ink-4); font-size: .74rem; line-height: 1.6; }.reading-meter { height: 4px; overflow: hidden; border-radius: 99px; background: rgba(16,44,50,.12); }.reading-meter i { display: block; height: 100%; border-radius: inherit; background: var(--agent-coral); }.context-card small { display: block; margin-top: 8px; color: #54796d; font-size: .68rem; }.text-action { border: 0; padding: 0; background: transparent; color: var(--agent-coral); cursor: pointer; font: inherit; font-size: .74rem; font-weight: 800; }.shortcut-card { padding: 0!important; overflow: hidden; }.shortcut-card > .note-index,.shortcut-card > h3 { display: block; margin-left: 19px; margin-right: 19px; }.shortcut-card > .note-index { margin-top: 19px; }.shortcut-card button { display: grid; gap: 3px; width: 100%; border: 0; border-top: 1px solid rgba(16,44,50,.1); padding: 13px 19px; background: transparent; color: var(--agent-ink); text-align: left; cursor: pointer; font: inherit; }.shortcut-card button:hover { background: rgba(184,214,125,.18); }.shortcut-card button b { font-size: .76rem; }.shortcut-card button span { color: var(--ink-4); font-size: .67rem; }.privacy-note { margin-top: auto; padding: 0 5px; color: var(--agent-ink-soft); font-size: .65rem; line-height: 1.55; }.privacy-note .status-dot { display: inline-block; margin-right: 5px; vertical-align: middle; }
 .model-layout,.privacy-layout { gap: 16px; }.model-layout .card,.privacy-layout .card,.insight-query,.insight-card { border: 1px solid rgba(16,44,50,.11); border-radius: 20px; box-shadow: 0 12px 28px rgba(16,44,50,.055); }.model-intro { position: relative; overflow: hidden; padding: 30px; color: #fffaf0; background: var(--agent-ink)!important; }.model-intro::after { content: '自配'; position: absolute; right: -8px; bottom: -35px; color: rgba(184,214,125,.13); font-family: var(--font-serif); font-size: 8rem; font-weight: 700; letter-spacing: -.08em; }.model-intro > * { position: relative; z-index: 1; }.model-intro h2 { color: #fffaf0; font-family: var(--font-serif); font-size: 2.1rem; letter-spacing: -.06em; }.model-intro p,.model-intro ul { color: rgba(247,242,233,.72)!important; line-height: 1.75; }.model-form,.saved-model { background: rgba(255,253,247,.86); }.model-form { padding: 26px; }.model-form h2,.saved-models h2,.privacy-layout h2 { color: var(--agent-ink); font-family: var(--font-serif); letter-spacing: -.04em; }.model-form label,.preference-form label { color: var(--agent-ink-soft); font-weight: 700; }.model-form input,.model-form select,.preference-form input,.preference-form select { border-color: rgba(16,44,50,.14); background: #fffefa; }.saved-models { padding: 24px; background: rgba(255,253,247,.86); }.saved-model { border-bottom-color: rgba(16,44,50,.1); }.saved-model strong { color: var(--agent-ink); }.model-actions .btn { border-color: rgba(16,44,50,.16); color: var(--agent-ink-soft); }
@@ -2141,6 +2291,26 @@ onBeforeUnmount(() => {
 .task-row-progress .task-progress-label small { display:block; margin:0; color:#47612f; font-size:.78rem; font-weight:800; line-height:1.4; }
 .task-row-progress .task-progress-track { height:10px; overflow:hidden; border-radius:99px; background:#dfe9d8; }
 .task-row-progress .task-progress-track i { background:linear-gradient(90deg,#5e9166,#9bc46c); }
+.task-row-progress { min-width:0; }
+.task-row-progress summary { display:block; cursor:pointer; list-style:none; }
+.task-row-progress summary::-webkit-details-marker { display:none; }
+.task-stage-toggle { display:inline-flex; align-items:center; gap:4px; margin-top:9px; color:var(--agent-ink-soft); font-size:.7rem; font-weight:800; }
+.task-stage-toggle i { font-style:normal; transition:transform .2s ease; }
+.task-row-progress[open] .task-stage-toggle i { transform:rotate(180deg); }
+.task-stage-list { display:grid; gap:8px; margin:13px 0 0; padding:13px 0 0; border-top:1px dashed rgba(16,44,50,.16); list-style:none; }
+.task-stage-list li { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; align-items:end; color:var(--agent-ink-soft); }
+.task-stage-list li > div:first-child { min-width:0; }
+.task-stage-list b,.task-stage-list small { display:block; }
+.task-stage-list b { color:inherit; font-size:.76rem; line-height:1.3; }
+.task-stage-list small { margin-top:2px; color:var(--agent-ink-soft); font-size:.67rem; line-height:1.35; }
+.task-stage-list li > span { color:inherit; font-size:.68rem; font-weight:800; }
+.task-stage-list li.running { color:#47612f; }
+.task-stage-list li.completed { color:#47612f; }
+.task-stage-list li.failed { color:#a34535; }
+.task-stage-track { grid-column:1 / -1; height:5px; overflow:hidden; border-radius:99px; background:rgba(16,44,50,.1); }
+.task-stage-track i { display:block; height:100%; border-radius:inherit; background:#8ba85d; transition:width .45s ease; }
+.task-stage-list li.pending .task-stage-track i { background:rgba(16,44,50,.22); }
+.task-stage-list li.failed .task-stage-track i { background:#d46145; }
 
 .message-markdown { min-width:0; white-space:normal; overflow-wrap:anywhere; }
 .message-markdown :deep(> :first-child) { margin-top:0; }
