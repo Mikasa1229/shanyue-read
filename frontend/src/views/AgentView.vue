@@ -84,10 +84,7 @@
                   <div class="message-edit-actions"><button type="button" @click="cancelMessageEdit">取消</button><button type="button" :disabled="sending || !editingMessageContent.trim()" @click="saveMessageEdit(message)">保存并重新生成</button></div>
                 </template>
                 <template v-else>
-                  <template v-if="message.role === 'ASSISTANT'">
-                    <div class="message-markdown" v-html="renderMarkdown(message.content)" />
-                    <p v-if="!message.content && sending" class="stream-status" aria-live="polite">{{ streamStatusText }}</p>
-                  </template>
+                  <div v-if="message.role === 'ASSISTANT'" class="message-markdown" v-html="renderMarkdown(message.content)" />
                   <span v-else>{{ message.content }}</span>
                   <button v-if="message.role === 'USER' && !String(message.id).startsWith('local-')" class="message-edit-button" type="button" title="编辑这条提问并重新生成后续回答" @click="startMessageEdit(message)"><span>✎</span> 编辑并重新生成</button>
                 </template>
@@ -440,7 +437,6 @@ const knowledgeBuild = ref(null)
 const buildTasks = ref([])
 const showKnowledgeBuildDialog = ref(false)
 const buildSubmitting = ref(false)
-const streamStatus = ref('thinking')
 const showGraphDeleteConfirm = ref(false)
 const graphDeleting = ref(false)
 const buildForm = ref({ modelMode: 'PLATFORM', modelConfigId: '', sharePublic: true, startChapter: 1, endChapter: 1 })
@@ -448,11 +444,6 @@ let taskPollTimer = null
 let buildEstimateTimer = null
 const graphTypes = computed(() => ['ALL', ...new Set((graph.value.nodes || []).map(node => node.type).filter(Boolean))])
 const enabledModels = computed(() => models.value.filter(model => model.enabled))
-const streamStatusText = computed(() => ({
-  thinking: '正在理解你的问题…',
-  searching_books: '正在检索并核验平台书源…',
-  writing: '书源已核验，正在为你整理推荐…'
-})[streamStatus.value] || '正在生成回答…')
 const selectedChatModelLabel = computed(() => enabledModels.value.find(model => String(model.id) === selectedModelConfigId.value)?.model || '平台模型')
 const usableShelfBooks = computed(() => shelfBooks.value.filter(book => book?.canonicalBookId && book.bookName))
 const selectedInsightBook = computed(() => usableShelfBooks.value.find(book => String(book.canonicalBookId) === String(insightBookId.value)) || null)
@@ -1352,7 +1343,6 @@ async function send(requestContext = {}, contentOverride = '') {
   if (!requestContext.reuseExistingUserMessage) messages.value.push({ id: `local-user-${localMessageId}`, role: 'USER', content })
   messages.value.push({ id: `local-assistant-${localMessageId}`, role: 'ASSISTANT', content: '' })
   sending.value = true
-  streamStatus.value = 'thinking'
   let answer = ''
   try {
     const modelRequest = selectedModelConfigId.value
@@ -1363,7 +1353,6 @@ async function send(requestContext = {}, contentOverride = '') {
       : {}
     await streamAgentMessage(activeSession.value.id, { content, ...modelRequest, ...readingContext, ...requestContext }, {
       onDelta: (delta) => { answer += delta; messages.value[messages.value.length - 1].content = answer },
-      onStatus: (data) => { streamStatus.value = data?.status || 'thinking' },
       onRecommendations: (data) => { if (Array.isArray(data)) shelfRecommendations.value = data },
       onDone: (reply) => {
         const message = messages.value[messages.value.length - 1]
@@ -2154,7 +2143,6 @@ onBeforeUnmount(() => {
 .task-row-progress .task-progress-track i { background:linear-gradient(90deg,#5e9166,#9bc46c); }
 
 .message-markdown { min-width:0; white-space:normal; overflow-wrap:anywhere; }
-.stream-status { margin:0; color:var(--agent-ink-soft); font-size:.9rem; }
 .message-markdown :deep(> :first-child) { margin-top:0; }
 .message-markdown :deep(> :last-child) { margin-bottom:0; }
 .message-markdown :deep(p) { margin:.55em 0; }
