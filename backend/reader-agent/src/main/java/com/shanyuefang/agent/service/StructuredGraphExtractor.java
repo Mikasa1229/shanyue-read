@@ -10,8 +10,10 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatClient;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClient;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -89,9 +91,7 @@ public class StructuredGraphExtractor {
             options.setModel(modelConfig.model()); options.setMaxTokens(2800); options.setTemperature(0f);
             // DeepSeek may otherwise return an empty or fenced explanation for strict extraction prompts.
             options.setResponseFormat(new OpenAiApi.ChatCompletionRequest.ResponseFormat("json_object"));
-            String baseUrl = modelConfig.baseUrl() == null ? "" : modelConfig.baseUrl().replaceAll("/+$", "");
-            if (baseUrl.matches("(?i).*/v1$")) baseUrl = baseUrl.substring(0, baseUrl.length() - 3);
-            OpenAiChatClient client = new OpenAiChatClient(new OpenAiApi(baseUrl, modelConfig.apiKey()), options);
+            OpenAiChatClient client = chatClient(modelConfig, options);
             String catalog = entityCatalog(knownEntities);
             ModelExtraction raw = callExtractionWithRetry(client, options, compactInstructions,
                     catalog + "\n章节原文：\n" + source);
@@ -139,9 +139,7 @@ public class StructuredGraphExtractor {
             OpenAiChatOptions options = new OpenAiChatOptions();
             options.setModel(modelConfig.model()); options.setMaxTokens(1400); options.setTemperature(0f);
             options.setResponseFormat(new OpenAiApi.ChatCompletionRequest.ResponseFormat("json_object"));
-            String baseUrl = modelConfig.baseUrl() == null ? "" : modelConfig.baseUrl().replaceAll("/+$", "");
-            if (baseUrl.matches("(?i).*/v1$")) baseUrl = baseUrl.substring(0, baseUrl.length() - 3);
-            OpenAiChatClient client = new OpenAiChatClient(new OpenAiApi(baseUrl, modelConfig.apiKey()), options);
+            OpenAiChatClient client = chatClient(modelConfig, options);
             String json = client.call(new Prompt(List.of(new SystemMessage(instructions),
                     new UserMessage("章节事实：\n" + source)), options)).getResult().getOutput().getContent();
             ModelStoryEventResponse response = objectMapper.readValue(stripFence(json), ModelStoryEventResponse.class);
@@ -174,9 +172,7 @@ public class StructuredGraphExtractor {
                     .append(facts.get(index).chapterIndex() + 1).append("章：").append(facts.get(index).evidence()).append('\n');
             OpenAiChatOptions options = new OpenAiChatOptions(); options.setModel(modelConfig.model()); options.setMaxTokens(1200); options.setTemperature(0f);
             options.setResponseFormat(new OpenAiApi.ChatCompletionRequest.ResponseFormat("json_object"));
-            String baseUrl = modelConfig.baseUrl() == null ? "" : modelConfig.baseUrl().replaceAll("/+$", "");
-            if (baseUrl.matches("(?i).*/v1$")) baseUrl = baseUrl.substring(0, baseUrl.length() - 3);
-            OpenAiChatClient client = new OpenAiChatClient(new OpenAiApi(baseUrl, modelConfig.apiKey()), options);
+            OpenAiChatClient client = chatClient(modelConfig, options);
             String json = client.call(new Prompt(List.of(new SystemMessage(instructions), new UserMessage(source.toString())), options))
                     .getResult().getOutput().getContent();
             ModelClueResponse response = objectMapper.readValue(stripFence(json), ModelClueResponse.class);
@@ -225,9 +221,7 @@ public class StructuredGraphExtractor {
             OpenAiChatOptions options = new OpenAiChatOptions();
             options.setModel(modelConfig.model()); options.setMaxTokens(700); options.setTemperature(0f);
             options.setResponseFormat(new OpenAiApi.ChatCompletionRequest.ResponseFormat("json_object"));
-            String baseUrl = modelConfig.baseUrl() == null ? "" : modelConfig.baseUrl().replaceAll("/+$", "");
-            if (baseUrl.matches("(?i).*/v1$")) baseUrl = baseUrl.substring(0, baseUrl.length() - 3);
-            OpenAiChatClient client = new OpenAiChatClient(new OpenAiApi(baseUrl, modelConfig.apiKey()), options);
+            OpenAiChatClient client = chatClient(modelConfig, options);
             ModelClueLifecycleResponse response = objectMapper.readValue(stripFence(client.call(new Prompt(List.of(
                     new SystemMessage(instructions), new UserMessage(source.toString())), options)).getResult().getOutput().getContent()),
                     ModelClueLifecycleResponse.class);
@@ -322,9 +316,7 @@ public class StructuredGraphExtractor {
             OpenAiChatOptions options = new OpenAiChatOptions();
             options.setModel(modelConfig.model()); options.setMaxTokens(2200); options.setTemperature(0f);
             options.setResponseFormat(new OpenAiApi.ChatCompletionRequest.ResponseFormat("json_object"));
-            String baseUrl = modelConfig.baseUrl() == null ? "" : modelConfig.baseUrl().replaceAll("/+$", "");
-            if (baseUrl.matches("(?i).*/v1$")) baseUrl = baseUrl.substring(0, baseUrl.length() - 3);
-            OpenAiChatClient client = new OpenAiChatClient(new OpenAiApi(baseUrl, modelConfig.apiKey()), options);
+            OpenAiChatClient client = chatClient(modelConfig, options);
             ModelCharacterKnowledge response = callCharacterKnowledgeWithRetry(client, options, instructions, source.toString());
             List<IdentityResolution> identities = response.identities == null ? List.of() : response.identities.stream()
                     .map(value -> sanitizeIdentity(value, facts)).filter(java.util.Objects::nonNull).limit(2).toList();
@@ -494,6 +486,18 @@ public class StructuredGraphExtractor {
         return List.of("父亲", "母亲", "爹叫", "娘叫", "父子", "父女", "母子", "母女", "亲兄", "亲弟", "亲姐", "亲妹",
                 "哥哥", "弟弟", "姐姐", "妹妹", "夫妻", "夫君", "妻子", "丈夫", "儿子", "女儿", "叔叔", "姑姑")
                 .stream().anyMatch(evidence::contains);
+    }
+
+    private OpenAiChatClient chatClient(ModelConfig modelConfig, OpenAiChatOptions options) {
+        String baseUrl = modelConfig.baseUrl() == null ? "" : modelConfig.baseUrl().replaceAll("/+$", "");
+        if (baseUrl.matches("(?i).*/v1$")) baseUrl = baseUrl.substring(0, baseUrl.length() - 3);
+        int timeout = Math.max(1000, properties.getGraphLlmOperationTimeoutMillis());
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(timeout);
+        requestFactory.setReadTimeout(timeout);
+        OpenAiApi api = new OpenAiApi(baseUrl, modelConfig.apiKey(),
+                RestClient.builder().requestFactory(requestFactory));
+        return new OpenAiChatClient(api, options);
     }
 
     private ModelExtraction callExtractionWithRetry(OpenAiChatClient client, OpenAiChatOptions options,

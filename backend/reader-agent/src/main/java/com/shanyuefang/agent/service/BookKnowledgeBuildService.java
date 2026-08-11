@@ -12,6 +12,8 @@ public interface BookKnowledgeBuildService {
         return prepare(userId, canonicalBookId);
     }
     BookKnowledgeBuildTask start(long userId, long canonicalBookId, StartBookKnowledgeBuildDTO dto);
+    /** Consumes one durable graph-build message. Returns false for an already terminal or claimed task. */
+    boolean consumeQueuedTask(long taskId);
     List<BookKnowledgeBuildTask> myTasks(long userId, int limit);
     void deleteTask(long userId, long taskId);
     void updateSharing(long userId, long canonicalBookId, boolean isPublic);

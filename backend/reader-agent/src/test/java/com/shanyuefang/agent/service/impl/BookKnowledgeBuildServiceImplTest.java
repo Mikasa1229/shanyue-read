@@ -10,6 +10,7 @@ import com.shanyuefang.agent.domain.entity.KnowledgeChunk;
 import com.shanyuefang.agent.domain.entity.UserModelConfig;
 import com.shanyuefang.agent.feign.CanonicalBookFeignClient;
 import com.shanyuefang.agent.feign.CommentPublishFeignClient;
+import com.shanyuefang.agent.feign.CreditOperationRequest;
 import com.shanyuefang.agent.feign.UserCreditFeignClient;
 import com.shanyuefang.agent.mapper.BookKnowledgeBuildTaskMapper;
 import com.shanyuefang.agent.mapper.BookKnowledgeChapterCoverageMapper;
@@ -19,6 +20,7 @@ import com.shanyuefang.agent.mapper.KnowledgeGraphNodeMapper;
 import com.shanyuefang.agent.mapper.UserModelConfigMapper;
 import com.shanyuefang.agent.service.ApiKeyCipher;
 import com.shanyuefang.agent.service.KnowledgeService;
+import com.shanyuefang.agent.config.KnowledgeMessagingConfig;
 import com.shanyuefang.common.result.R;
 import com.shanyuefang.common.exception.BusinessException;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 class BookKnowledgeBuildServiceImplTest {
     @Test
@@ -209,7 +212,7 @@ class BookKnowledgeBuildServiceImplTest {
         BookKnowledgeBuildServiceImpl service = new BookKnowledgeBuildServiceImpl(
                 mock(BookKnowledgeBuildTaskMapper.class), coverageMapper, spaceMapper, mock(KnowledgeChunkMapper.class),
                 mock(KnowledgeGraphNodeMapper.class), mock(UserModelConfigMapper.class), mock(ApiKeyCipher.class), new AgentProperties(),
-                knowledgeService, mock(UserCreditFeignClient.class), mock(CommentPublishFeignClient.class), mock(CanonicalBookFeignClient.class));
+                knowledgeService, mock(UserCreditFeignClient.class), mock(CommentPublishFeignClient.class), mock(CanonicalBookFeignClient.class), mock(RabbitTemplate.class));
 
         service.deleteOwnedGraph(1L, 9L);
 
@@ -220,6 +223,69 @@ class BookKnowledgeBuildServiceImplTest {
         verify(spaceMapper).updateById(saved.capture());
         assertEquals("NOT_BUILT", saved.getValue().getStatus());
         assertEquals(0, saved.getValue().getCompletedChapters());
+    }
+
+    @Test
+    void startupRecoveryFailsInterruptedTaskAndRefundsItsFrozenPlatformCredits() {
+        BookKnowledgeBuildTask task = new BookKnowledgeBuildTask();
+        task.setId(71L); task.setCanonicalBookId(9L); task.setRequesterUserId(1L);
+        task.setStatus("RUNNING"); task.setCompletedChapters(0); task.setModelMode("PLATFORM"); task.setChargedCredits(3);
+        BookKnowledgeBuildTaskMapper tasks = mock(BookKnowledgeBuildTaskMapper.class);
+        when(tasks.selectList(any(Wrapper.class))).thenReturn(List.of(task));
+        BookKnowledgeSpace space = new BookKnowledgeSpace(); space.setCanonicalBookId(9L);
+        BookKnowledgeSpaceMapper spaces = mock(BookKnowledgeSpaceMapper.class);
+        when(spaces.selectById(9L)).thenReturn(space);
+        UserCreditFeignClient credits = mock(UserCreditFeignClient.class);
+        when(credits.refund(any(CreditOperationRequest.class))).thenReturn(R.ok());
+        BookKnowledgeBuildServiceImpl service = new BookKnowledgeBuildServiceImpl(tasks,
+                mock(BookKnowledgeChapterCoverageMapper.class), spaces, mock(KnowledgeChunkMapper.class),
+                mock(KnowledgeGraphNodeMapper.class), mock(UserModelConfigMapper.class), mock(ApiKeyCipher.class),
+                new AgentProperties(), mock(KnowledgeService.class), credits, mock(CommentPublishFeignClient.class),
+                mock(CanonicalBookFeignClient.class), mock(RabbitTemplate.class));
+
+        service.recoverInterruptedTasks();
+
+        assertEquals("FAILED", task.getStatus());
+        assertEquals("服务重启导致构建中断，已停止任务，可重新发起构建", task.getErrorMessage());
+        verify(tasks).updateById(task);
+        ArgumentCaptor<CreditOperationRequest> refund = ArgumentCaptor.forClass(CreditOperationRequest.class);
+        verify(credits).refund(refund.capture());
+        assertEquals("book-knowledge-refund-71", refund.getValue().getRequestId());
+    }
+
+    @Test
+    void queuedTasksAreRepublishedUntilTheBrokerConsumerClaimsThem() {
+        BookKnowledgeBuildTask task = new BookKnowledgeBuildTask(); task.setId(71L); task.setStatus("QUEUED");
+        BookKnowledgeBuildTaskMapper tasks = mock(BookKnowledgeBuildTaskMapper.class);
+        when(tasks.selectList(any(Wrapper.class))).thenReturn(List.of(task));
+        RabbitTemplate rabbit = mock(RabbitTemplate.class);
+        BookKnowledgeBuildServiceImpl service = new BookKnowledgeBuildServiceImpl(tasks,
+                mock(BookKnowledgeChapterCoverageMapper.class), mock(BookKnowledgeSpaceMapper.class), mock(KnowledgeChunkMapper.class),
+                mock(KnowledgeGraphNodeMapper.class), mock(UserModelConfigMapper.class), mock(ApiKeyCipher.class), new AgentProperties(),
+                mock(KnowledgeService.class), mock(UserCreditFeignClient.class), mock(CommentPublishFeignClient.class),
+                mock(CanonicalBookFeignClient.class), rabbit);
+
+        service.republishQueuedTasks();
+
+        verify(rabbit).convertAndSend(org.mockito.ArgumentMatchers.eq(KnowledgeMessagingConfig.EXCHANGE),
+                org.mockito.ArgumentMatchers.eq(KnowledgeMessagingConfig.GRAPH_BUILD_ROUTING_KEY),
+                org.mockito.ArgumentMatchers.eq(Map.of("taskId", 71L)));
+    }
+
+    @Test
+    void duplicateQueueDeliveryDoesNotRunAnAlreadyClaimedTask() {
+        BookKnowledgeBuildTaskMapper tasks = mock(BookKnowledgeBuildTaskMapper.class);
+        when(tasks.claimQueuedTask(71L)).thenReturn(0);
+        KnowledgeService knowledge = mock(KnowledgeService.class);
+        BookKnowledgeBuildServiceImpl service = new BookKnowledgeBuildServiceImpl(tasks,
+                mock(BookKnowledgeChapterCoverageMapper.class), mock(BookKnowledgeSpaceMapper.class), mock(KnowledgeChunkMapper.class),
+                mock(KnowledgeGraphNodeMapper.class), mock(UserModelConfigMapper.class), mock(ApiKeyCipher.class), new AgentProperties(),
+                knowledge, mock(UserCreditFeignClient.class), mock(CommentPublishFeignClient.class),
+                mock(CanonicalBookFeignClient.class), mock(RabbitTemplate.class));
+
+        assertEquals(false, service.consumeQueuedTask(71L));
+
+        verify(knowledge, never()).buildGraphRange(any(Long.class), any(Integer.class), any(Integer.class), any(), any());
     }
 
     private KnowledgeChunk chunk(int chapter, String content) {
@@ -234,7 +300,7 @@ class BookKnowledgeBuildServiceImplTest {
         return new BookKnowledgeBuildServiceImpl(taskMapper, mock(BookKnowledgeChapterCoverageMapper.class), mock(BookKnowledgeSpaceMapper.class), chunkMapper,
                 mock(KnowledgeGraphNodeMapper.class), modelMapper, mock(ApiKeyCipher.class), new AgentProperties(),
                 mock(KnowledgeService.class), mock(UserCreditFeignClient.class), mock(CommentPublishFeignClient.class),
-                mock(CanonicalBookFeignClient.class));
+                mock(CanonicalBookFeignClient.class), mock(RabbitTemplate.class));
     }
 
     private BookKnowledgeBuildServiceImpl service(KnowledgeChunkMapper chunkMapper, UserModelConfigMapper modelMapper,
@@ -248,6 +314,7 @@ class BookKnowledgeBuildServiceImplTest {
                                                    BookKnowledgeChapterCoverageMapper coverageMapper, BookKnowledgeSpaceMapper spaceMapper) {
         return new BookKnowledgeBuildServiceImpl(taskMapper, coverageMapper, spaceMapper, chunkMapper,
                 mock(KnowledgeGraphNodeMapper.class), modelMapper, mock(ApiKeyCipher.class), new AgentProperties(),
-                mock(KnowledgeService.class), mock(UserCreditFeignClient.class), mock(CommentPublishFeignClient.class), bookClient);
+                mock(KnowledgeService.class), mock(UserCreditFeignClient.class), mock(CommentPublishFeignClient.class), bookClient,
+                mock(RabbitTemplate.class));
     }
 }

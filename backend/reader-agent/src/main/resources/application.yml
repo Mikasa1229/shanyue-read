@@ -105,6 +105,7 @@ app:
     neo4j-failure-cooldown-seconds: ${AGENT_NEO4J_FAILURE_COOLDOWN_SECONDS:30}
     graph-llm-enabled: ${AGENT_GRAPH_LLM_ENABLED:false}
     graph-llm-max-chars: ${AGENT_GRAPH_LLM_MAX_CHARS:8000}
+    graph-llm-operation-timeout-millis: ${AGENT_GRAPH_LLM_OPERATION_TIMEOUT_MILLIS:120000}
     min-graph-confidence: ${AGENT_MIN_GRAPH_CONFIDENCE:0.60}
     max-requests-per-minute: ${AGENT_MAX_REQUESTS_PER_MINUTE:20}
     max-requests-per-ip-per-minute: ${AGENT_MAX_REQUESTS_PER_IP_PER_MINUTE:60}

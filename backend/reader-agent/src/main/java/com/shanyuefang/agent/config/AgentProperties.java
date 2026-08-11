@@ -63,6 +63,8 @@ public class AgentProperties {
     private int neo4jFailureCooldownSeconds = 30;
     private boolean graphLlmEnabled;
     private int graphLlmMaxChars = 8000;
+    /** Bound a single graph model response so a stalled provider cannot leave a task running forever. */
+    private int graphLlmOperationTimeoutMillis = 120000;
     /** Below this confidence, graph claims remain stored for review but never reach a reader-facing context. */
     private double minGraphConfidence = 0.60D;
     private int maxRequestsPerMinute = 20;

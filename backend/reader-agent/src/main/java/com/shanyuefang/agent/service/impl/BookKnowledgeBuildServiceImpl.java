@@ -2,6 +2,7 @@ package com.shanyuefang.agent.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.shanyuefang.agent.config.AgentProperties;
+import com.shanyuefang.agent.config.KnowledgeMessagingConfig;
 import com.shanyuefang.agent.domain.dto.StartBookKnowledgeBuildDTO;
 import com.shanyuefang.agent.domain.entity.BookKnowledgeBuildTask;
 import com.shanyuefang.agent.domain.entity.BookKnowledgeChapterCoverage;
@@ -27,6 +28,10 @@ import com.shanyuefang.common.result.R;
 import com.shanyuefang.common.result.ResultCode;
 import com.shanyuefang.common.util.SnowflakeIdUtil;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -39,7 +44,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -64,6 +68,35 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
     private final UserCreditFeignClient creditClient;
     private final CommentPublishFeignClient commentPublishClient;
     private final CanonicalBookFeignClient canonicalBookClient;
+    private final RabbitTemplate rabbitTemplate;
+
+    /** Requeue durable work left between delivery and acknowledgement, and fail only a genuinely interrupted worker. */
+    @EventListener(ApplicationReadyEvent.class)
+    public void recoverInterruptedTasks() {
+        List<BookKnowledgeBuildTask> interrupted = taskMapper.selectList(Wrappers.<BookKnowledgeBuildTask>lambdaQuery()
+                .in(BookKnowledgeBuildTask::getStatus, "QUEUED", "RUNNING"));
+        for (BookKnowledgeBuildTask task : interrupted) {
+            if ("QUEUED".equals(task.getStatus())) {
+                publish(task.getId());
+                continue;
+            }
+            task.setStatus("FAILED");
+            task.setMessage("服务重启导致构建中断，已停止任务，可重新发起构建");
+            task.setErrorMessage("服务重启导致构建中断，已停止任务，可重新发起构建");
+            task.setCompletedAt(LocalDateTime.now());
+            task.setUpdatedAt(LocalDateTime.now());
+            taskMapper.updateById(task);
+            updateSpace(task, "FAILED", task.getCompletedChapters() == null ? 0 : task.getCompletedChapters(), task.getErrorMessage());
+            if (PLATFORM.equals(task.getModelMode()) && task.getChargedCredits() != null && task.getChargedCredits() > 0) refund(task);
+        }
+    }
+
+    /** Repairs the commit-to-publish gap: a durable queued row is re-published until a consumer claims it. */
+    @Scheduled(fixedDelayString = "${AGENT_GRAPH_BUILD_QUEUE_RECONCILE_MILLIS:30000}")
+    public void republishQueuedTasks() {
+        taskMapper.selectList(Wrappers.<BookKnowledgeBuildTask>lambdaQuery().eq(BookKnowledgeBuildTask::getStatus, "QUEUED"))
+                .forEach(task -> publish(task.getId()));
+    }
 
     @Override
     public Map<String, Object> prepare(long userId, long canonicalBookId) {
@@ -124,9 +157,9 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         saved.setModelMode(mode); saved.setModelConfigId(task.getModelConfigId()); saved.setTotalChapters(estimate.chapters()); saved.setCompletedChapters(0);
         saved.setEstimatedInputTokens(estimate.inputTokens()); saved.setEstimatedOutputTokens(estimate.outputTokens()); saved.setEstimatedCredits(task.getEstimatedCredits());
         saved.setFailureMessage(null); saved.setUpdatedAt(LocalDateTime.now()); if (space == null) { saved.setCreatedAt(LocalDateTime.now()); spaceMapper.insert(saved); } else spaceMapper.updateById(saved);
-        // Do not let the worker observe a task before this creation transaction is committed.
+        // Publish only after the task row commits so a consumer can always resolve its payload from durable storage.
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override public void afterCommit() { CompletableFuture.runAsync(() -> run(task.getId())); }
+            @Override public void afterCommit() { publish(task.getId()); }
         });
         return task;
     }
@@ -287,10 +320,13 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         if (insert) spaceMapper.insert(space); else spaceMapper.updateById(space);
     }
 
-    private void run(long taskId) {
-        BookKnowledgeBuildTask task = taskMapper.selectById(taskId); if (task == null) return;
+    @Override
+    public boolean consumeQueuedTask(long taskId) {
+        if (taskMapper.claimQueuedTask(taskId) != 1) return false;
+        BookKnowledgeBuildTask task = taskMapper.selectById(taskId);
+        if (task == null) return false;
         try {
-            task.setStatus("RUNNING"); task.setStartedAt(LocalDateTime.now()); task.setMessage("正在由大模型阅读章节并提取实体关系"); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "RUNNING", 0, null);
+            task.setStatus("RUNNING"); task.setMessage("正在分析第 " + task.getStartChapter() + " 章并提取实体关系"); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "RUNNING", 0, null);
             if (PLATFORM.equals(task.getModelMode())) freeze(task);
             StructuredGraphExtractor.ModelConfig config = modelConfig(task);
             AtomicInteger completed = new AtomicInteger();
@@ -309,10 +345,20 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
             task.setCompletedAt(LocalDateTime.now()); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "FAILED", task.getCompletedChapters(), task.getErrorMessage());
             if (PLATFORM.equals(task.getModelMode()) && task.getChargedCredits() != null && task.getChargedCredits() > 0) refund(task);
         }
+        return true;
+    }
+
+    private void publish(long taskId) {
+        rabbitTemplate.convertAndSend(KnowledgeMessagingConfig.EXCHANGE,
+                KnowledgeMessagingConfig.GRAPH_BUILD_ROUTING_KEY, Map.of("taskId", taskId));
     }
 
     private void updateProgress(BookKnowledgeBuildTask task, int completed) {
-        task.setCompletedChapters(completed); task.setMessage("已完成 " + completed + " / " + task.getTotalChapters() + " 章的大模型关系抽取"); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "RUNNING", completed, null);
+        task.setCompletedChapters(completed);
+        String message = completed >= task.getTotalChapters()
+                ? "已完成 " + completed + " / " + task.getTotalChapters() + " 章的大模型关系抽取"
+                : "已完成 " + completed + " / " + task.getTotalChapters() + " 章，正在分析第 " + (task.getStartChapter() + completed) + " 章";
+        task.setMessage(message); task.setUpdatedAt(LocalDateTime.now()); taskMapper.updateById(task); updateSpace(task, "RUNNING", completed, null);
     }
     private void recordCoverage(long canonicalBookId, List<Integer> chapterIndexes) {
         for (Integer chapterIndex : chapterIndexes) {
@@ -408,6 +454,14 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
     private String normalizeMode(String value) { String mode = value == null ? PLATFORM : value.trim().toUpperCase(Locale.ROOT); if (!PLATFORM.equals(mode) && !BYOK.equals(mode)) throw new BusinessException(ResultCode.PARAM_ERROR, "模型来源只能选择平台模型或个人模型"); return mode; }
     private Map<String, Object> statusMap(BookKnowledgeSpace space) { return Map.of("status", space.getStatus(), "isPublic", Boolean.TRUE.equals(space.getIsPublic()), "totalChapters", space.getTotalChapters(), "completedChapters", space.getCompletedChapters(), "ownerUserId", space.getOwnerUserId() == null ? 0L : space.getOwnerUserId()); }
     private String safeMessage(Exception exception) {
+        Throwable cause = exception;
+        while (cause != null) {
+            String causeMessage = cause.getMessage();
+            if (cause instanceof java.net.SocketTimeoutException || (causeMessage != null && causeMessage.toLowerCase(Locale.ROOT).contains("timed out"))) {
+                return "模型服务响应超时，构建已停止且平台积分会自动退回，请稍后重试";
+            }
+            cause = cause.getCause();
+        }
         String value = exception.getMessage() == null ? "模型调用或图谱写入失败" : exception.getMessage();
         if (value.contains("未能返回可验证的知识图谱 JSON")) {
             return "平台模型输出格式不完整或未提供可验证的原文证据，请缩小章节范围后重试";
