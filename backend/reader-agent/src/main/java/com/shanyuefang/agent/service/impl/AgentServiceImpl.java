@@ -326,8 +326,6 @@ public class AgentServiceImpl implements AgentService {
         AgentReadOnlyToolService.ToolResult toolResult = readOnlyToolService.execute(userId, dto, content, searchRequest, prefetchBookSearch);
         boolean frozen = false;
         boolean degraded = false;
-        boolean delayedRecommendation = properties.isNativeToolCallingEnabled()
-                && AgentReadOnlyToolService.asksForBookSearch(content.toLowerCase(Locale.ROOT));
         PromptAssembly prompt = buildPrompt(session, dto, content, toolResult, userId);
         ModelCallResult modelResult;
         try {
@@ -335,9 +333,10 @@ public class AgentServiceImpl implements AgentService {
                 credit("freeze", userId, requestId, "Platform agent request");
                 frozen = true;
             }
-            modelResult = agentMetrics.observeModelCall(selection.mode(), selection.provider(), () -> delayedRecommendation
-                    ? callModel(userId, selection, dto, prompt)
-                    : callModelStreaming(userId, selection, dto, prompt, onDelta));
+            // Spring AI resumes the same stream after a native tool call. Do not turn
+            // recommendations into a blocking request just because book_search is available.
+            modelResult = agentMetrics.observeModelCall(selection.mode(), selection.provider(), () ->
+                    callModelStreaming(userId, selection, dto, prompt, onDelta));
             if (PLATFORM.equals(selection.mode())) rateLimiter.recordPlatformSuccess();
             if (frozen) credit("settle", userId, requestId, "Platform agent request");
         } catch (Exception exception) {
@@ -350,7 +349,7 @@ public class AgentServiceImpl implements AgentService {
             log.warn("Agent streaming call failed: requestId={}, provider={}", requestId, selection.provider(), exception);
             modelResult = ModelCallResult.estimated(localFallback(dto), List.of());
             String answer = modelResult.content();
-            if (!delayedRecommendation) onDelta.accept(answer);
+            onDelta.accept(answer);
             degraded = true;
         }
         String answer = modelResult.content();
@@ -359,7 +358,6 @@ public class AgentServiceImpl implements AgentService {
                 referencedBooks(answer, modelResult.bookReferences()));
         answer = enforceVerifiedRecommendationAnswer(answer, content, bookReferences);
         answer = appendBookReferenceEvidence(enforceBookSearchEvidence(answer, content, toolResult, bookReferences), bookReferences);
-        if (delayedRecommendation) onDelta.accept(answer);
         if (retainConversations) saveMessage(sessionId, "ASSISTANT", answer, writeCitations(citations), writeBookReferences(bookReferences), toolResult.traceJson());
         touchSession(session, retainConversations, content);
         saveUsage(userId, sessionId, selection, requestId, prompt, modelResult, degraded ? "DEGRADED" : "SUCCESS");
