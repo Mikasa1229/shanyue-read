@@ -198,6 +198,68 @@ public class StructuredGraphExtractor {
         }
     }
 
+    /**
+     * Judges whether later, verbatim evidence develops or answers an already-open clue. Candidate
+     * recall happens outside the model; this method deliberately makes no keyword-derived claim.
+     */
+    public ClueLifecycleExtraction assessClueLifecycle(ClueContext clue, List<ChapterFact> candidates,
+                                                        ModelConfig modelConfig) {
+        if (clue == null || modelConfig == null || !StringUtils.hasText(modelConfig.apiKey())
+                || candidates == null || candidates.isEmpty()) return ClueLifecycleExtraction.empty();
+        List<ChapterFact> facts = candidates.stream().filter(fact -> fact != null && StringUtils.hasText(fact.evidence()))
+                .filter(fact -> fact.chapterIndex() > clue.chapterIndex()).limit(10).toList();
+        if (facts.isEmpty()) return ClueLifecycleExtraction.empty();
+        try {
+            String instructions = """
+                    你是中文小说线索生命周期审查器。输入含一条先前已确认的线索及其后的候选原文。只返回 JSON：{"assessments":[]}。
+                    assessments 每项只能含 type,factIndex,evidence,explanation,confidence。type 只能为 PARTIAL 或 FINAL；若候选不能可靠推进或回答该线索，返回空数组。
+                    PARTIAL 仅表示后文直接补充了线索对象、范围、关联人物、动机或机制的一部分，但仍不能回答最初缺失的关键答案。FINAL 仅表示后文明确回答了原线索的关键未知点。不能凭叙事常识、角色推测、相似主题或关键词重合判定；不能把同章内容当作后续发展。
+                    evidence 必须是 factIndex 指向候选中的逐字连续原文，最多160字。explanation 用一句中文解释它补充/回答了原先哪个未知点，不能复述窗口外剧情。按章节顺序返回，最多3项；FINAL 后不可再返回 PARTIAL。没有足够直接证据时返回 {"assessments":[]}。
+                    """;
+            StringBuilder source = new StringBuilder("原线索（第").append(clue.chapterIndex() + 1).append("章）：\n")
+                    .append("线索概括：").append(clue.signal()).append('\n')
+                    .append("尚缺答案：").append(clue.unresolvedReason()).append('\n')
+                    .append("原文依据：").append(clue.evidence()).append("\n\n后续候选原文：\n");
+            for (int index = 0; index < facts.size(); index++) source.append('[').append(index + 1).append("] 第")
+                    .append(facts.get(index).chapterIndex() + 1).append("章：").append(facts.get(index).evidence()).append('\n');
+            OpenAiChatOptions options = new OpenAiChatOptions();
+            options.setModel(modelConfig.model()); options.setMaxTokens(700); options.setTemperature(0f);
+            options.setResponseFormat(new OpenAiApi.ChatCompletionRequest.ResponseFormat("json_object"));
+            String baseUrl = modelConfig.baseUrl() == null ? "" : modelConfig.baseUrl().replaceAll("/+$", "");
+            if (baseUrl.matches("(?i).*/v1$")) baseUrl = baseUrl.substring(0, baseUrl.length() - 3);
+            OpenAiChatClient client = new OpenAiChatClient(new OpenAiApi(baseUrl, modelConfig.apiKey()), options);
+            ModelClueLifecycleResponse response = objectMapper.readValue(stripFence(client.call(new Prompt(List.of(
+                    new SystemMessage(instructions), new UserMessage(source.toString())), options)).getResult().getOutput().getContent()),
+                    ModelClueLifecycleResponse.class);
+            if (response == null || response.assessments == null) return ClueLifecycleExtraction.empty();
+            List<ClueLifecycleAssessment> assessments = new ArrayList<>();
+            for (ModelClueLifecycle assessment : response.assessments) {
+                if (assessment == null || !Set.of("PARTIAL", "FINAL").contains(safeUpper(assessment.type)) || assessment.factIndex == null
+                        || assessment.factIndex < 1 || assessment.factIndex > facts.size() || !StringUtils.hasText(assessment.evidence)
+                        || !StringUtils.hasText(assessment.explanation)) continue;
+                ChapterFact fact = facts.get(assessment.factIndex - 1);
+                String evidence = trimEvidence(assessment.evidence, fact.evidence());
+                if (evidence == null || evidence.length() > 240) continue;
+                assessments.add(new ClueLifecycleAssessment(safeUpper(assessment.type),
+                        new ChapterFact(fact.id(), fact.chapterIndex(), evidence), assessment.explanation.trim(), clamp(assessment.confidence)));
+            }
+            assessments = assessments.stream().sorted(java.util.Comparator.comparingInt(item -> item.evidence().chapterIndex()))
+                    .distinct().limit(3).toList();
+            boolean finalSeen = false;
+            List<ClueLifecycleAssessment> ordered = new ArrayList<>();
+            for (ClueLifecycleAssessment assessment : assessments) {
+                if (finalSeen || ("PARTIAL".equals(assessment.type()) && ordered.stream().anyMatch(item ->
+                        item.evidence().chapterIndex() == assessment.evidence().chapterIndex()))) continue;
+                ordered.add(assessment);
+                if ("FINAL".equals(assessment.type())) finalSeen = true;
+            }
+            return new ClueLifecycleExtraction(ordered);
+        } catch (Exception exception) {
+            log.warn("Clue lifecycle assessment failed", exception);
+            return ClueLifecycleExtraction.empty();
+        }
+    }
+
     /** Resolves later naming revelations and richer character relations from a bounded story window. */
     public CharacterKnowledgeExtraction extractCharacterKnowledge(List<ChapterFact> input,
                                                                   List<EntityContext> knownEntities,
@@ -624,6 +686,7 @@ public class StructuredGraphExtractor {
         return matcher.find() ? matcher.group(1) + name : hint;
     }
     private String stripFence(String value) { return value == null ? "{}" : value.replace("```json", "").replace("```", "").trim(); }
+    private String safeUpper(String value) { return value == null ? "" : value.trim().toUpperCase(java.util.Locale.ROOT); }
 
     private static class ModelExtraction { public List<ModelEntity> entities; public List<ModelRelation> relations; }
     private static class ModelEntity { public String name; public String type; public String identityHint; public Object aliases; public String evidence; public Double confidence; }
@@ -632,6 +695,8 @@ public class StructuredGraphExtractor {
     private static class ModelStoryEvent { public String name; public String branch; public String status; public List<Integer> factIndexes; public Double confidence; }
     private static class ModelClueResponse { public List<ModelClue> clues; }
     private static class ModelClue { public String signal; public List<Integer> factIndexes; public String unresolvedReason; public Double confidence; }
+    private static class ModelClueLifecycleResponse { public List<ModelClueLifecycle> assessments; }
+    private static class ModelClueLifecycle { public String type; public Integer factIndex; public String evidence; public String explanation; public Double confidence; }
     private static class ModelCharacterKnowledge { public List<ModelIdentity> identities; public List<ModelCharacterRelation> relations; }
     private static class ModelIdentity { public String canonicalName; public String mention; public Integer factIndex; public String evidence; public Double confidence; }
     private static class ModelCharacterRelation { public String source; public String target; public String type; public Integer factIndex; public String evidence; public Double confidence; }
@@ -646,6 +711,11 @@ public class StructuredGraphExtractor {
     public record ClueCandidate(String signal, String unresolvedReason, List<ChapterFact> evidence, double confidence) { }
     public record ClueExtraction(List<ClueCandidate> clues) {
         static ClueExtraction empty() { return new ClueExtraction(List.of()); }
+    }
+    public record ClueContext(int chapterIndex, String signal, String unresolvedReason, String evidence) { }
+    public record ClueLifecycleAssessment(String type, ChapterFact evidence, String explanation, double confidence) { }
+    public record ClueLifecycleExtraction(List<ClueLifecycleAssessment> assessments) {
+        static ClueLifecycleExtraction empty() { return new ClueLifecycleExtraction(List.of()); }
     }
     public record IdentityResolution(String canonicalName, String mention, List<ChapterFact> evidence, double confidence) { }
     public record CharacterRelation(String source, String target, String type, List<ChapterFact> evidence, double confidence) { }

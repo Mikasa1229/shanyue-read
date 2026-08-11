@@ -89,7 +89,7 @@ class KnowledgeServiceImplEvidenceRecallTest {
         when(embeddings.similarity(anyList(), anyList())).thenReturn(0.5D);
 
         KnowledgeServiceImpl service = new KnowledgeServiceImpl(mock(KnowledgeDocumentMapper.class), chunks,
-                mock(KnowledgeClueMapper.class), mock(KnowledgeVectorProfileMapper.class), nodes, aliases,
+                mock(KnowledgeClueMapper.class), mock(KnowledgeClueResolutionMapper.class), mock(KnowledgeVectorProfileMapper.class), nodes, aliases,
                 mock(KnowledgeClueGraphLinkMapper.class), mock(LightRagCommunityMapper.class), mock(KnowledgeGraphEdgeMapper.class),
                 mock(KnowledgeRelationAssertionMapper.class),
                 embeddings, new ObjectMapper(), mock(GraphKnowledgeStore.class), mock(StructuredGraphExtractor.class),
@@ -125,6 +125,7 @@ class KnowledgeServiceImplEvidenceRecallTest {
     private KnowledgeServiceImpl service(KnowledgeChunkMapper chunks, EmbeddingService embeddings, VectorKnowledgeStore vectors,
                                          ElasticsearchKnowledgeStore elasticsearch, RerankerService reranker) {
         return new KnowledgeServiceImpl(mock(KnowledgeDocumentMapper.class), chunks, mock(KnowledgeClueMapper.class),
+                mock(KnowledgeClueResolutionMapper.class),
                 mock(KnowledgeVectorProfileMapper.class), mock(KnowledgeGraphNodeMapper.class), mock(KnowledgeEntityAliasMapper.class),
                 mock(KnowledgeClueGraphLinkMapper.class), mock(LightRagCommunityMapper.class), mock(KnowledgeGraphEdgeMapper.class),
                 mock(KnowledgeRelationAssertionMapper.class), embeddings,

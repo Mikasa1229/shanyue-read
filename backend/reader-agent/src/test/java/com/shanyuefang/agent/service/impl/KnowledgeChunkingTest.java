@@ -45,6 +45,7 @@ class KnowledgeChunkingTest {
     private KnowledgeServiceImpl service() {
         return new KnowledgeServiceImpl(mock(com.shanyuefang.agent.mapper.KnowledgeDocumentMapper.class),
                 mock(com.shanyuefang.agent.mapper.KnowledgeChunkMapper.class), mock(com.shanyuefang.agent.mapper.KnowledgeClueMapper.class),
+                mock(com.shanyuefang.agent.mapper.KnowledgeClueResolutionMapper.class),
                 mock(com.shanyuefang.agent.mapper.KnowledgeVectorProfileMapper.class), mock(com.shanyuefang.agent.mapper.KnowledgeGraphNodeMapper.class),
                 mock(com.shanyuefang.agent.mapper.KnowledgeEntityAliasMapper.class), mock(com.shanyuefang.agent.mapper.KnowledgeClueGraphLinkMapper.class),
                 mock(com.shanyuefang.agent.mapper.LightRagCommunityMapper.class), mock(com.shanyuefang.agent.mapper.KnowledgeGraphEdgeMapper.class),

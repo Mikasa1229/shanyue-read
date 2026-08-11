@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shanyuefang.agent.domain.dto.IndexChapterDTO;
 import com.shanyuefang.agent.domain.entity.KnowledgeChunk;
 import com.shanyuefang.agent.domain.entity.KnowledgeClue;
+import com.shanyuefang.agent.domain.entity.KnowledgeClueResolution;
 import com.shanyuefang.agent.domain.entity.KnowledgeVectorProfile;
 import com.shanyuefang.agent.domain.entity.KnowledgeDocument;
 import com.shanyuefang.agent.domain.entity.KnowledgeGraphEdge;
@@ -15,6 +16,7 @@ import com.shanyuefang.agent.domain.entity.KnowledgeEntityAlias;
 import com.shanyuefang.agent.domain.entity.KnowledgeClueGraphLink;
 import com.shanyuefang.agent.domain.entity.LightRagCommunity;
 import com.shanyuefang.agent.domain.vo.ClueVO;
+import com.shanyuefang.agent.domain.vo.ClueProgressVO;
 import com.shanyuefang.agent.domain.vo.CitationVO;
 import com.shanyuefang.agent.domain.vo.KnowledgeGraphVO;
 import com.shanyuefang.agent.domain.vo.SimilarBookVO;
@@ -22,6 +24,7 @@ import com.shanyuefang.agent.domain.vo.ReadingMapVO;
 import com.shanyuefang.agent.domain.vo.GraphReviewClaimVO;
 import com.shanyuefang.agent.mapper.KnowledgeChunkMapper;
 import com.shanyuefang.agent.mapper.KnowledgeClueMapper;
+import com.shanyuefang.agent.mapper.KnowledgeClueResolutionMapper;
 import com.shanyuefang.agent.mapper.KnowledgeVectorProfileMapper;
 import com.shanyuefang.agent.mapper.KnowledgeDocumentMapper;
 import com.shanyuefang.agent.mapper.KnowledgeGraphEdgeMapper;
@@ -88,7 +91,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private static final Pattern CLUE_PATTERN = Pattern.compile("[^。！？]{0,80}(似乎|秘密|奇怪|线索|疑惑|真相|隐约|不对劲|伏笔)[^。！？]{0,100}");
     private static final Pattern LOCATION_PATTERN = Pattern.compile("(?:在|来到|前往|位于)([\\p{IsHan}]{2,8}(?:城|镇|村|山|府|楼|馆|院|谷|岛))");
     private static final Pattern EVENT_PATTERN = Pattern.compile("[^。！？]{0,70}(?:冲突|战斗|相遇|离开|抵达|失踪|发现|决定|约定)[^。！？]{0,90}");
-    private static final Pattern CLUE_RESOLUTION_PATTERN = Pattern.compile("(?:真相|揭晓|原来|答案|解开)");
+    private static final int CLUE_LIFECYCLE_CANDIDATE_LIMIT = 12;
+    private static final String CLUE_LIFECYCLE_VERSION_PREFIX = "clue-lifecycle-v3:";
     /** Keeps the no-model fallback conservative: prose fragments must look like a Chinese name. */
     private static final String COMMON_SURNAME_CHARACTERS = "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏窦章云苏潘葛范彭郎鲁韦昌马苗方俞任袁柳史唐费廉薛雷贺倪汤滕殷罗毕郝邬安常乐于傅皮齐康伍余顾孟黄穆萧尹姚邵汪祁毛狄米贝明伏成戴谈宋庞熊纪舒屈项祝董梁杜阮蓝闵席季强贾路江童颜郭梅盛林钟徐邱骆高夏蔡田樊胡凌霍虞万柯管卢莫房裘干解应宗丁宣邓杭洪包左石崔吉龚程邢裴陆荣翁荀羊惠曲封储靳段富焦巴牧谷车侯全秋仲伊宫宁仇栾甘厉戎祖武符刘景詹龙叶幸司黎白怀蒲连古易廖居衡耿谭劳姬申冉燕温庄晏柴瞿阎慕艾容向";
     private static final Set<String> NON_NAME_FRAGMENTS = Set.of("这个", "那个", "这里", "那里", "他们", "我们", "你们", "自己", "少年", "女子", "老人", "脸色", "主人", "于是", "但是", "如果", "因为", "已经", "没有", "起来", "看着", "说道", "问道");
@@ -96,6 +100,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeChunkMapper chunkMapper;
     private final KnowledgeClueMapper clueMapper;
+    private final KnowledgeClueResolutionMapper clueResolutionMapper;
     private final KnowledgeVectorProfileMapper vectorProfileMapper;
     private final KnowledgeGraphNodeMapper nodeMapper;
     private final KnowledgeEntityAliasMapper aliasMapper;
@@ -500,15 +505,21 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     @Override
     public List<ClueVO> clues(long canonicalBookId, int currentChapter) {
-        return clueMapper.selectList(Wrappers.<KnowledgeClue>lambdaQuery()
+        List<KnowledgeClue> source = clueMapper.selectList(Wrappers.<KnowledgeClue>lambdaQuery()
                         .eq(KnowledgeClue::getCanonicalBookId, canonicalBookId)
                         .le(KnowledgeClue::getChapterIndex, currentChapter)
                         .eq(KnowledgeClue::getReviewStatus, APPROVED)
-                        .orderByDesc(KnowledgeClue::getChapterIndex).last("LIMIT 200"))
-                .stream().map(clue -> clue.getResolvedChapter() != null && clue.getResolvedChapter() > currentChapter
-                        ? new ClueVO(clue.getChapterIndex(), clue.getExcerpt(), clue.getSignal(), "OPEN", null, null)
-                        : new ClueVO(clue.getChapterIndex(), clue.getExcerpt(), clue.getSignal(), clue.getStatus(),
-                        clue.getResolvedChapter(), clue.getResolutionEvidence())).toList();
+                        .orderByDesc(KnowledgeClue::getChapterIndex).last("LIMIT 200"));
+        if (source.isEmpty()) return List.of();
+        Map<Long, List<KnowledgeClueResolution>> milestones = clueResolutionMapper.selectList(Wrappers.<KnowledgeClueResolution>lambdaQuery()
+                        .eq(KnowledgeClueResolution::getCanonicalBookId, canonicalBookId)
+                        .in(KnowledgeClueResolution::getClueId, source.stream().map(KnowledgeClue::getId).toList())
+                        .le(KnowledgeClueResolution::getResolutionChapter, currentChapter)
+                        .eq(KnowledgeClueResolution::getReviewStatus, APPROVED)
+                        .orderByAsc(KnowledgeClueResolution::getResolutionChapter))
+                .stream().collect(java.util.stream.Collectors.groupingBy(KnowledgeClueResolution::getClueId,
+                        LinkedHashMap::new, java.util.stream.Collectors.toList()));
+        return source.stream().map(clue -> clueViewAtBoundary(clue, milestones.getOrDefault(clue.getId(), List.of()))).toList();
     }
 
     @Override
@@ -899,7 +910,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             calibrateCharacterKnowledge(canonicalBookId, chapters, modelConfig);
             synthesizeStoryEvents(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
             synthesizeClues(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
-            reconcileClueLifecycle(canonicalBookId, startChapter - 1, endChapter - 1);
+            reconcileClueLifecycle(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
             refreshBookProfile(canonicalBookId);
             lightRagService.refresh(canonicalBookId);
             // The relational graph is authoritative; projection refresh keeps Neo4j complete after merging a range.
@@ -927,6 +938,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         aliasMapper.delete(Wrappers.<KnowledgeEntityAlias>lambdaQuery().eq(KnowledgeEntityAlias::getCanonicalBookId, canonicalBookId));
         lightRagService.deleteBook(canonicalBookId);
         clueGraphLinkMapper.delete(Wrappers.<KnowledgeClueGraphLink>lambdaQuery().eq(KnowledgeClueGraphLink::getCanonicalBookId, canonicalBookId));
+        clueResolutionMapper.delete(Wrappers.<KnowledgeClueResolution>lambdaQuery().eq(KnowledgeClueResolution::getCanonicalBookId, canonicalBookId));
         clueMapper.delete(Wrappers.<KnowledgeClue>lambdaQuery().eq(KnowledgeClue::getCanonicalBookId, canonicalBookId));
         edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery().eq(KnowledgeGraphEdge::getCanonicalBookId, canonicalBookId));
         relationAssertionMapper.delete(Wrappers.<KnowledgeRelationAssertion>lambdaQuery()
@@ -1255,11 +1267,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
         List<Long> clueIds = clueMapper.selectList(Wrappers.<KnowledgeClue>lambdaQuery().eq(KnowledgeClue::getCanonicalBookId, canonicalBookId)
                         .between(KnowledgeClue::getChapterIndex, zeroStart, zeroEnd)).stream().map(KnowledgeClue::getId).toList();
-        if (!clueIds.isEmpty()) clueGraphLinkMapper.delete(Wrappers.<KnowledgeClueGraphLink>lambdaQuery().in(KnowledgeClueGraphLink::getClueId, clueIds));
+        if (!clueIds.isEmpty()) {
+            clueGraphLinkMapper.delete(Wrappers.<KnowledgeClueGraphLink>lambdaQuery().in(KnowledgeClueGraphLink::getClueId, clueIds));
+            clueResolutionMapper.delete(Wrappers.<KnowledgeClueResolution>lambdaQuery().in(KnowledgeClueResolution::getClueId, clueIds));
+        }
         clueMapper.delete(Wrappers.<KnowledgeClue>lambdaQuery().eq(KnowledgeClue::getCanonicalBookId, canonicalBookId)
                 .between(KnowledgeClue::getChapterIndex, zeroStart, zeroEnd));
         synthesizeStoryEvents(canonicalBookId, zeroStart, zeroEnd, modelConfig);
         synthesizeClues(canonicalBookId, zeroStart, zeroEnd, modelConfig);
+        reconcileClueLifecycle(canonicalBookId, zeroStart, zeroEnd, modelConfig);
         reprojectGraph(canonicalBookId);
     }
 
@@ -1326,12 +1342,9 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         }
     }
 
-    /**
-     * Resolves previously discovered clues incrementally. A clue is only marked resolved
-     * when a later indexed chapter contains an explicit reveal signal and repeats at least
-     * one distinctive term from the clue; a generic "答案" sentence is not sufficient.
-     */
-    private void reconcileClueLifecycle(long bookId, int startChapter, int endChapter) {
+    /** Replays only later evidence, so a reader never sees a future clue development. */
+    private void reconcileClueLifecycle(long bookId, int startChapter, int endChapter,
+                                        StructuredGraphExtractor.ModelConfig modelConfig) {
         List<KnowledgeClue> openClues = clueMapper.selectList(Wrappers.<KnowledgeClue>lambdaQuery()
                 .eq(KnowledgeClue::getCanonicalBookId, bookId)
                 .in(KnowledgeClue::getStatus, List.of("OPEN", "PARTIALLY_RESOLVED"))
@@ -1340,32 +1353,94 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         if (openClues.isEmpty()) return;
         List<KnowledgeChunk> laterChunks = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
                 .eq(KnowledgeChunk::getCanonicalBookId, bookId)
-                .gt(KnowledgeChunk::getChapterIndex, startChapter)
                 .le(KnowledgeChunk::getChapterIndex, endChapter)
                 .orderByAsc(KnowledgeChunk::getChapterIndex));
         for (KnowledgeClue clue : openClues) {
-            List<String> terms = clueTerms(clue.getSignal(), clue.getExcerpt());
-            if (terms.isEmpty()) continue;
-            for (KnowledgeChunk chunk : laterChunks) {
-                String text = safe(chunk.getContent());
-                if (!CLUE_RESOLUTION_PATTERN.matcher(text).find()) continue;
-                long matches = terms.stream().filter(text::contains).count();
-                if (matches < Math.min(2, terms.size())) continue;
-                clue.setStatus("RESOLVED");
-                clue.setResolvedChapter(chunk.getChapterIndex());
-                clue.setResolutionEvidence(excerpt(text, 280));
-                clue.setUpdatedAt(LocalDateTime.now());
-                clueMapper.updateById(clue);
-                break;
+            List<KnowledgeChunk> candidates = rankClueLifecycleCandidates(clue, laterChunks);
+            if (candidates.isEmpty()) continue;
+            StructuredGraphExtractor.ClueLifecycleExtraction assessment = structuredGraphExtractor.assessClueLifecycle(
+                    clueContext(clue), candidates.stream().map(chunk -> new StructuredGraphExtractor.ChapterFact(chunk.getId(),
+                            chunk.getChapterIndex(), excerpt(chunk.getContent(), 900))).toList(), modelConfig);
+            if (assessment == null || assessment.assessments().isEmpty()) continue;
+            for (StructuredGraphExtractor.ClueLifecycleAssessment milestone : assessment.assessments()) {
+                persistClueMilestone(bookId, clue, milestone, modelConfig.model());
+                if ("FINAL".equals(milestone.type())) break;
             }
         }
     }
 
-    private List<String> clueTerms(String signal, String excerpt) {
-        String value = safe(signal) + safe(excerpt).replaceAll("【[^】]+】", " ");
-        return java.util.regex.Pattern.compile("[\\p{IsHan}]{2,6}").matcher(value).results()
-                .map(match -> match.group()).filter(term -> !Set.of("当前未解", "原文依据", "已经知道", "没有答案").contains(term))
-                .distinct().limit(4).toList();
+    private StructuredGraphExtractor.ClueContext clueContext(KnowledgeClue clue) {
+        String excerpt = safe(clue.getExcerpt());
+        Matcher matcher = Pattern.compile("【当前未解原因】([\\s\\S]*?)(?=【原文依据】|$)").matcher(excerpt);
+        String reason = matcher.find() ? matcher.group(1).trim() : safe(clue.getSignal());
+        int marker = excerpt.indexOf("【原文依据】");
+        String evidence = marker < 0 ? excerpt : excerpt.substring(marker + "【原文依据】".length()).trim();
+        return new StructuredGraphExtractor.ClueContext(clue.getChapterIndex(), safe(clue.getSignal()), reason, evidence);
+    }
+
+    /** Candidate ranking is recall only; the model still rejects unrelated semantic neighbours. */
+    private List<KnowledgeChunk> rankClueLifecycleCandidates(KnowledgeClue clue, List<KnowledgeChunk> chunks) {
+        String query = safe(clue.getSignal()) + " " + clueContext(clue).unresolvedReason() + " " + clueContext(clue).evidence();
+        List<Double> embedded;
+        try { embedded = embeddingService.embed(query); } catch (Exception ignored) { embedded = List.of(); }
+        final List<Double> queryVector = embedded;
+        return chunks.stream().filter(chunk -> chunk.getChapterIndex() > clue.getChapterIndex())
+                .map(chunk -> new ScoredChunk(chunk, clueCandidateScore(query, queryVector, chunk)))
+                .filter(candidate -> candidate.score() > 0D).sorted(Comparator.comparingDouble(ScoredChunk::score).reversed()
+                        .thenComparing(candidate -> candidate.chunk().getChapterIndex()))
+                .limit(CLUE_LIFECYCLE_CANDIDATE_LIMIT).map(ScoredChunk::chunk).toList();
+    }
+
+    private double clueCandidateScore(String query, List<Double> queryVector, KnowledgeChunk chunk) {
+        String text = safe(chunk.getContent());
+        double lexical = keywordOverlap(query, text);
+        if (queryVector == null || queryVector.isEmpty() || !StringUtils.hasText(chunk.getEmbeddingJson())) return lexical;
+        try {
+            List<Double> vector = readVector(chunk.getEmbeddingJson());
+            return Math.max(0D, embeddingService.similarity(queryVector, vector)) * 0.72D + lexical * 0.28D;
+        } catch (Exception ignored) { return lexical; }
+    }
+
+    private double keywordOverlap(String query, String text) {
+        Set<String> terms = extractKeywords(query);
+        if (terms.isEmpty() || !StringUtils.hasText(text)) return 0D;
+        long matched = terms.stream().filter(text::contains).count();
+        return (double) matched / terms.size();
+    }
+
+    private void persistClueMilestone(long bookId, KnowledgeClue clue, StructuredGraphExtractor.ClueLifecycleAssessment assessment,
+                                      String model) {
+        String hash = sha256(assessment.type() + "\n" + assessment.evidence().chapterIndex() + "\n" + assessment.evidence().evidence());
+        KnowledgeClueResolution existing = clueResolutionMapper.selectOne(Wrappers.<KnowledgeClueResolution>lambdaQuery()
+                .eq(KnowledgeClueResolution::getClueId, clue.getId()).eq(KnowledgeClueResolution::getContentHash, hash));
+        if (existing != null) return;
+        KnowledgeClueResolution milestone = new KnowledgeClueResolution();
+        milestone.setId(SnowflakeIdUtil.next()); milestone.setCanonicalBookId(bookId); milestone.setClueId(clue.getId());
+        milestone.setResolutionChapter(assessment.evidence().chapterIndex()); milestone.setResolutionType(assessment.type());
+        milestone.setEvidence(excerpt(assessment.evidence().evidence(), 500)); milestone.setExplanation(excerpt(assessment.explanation(), 180));
+        milestone.setConfidence(assessment.confidence()); milestone.setSourceModelVersion(CLUE_LIFECYCLE_VERSION_PREFIX + model);
+        milestone.setReviewStatus(APPROVED); milestone.setContentHash(hash); milestone.setCreatedAt(LocalDateTime.now()); milestone.setUpdatedAt(LocalDateTime.now());
+        clueResolutionMapper.insert(milestone);
+        clue.setStatus("FINAL".equals(assessment.type()) ? "RESOLVED" : "PARTIALLY_RESOLVED");
+        clue.setResolvedChapter(assessment.evidence().chapterIndex()); clue.setResolutionEvidence(milestone.getEvidence());
+        clue.setUpdatedAt(LocalDateTime.now()); clueMapper.updateById(clue);
+    }
+
+    private ClueVO clueViewAtBoundary(KnowledgeClue clue, List<KnowledgeClueResolution> milestones) {
+        List<ClueProgressVO> progress = milestones.stream().map(item -> new ClueProgressVO(item.getResolutionChapter(),
+                item.getResolutionType(), item.getEvidence(), item.getExplanation())).toList();
+        KnowledgeClueResolution latest = milestones.isEmpty() ? null : milestones.get(milestones.size() - 1);
+        boolean finalAnswer = milestones.stream().anyMatch(item -> "FINAL".equals(item.getResolutionType()));
+        if (latest != null) {
+            return new ClueVO(clue.getChapterIndex(), clue.getExcerpt(), clue.getSignal(), finalAnswer ? "RESOLVED" : "PARTIALLY_RESOLVED",
+                    latest.getResolutionChapter(), latest.getEvidence(), progress);
+        }
+        // Retain compatibility for a database that has not yet applied the history migration.
+        if ("RESOLVED".equals(clue.getStatus()) && clue.getResolvedChapter() != null) {
+            return new ClueVO(clue.getChapterIndex(), clue.getExcerpt(), clue.getSignal(), "RESOLVED",
+                    clue.getResolvedChapter(), clue.getResolutionEvidence(), List.of());
+        }
+        return new ClueVO(clue.getChapterIndex(), clue.getExcerpt(), clue.getSignal(), "OPEN", null, null, List.of());
     }
 
     private boolean hasClueSignal(String content) {
@@ -1386,6 +1461,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         aliasMapper.delete(Wrappers.<KnowledgeEntityAlias>lambdaQuery().eq(KnowledgeEntityAlias::getCanonicalBookId, canonicalBookId));
         lightRagService.deleteBook(canonicalBookId);
         clueMapper.delete(Wrappers.<KnowledgeClue>lambdaQuery().eq(KnowledgeClue::getCanonicalBookId, canonicalBookId));
+        clueResolutionMapper.delete(Wrappers.<KnowledgeClueResolution>lambdaQuery().eq(KnowledgeClueResolution::getCanonicalBookId, canonicalBookId));
         clueGraphLinkMapper.delete(Wrappers.<KnowledgeClueGraphLink>lambdaQuery().eq(KnowledgeClueGraphLink::getCanonicalBookId, canonicalBookId));
         edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery().eq(KnowledgeGraphEdge::getCanonicalBookId, canonicalBookId));
         relationAssertionMapper.delete(Wrappers.<KnowledgeRelationAssertion>lambdaQuery()
@@ -1520,6 +1596,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         aliasMapper.delete(Wrappers.<KnowledgeEntityAlias>lambdaQuery().eq(KnowledgeEntityAlias::getCanonicalBookId, canonicalBookId));
         lightRagService.deleteBook(canonicalBookId);
         clueMapper.delete(Wrappers.<KnowledgeClue>lambdaQuery().eq(KnowledgeClue::getCanonicalBookId, canonicalBookId));
+        clueResolutionMapper.delete(Wrappers.<KnowledgeClueResolution>lambdaQuery().eq(KnowledgeClueResolution::getCanonicalBookId, canonicalBookId));
         clueGraphLinkMapper.delete(Wrappers.<KnowledgeClueGraphLink>lambdaQuery().eq(KnowledgeClueGraphLink::getCanonicalBookId, canonicalBookId));
         edgeMapper.delete(Wrappers.<KnowledgeGraphEdge>lambdaQuery().eq(KnowledgeGraphEdge::getCanonicalBookId, canonicalBookId));
         nodeMapper.delete(Wrappers.<KnowledgeGraphNode>lambdaQuery().eq(KnowledgeGraphNode::getCanonicalBookId, canonicalBookId));
