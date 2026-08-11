@@ -84,8 +84,10 @@
                   <div class="message-edit-actions"><button type="button" @click="cancelMessageEdit">取消</button><button type="button" :disabled="sending || !editingMessageContent.trim()" @click="saveMessageEdit(message)">保存并重新生成</button></div>
                 </template>
                 <template v-else>
-                  <div v-if="message.role === 'ASSISTANT'" class="message-markdown" v-html="renderMarkdown(message.content)" />
-                  <p v-if="message.role === 'ASSISTANT' && !message.content && sending" class="stream-status" aria-live="polite">{{ streamStatusText }}</p>
+                  <template v-if="message.role === 'ASSISTANT'">
+                    <div class="message-markdown" v-html="renderMarkdown(message.content)" />
+                    <p v-if="!message.content && sending" class="stream-status" aria-live="polite">{{ streamStatusText }}</p>
+                  </template>
                   <span v-else>{{ message.content }}</span>
                   <button v-if="message.role === 'USER' && !String(message.id).startsWith('local-')" class="message-edit-button" type="button" title="编辑这条提问并重新生成后续回答" @click="startMessageEdit(message)"><span>✎</span> 编辑并重新生成</button>
                 </template>
@@ -1342,21 +1344,6 @@ async function deleteConversation() {
   } catch (error) { toast.error(error.message) }
 }
 
-// Some compatible providers or proxies can replay an SSE delta before the final
-// `done` payload replaces the temporary answer. Keep the in-progress rendering idempotent.
-function appendUniqueStreamDelta(accumulated, incoming) {
-  const delta = String(incoming || '')
-  if (!delta || !accumulated) return accumulated + delta
-  if (accumulated.endsWith(delta)) return accumulated
-  if (delta.startsWith(accumulated)) return delta
-  if (delta.length >= 12 && accumulated.includes(delta)) return accumulated
-  const limit = Math.min(accumulated.length, delta.length)
-  for (let overlap = limit; overlap >= 4; overlap -= 1) {
-    if (accumulated.endsWith(delta.slice(0, overlap))) return accumulated + delta.slice(overlap)
-  }
-  return accumulated + delta
-}
-
 async function send(requestContext = {}, contentOverride = '') {
   const content = (contentOverride || draft.value).trim()
   if (!activeSession.value || !content || sending.value) return
@@ -1375,10 +1362,7 @@ async function send(requestContext = {}, contentOverride = '') {
       ? { canonicalBookId: String(insightBookId.value), currentChapter: Number(insightChapter.value) - 1, currentBookTitle: selectedInsightBook.value?.bookName || chatReferenceBook.value?.bookName }
       : {}
     await streamAgentMessage(activeSession.value.id, { content, ...modelRequest, ...readingContext, ...requestContext }, {
-      onDelta: (delta) => {
-        answer = appendUniqueStreamDelta(answer, delta)
-        messages.value[messages.value.length - 1].content = answer
-      },
+      onDelta: (delta) => { answer += delta; messages.value[messages.value.length - 1].content = answer },
       onStatus: (data) => { streamStatus.value = data?.status || 'thinking' },
       onRecommendations: (data) => { if (Array.isArray(data)) shelfRecommendations.value = data },
       onDone: (reply) => {

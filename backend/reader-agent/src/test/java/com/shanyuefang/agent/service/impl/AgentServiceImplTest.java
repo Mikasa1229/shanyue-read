@@ -142,16 +142,6 @@ class AgentServiceImplTest {
         assertEquals("诡秘之主", references.get(0).getTitle());
     }
 
-    @Test
-    void keepsOnlyNewTextWhenCompatibleProviderReplaysStreamChunks() {
-        String first = "明白了，我会排除掉这些候选。";
-
-        assertEquals("", AgentServiceImpl.uniqueStreamAddition(first, first));
-        assertEquals("我会排除掉这些候选。", AgentServiceImpl.uniqueStreamAddition("明白了，", first));
-        assertEquals("继续筛选。", AgentServiceImpl.uniqueStreamAddition("明白了，我会继续", "继续筛选。"));
-        assertEquals("", AgentServiceImpl.uniqueStreamAddition(first + "下一句", first));
-    }
-
     private AgentMessage message(String role, String content) {
         AgentMessage message = new AgentMessage();
         message.setRole(role);

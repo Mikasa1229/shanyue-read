@@ -544,34 +544,12 @@ public class AgentServiceImpl implements AgentService {
                     String delta = response.getResult() == null || response.getResult().getOutput() == null
                             ? null : response.getResult().getOutput().getContent();
                     if (StringUtils.hasText(delta)) {
-                        String addition = uniqueStreamAddition(answer.toString(), delta);
-                        if (StringUtils.hasText(addition)) {
-                            answer.append(addition);
-                            onDelta.accept(addition);
-                        }
+                        answer.append(delta);
+                        onDelta.accept(delta);
                     }
                 }).blockLast();
         if (answer.isEmpty()) throw new BusinessException(ResultCode.SERVICE_UNAVAILABLE, "模型没有返回有效的流式内容");
         return fromUsage(answer.toString(), providerUsage.get(), mergeBookReferences(prompt.bookReferences(), functionReferences));
-    }
-
-    /**
-     * OpenAI-compatible providers are inconsistent here: some send true deltas,
-     * while others replay the current cumulative text or its overlapping tail.
-     */
-    static String uniqueStreamAddition(String accumulated, String incoming) {
-        if (!StringUtils.hasText(incoming) || accumulated == null || accumulated.isEmpty()) return incoming;
-        if (accumulated.endsWith(incoming)) return "";
-        if (incoming.startsWith(accumulated)) return incoming.substring(accumulated.length());
-        // Do not suppress short repeated tokens such as Chinese function words.
-        if (incoming.length() >= 12 && accumulated.contains(incoming)) return "";
-        int limit = Math.min(accumulated.length(), incoming.length());
-        for (int overlap = limit; overlap >= 4; overlap--) {
-            if (accumulated.regionMatches(accumulated.length() - overlap, incoming, 0, overlap)) {
-                return incoming.substring(overlap);
-            }
-        }
-        return incoming;
     }
 
     private PromptAssembly buildPrompt(AgentSession session, ChatMessageDTO dto, String content,
