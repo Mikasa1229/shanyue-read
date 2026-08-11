@@ -17,6 +17,7 @@ import com.shanyuefang.novel.mapper.CanonicalMergeReviewMapper;
 import com.shanyuefang.novel.mapper.FavoriteBookMapper;
 import com.shanyuefang.novel.mapper.BookContentVersionMapper;
 import com.shanyuefang.novel.service.impl.CanonicalBookServiceImpl;
+import com.shanyuefang.novel.domain.dto.ResolveCanonicalBookDTO;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -26,6 +27,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 class CanonicalBookServiceImplTest {
     @org.junit.jupiter.api.BeforeAll
@@ -107,6 +109,22 @@ class CanonicalBookServiceImplTest {
         verify(fixture.books).deleteById(41L);
         verify(fixture.shelves).update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class));
         verify(fixture.favorites).update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class));
+    }
+
+    @Test
+    void authorPrefixResolvesToTheExistingCanonicalWork() {
+        Fixture fixture = fixture();
+        CanonicalBook existing = new CanonicalBook();
+        existing.setId(41L); existing.setNormalizedTitle("剑来"); existing.setNormalizedAuthor("烽火戏诸侯");
+        when(fixture.mappings.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(fixture.books.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        ResolveCanonicalBookDTO request = new ResolveCanonicalBookDTO();
+        request.setSourceId(9L); request.setBookUrl("https://source.example/jiannlai");
+        request.setTitle("《剑来》"); request.setAuthor("作者：烽火戏诸侯");
+
+        assertThat(fixture.service.resolve(request).getCanonicalBookId()).isEqualTo(41L);
+        verify(fixture.books, never()).insert(any(CanonicalBook.class));
+        verify(fixture.mappings).insert(any(BookSourceMapping.class));
     }
 
     private Fixture fixture() {

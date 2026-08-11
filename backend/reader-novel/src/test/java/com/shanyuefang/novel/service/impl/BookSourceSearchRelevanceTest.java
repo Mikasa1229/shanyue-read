@@ -22,4 +22,11 @@ class BookSourceSearchRelevanceTest {
 
         assertTrue(titleMatch < authorMatch);
     }
+
+    @Test
+    void authorPrefixesShareOneAggregateIdentity() {
+        org.junit.jupiter.api.Assertions.assertEquals("烽火戏诸侯", BookSourceServiceImpl.normalizedAuthorField("作者：烽火戏诸侯"));
+        org.junit.jupiter.api.Assertions.assertEquals(BookSourceServiceImpl.normalizedAuthorField("烽火戏诸侯"),
+                BookSourceServiceImpl.normalizedAuthorField("作者：烽火戏诸侯"));
+    }
 }

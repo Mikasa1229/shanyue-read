@@ -51,7 +51,7 @@ public class CanonicalBookServiceImpl implements CanonicalBookService {
         }
 
         String normalizedTitle = normalize(dto.getTitle());
-        String normalizedAuthor = normalize(dto.getAuthor());
+        String normalizedAuthor = normalizeAuthor(dto.getAuthor());
         CanonicalBook candidate = canonicalBookMapper.selectList(Wrappers.<CanonicalBook>lambdaQuery()
                         .eq(CanonicalBook::getNormalizedTitle, normalizedTitle)
                         .ne(CanonicalBook::getMergeStatus, "MERGED"))
@@ -183,6 +183,19 @@ public class CanonicalBookServiceImpl implements CanonicalBookService {
                 mapping == null ? null : mapping.getSourceId(), mapping == null ? null : mapping.getSourceBookUrl());
     }
 
+    @Override
+    public List<Long> equivalentCanonicalBookIds(long canonicalBookId) {
+        CanonicalBook book = canonicalBookMapper.selectById(canonicalBookId);
+        if (book == null || "MERGED".equals(book.getMergeStatus())) return List.of();
+        String title = normalize(book.getNormalizedTitle());
+        String author = normalizeAuthor(book.getNormalizedAuthor());
+        return canonicalBookMapper.selectList(Wrappers.<CanonicalBook>lambdaQuery()
+                        .eq(CanonicalBook::getNormalizedTitle, title)
+                        .ne(CanonicalBook::getMergeStatus, "MERGED"))
+                .stream().filter(candidate -> normalizeAuthor(candidate.getNormalizedAuthor()).equals(author))
+                .map(CanonicalBook::getId).sorted().toList();
+    }
+
     private CanonicalBook createCanonical(ResolveCanonicalBookDTO dto, String title, String author, double confidence, String status) {
         CanonicalBook value = new CanonicalBook(); value.setId(SnowflakeIdUtil.next()); value.setNormalizedTitle(title);
         value.setNormalizedAuthor(author); value.setTitle(dto.getTitle().trim()); value.setAuthor(dto.getAuthor());
@@ -216,6 +229,11 @@ public class CanonicalBookServiceImpl implements CanonicalBookService {
 
     private String normalize(String value) {
         if (value == null) return "";
-        return value.toLowerCase(Locale.ROOT).replaceAll("[\\s\\p{Punct}]+", "").trim();
+        return value.toLowerCase(Locale.ROOT).replaceAll("[\\s\\p{P}\\p{S}]+", "").trim();
+    }
+
+    private String normalizeAuthor(String value) {
+        if (value == null) return "";
+        return normalize(value.replaceFirst("^\\s*(?:作者|作\\s*者)\\s*[:：]?\\s*", ""));
     }
 }

@@ -231,7 +231,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
             vo.setSourceId(bs.getId());
             vo.setSourceName(bs.getSourceName());
             vo.setName(extractField(model.effectiveSearchName(), item));
-            vo.setAuthor(extractField(model.effectiveSearchAuthor(), item));
+            vo.setAuthor(displayAuthor(extractField(model.effectiveSearchAuthor(), item)));
             String coverUrl = resolveUrl(extractField(model.effectiveSearchCover(), item), model.getBookSourceUrl());
             vo.setCoverUrl(enrichResult ? snapshotCover(coverUrl) : coverUrl);
             vo.setIntro(extractField(model.effectiveSearchIntro(), item));
@@ -264,7 +264,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         BookSourceModel.BookInfoRule info = model.getRuleBookInfo();
         if (info != null) {
             vo.setName(extractField(info.getName(), body));
-            vo.setAuthor(extractField(info.getAuthor(), body));
+            vo.setAuthor(displayAuthor(extractField(info.getAuthor(), body)));
             vo.setCoverUrl(snapshotCover(resolveUrl(extractField(info.getCoverUrl(), body), model.getBookSourceUrl())));
             vo.setIntro(extractField(info.getIntro(), body));
             vo.setKind(extractField(info.getKind(), body));
@@ -646,11 +646,11 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     @Override
     public List<AggregatedBookVO> aggregateCanonicalSearch(String keyword, int page) {
         List<SearchBookVO> sourceResults = aggregateSourceResults(keyword, page);
-        Map<Long, List<SearchBookVO>> grouped = sourceResults.stream()
+        Map<String, List<SearchBookVO>> grouped = sourceResults.stream()
                 .filter(book -> book.getCanonicalBookId() != null)
-                .collect(java.util.stream.Collectors.groupingBy(SearchBookVO::getCanonicalBookId,
+                .collect(java.util.stream.Collectors.groupingBy(this::canonicalSearchIdentity,
                         LinkedHashMap::new, java.util.stream.Collectors.toList()));
-        return grouped.entrySet().stream().map(entry -> aggregateBook(entry.getKey(), entry.getValue()))
+        return grouped.values().stream().map(books -> aggregateBook(preferredCanonicalBookId(books), books))
                 .sorted(Comparator.<AggregatedBookVO>comparingInt(book -> searchRelevance(keyword, book.getName(), book.getAuthor()))
                         .thenComparing(Comparator.comparingInt(AggregatedBookVO::getSourceCount).reversed())
                         .thenComparing(AggregatedBookVO::getName, Comparator.nullsLast(String::compareTo)))
@@ -660,8 +660,10 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     @Override
     public List<AggregatedBookVO> canonicalBookSources(Long canonicalBookId) {
         if (canonicalBookId == null) return List.of();
+        List<Long> equivalentIds = canonicalBookService.equivalentCanonicalBookIds(canonicalBookId);
+        if (equivalentIds.isEmpty()) return List.of();
         List<BookSourceMapping> mappings = mappingMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BookSourceMapping>()
-                .eq(BookSourceMapping::getCanonicalBookId, canonicalBookId));
+                .in(BookSourceMapping::getCanonicalBookId, equivalentIds));
         if (mappings.isEmpty()) return List.of();
         Map<Long, BookSource> sources = listByIds(mappings.stream().map(BookSourceMapping::getSourceId).distinct().toList())
                 .stream().collect(java.util.stream.Collectors.toMap(BookSource::getId, source -> source));
@@ -671,7 +673,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
             book.setSourceId(mapping.getSourceId());
             book.setBookUrl(mapping.getSourceBookUrl());
             book.setName(mapping.getSourceTitle());
-            book.setAuthor(mapping.getSourceAuthor());
+            book.setAuthor(displayAuthor(mapping.getSourceAuthor()));
             BookSource source = sources.get(mapping.getSourceId());
             book.setSourceName(source == null ? "已移除书源" : source.getSourceName());
             return book;
@@ -775,7 +777,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
     private String aggregateIdentity(SearchBookVO book) {
         String title = normalizedBookField(book.getName());
-        String author = normalizedBookField(book.getAuthor());
+        String author = normalizedAuthorField(book.getAuthor());
         if (!title.isBlank() && !"未知书名".equals(title)) return "title|" + title + "|" + author;
         String cover = normalizedBookField(book.getCoverUrl());
         String intro = normalizedBookField(book.getIntro());
@@ -787,7 +789,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     private String coverIdentity(SearchBookVO book) {
         String cover = normalizedBookField(book.getCoverUrl());
         if (cover.isBlank()) return "";
-        return cover + "|" + normalizedBookField(book.getAuthor());
+        return cover + "|" + normalizedAuthorField(book.getAuthor());
     }
 
     private int resultQuality(SearchBookVO book) {
@@ -829,6 +831,24 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
     private String normalizedBookField(String value) {
         return value == null ? "" : value.replaceAll("\\s+", "").trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private String canonicalSearchIdentity(SearchBookVO book) {
+        return normalizedSearchText(book.getName()) + "|" + normalizedAuthorField(book.getAuthor());
+    }
+
+    private Long preferredCanonicalBookId(List<SearchBookVO> books) {
+        return books.stream().map(SearchBookVO::getCanonicalBookId).filter(java.util.Objects::nonNull)
+                .min(Long::compareTo).orElseThrow();
+    }
+
+    private static String displayAuthor(String value) {
+        if (value == null) return null;
+        return value.replaceFirst("^\\s*(?:作者|作\\s*者)\\s*[:：]?\\s*", "").trim();
+    }
+
+    static String normalizedAuthorField(String value) {
+        return normalizedSearchText(displayAuthor(value));
     }
 
     private CompletableFuture<List<SearchBookVO>> searchSourceAsync(BookSource source, String keyword, int page) {

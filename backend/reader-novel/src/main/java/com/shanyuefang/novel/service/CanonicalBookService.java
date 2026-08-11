@@ -14,4 +14,5 @@ public interface CanonicalBookService {
     void reviewMerge(long reviewId, ReviewCanonicalMergeDTO dto);
     List<Long> detachSource(long sourceId);
     CanonicalBookDetailVO detail(long canonicalBookId);
+    List<Long> equivalentCanonicalBookIds(long canonicalBookId);
 }
