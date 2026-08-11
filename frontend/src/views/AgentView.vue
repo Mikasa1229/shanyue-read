@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <main class="agent-center page" :class="{ 'is-workspace': activeTab !== 'overview', 'is-chat-workspace': activeTab === 'chats' }">
     <div class="container">
       <p v-if="loadNotice" class="agent-load-notice">{{ loadNotice }}</p>
@@ -32,7 +32,7 @@
             <article class="dashboard-status">
               <span class="dashboard-label">服务状态</span>
               <strong><i :class="statusDot(infrastructure)" />{{ infrastructure ? '阅读智能体在线' : '正在确认服务状态' }}</strong>
-              <p>{{ infrastructure?.retrievalArchitecture || 'LightRAG 多路检索' }}</p>
+              <p>{{ retrievalArchitectureLabel(infrastructure?.retrievalArchitecture) }}</p>
               <div class="status-tags">
                 <span>{{ infrastructure?.milvusEnabled ? '向量检索已启用' : '本地向量检索' }}</span>
                 <span>{{ infrastructure?.neo4jEnabled ? '知识图谱已启用' : '本地知识图谱' }}</span>
@@ -49,7 +49,7 @@
               <template v-else>
                 <span class="dashboard-label">知识图谱</span>
                 <strong>让故事脉络变得可读</strong>
-                <p>从书架选择作品，构建基于已读内容的 LightRAG 知识图谱。</p>
+            <p>从书架选择作品，构建基于已读内容的多路检索知识图谱。</p>
                 <button type="button" @click="selectTab('insights')">打开书籍洞察 →</button>
               </template>
             </article>
@@ -121,7 +121,7 @@
                 <div v-if="showModelPicker" class="chat-model-menu">
                   <p>选择本次回答使用的模型</p>
                   <button type="button" :class="{ selected: !selectedModelConfigId }" @click="selectedModelConfigId = ''; showModelPicker = false"><i /><span><b>平台试用模型</b><small>按调用消耗平台积分</small></span><em>平台</em></button>
-                  <button v-for="model in enabledModels" :key="model.id" type="button" :class="{ selected: selectedModelConfigId === String(model.id) }" @click="selectedModelConfigId = String(model.id); showModelPicker = false"><i /><span><b>{{ model.model }}</b><small>你的 OpenAI 兼容接口</small></span><em>自配</em></button>
+                  <button v-for="model in enabledModels" :key="model.id" type="button" :class="{ selected: selectedModelConfigId === String(model.id) }" @click="selectedModelConfigId = String(model.id); showModelPicker = false"><i /><span><b>{{ model.model }}</b><small>你的兼容接口</small></span><em>自配</em></button>
                   <button v-if="!enabledModels.length" type="button" class="model-picker-manage" @click="selectTab('models'); showModelPicker = false">添加个人模型 →</button>
                 </div>
               </div>
@@ -144,18 +144,18 @@
       </section>
 
       <section v-else-if="activeTab === 'models'" class="model-layout">
-        <header class="model-page-head"><div><span class="agent-eyebrow">模型接入</span><h2>把模型选择权交给你</h2><p>统一使用 OpenAI Chat Completions 格式。平台模型便于试用；自配模型只使用你的额度。</p></div><div class="model-credit-chip"><span>可用积分</span><b>{{ credits?.availableCredits ?? '--' }}</b><small>平台模型按次结算</small></div></header>
+        <header class="model-page-head"><div><span class="agent-eyebrow">模型接入</span><h2>把模型选择权交给你</h2><p>统一使用兼容接口格式。平台模型便于试用；自配模型只使用你的额度。</p></div><div class="model-credit-chip"><span>可用积分</span><b>{{ credits?.availableCredits ?? '--' }}</b><small>平台模型按次结算</small></div></header>
         <div class="model-settings-grid">
           <article class="model-platform-card">
-            <div><span class="model-card-kicker">平台模型</span><h3>随时可用的阅读助手</h3><p>适合快速体验角色访谈、剧情回忆与 LightRAG 检索回答。</p></div>
+            <div><span class="model-card-kicker">平台模型</span><h3>随时可用的阅读助手</h3><p>适合快速体验角色访谈、剧情回忆与知识检索回答。</p></div>
             <ul><li>无需配置密钥</li><li>每次调用消耗 1 积分</li><li>会话中可随时切换</li></ul>
           </article>
           <form class="model-form" @submit.prevent="saveModel">
-            <div class="model-form-head"><div><span class="model-card-kicker">自配模型</span><h3>添加一个兼容接口</h3></div><span>OpenAI 格式</span></div>
+            <div class="model-form-head"><div><span class="model-card-kicker">自配模型</span><h3>添加一个兼容接口</h3></div><span>兼容接口格式</span></div>
             <label>模型 ID<input v-model="modelForm.model" required maxlength="128" spellcheck="false" placeholder="例如：mimo-v2.5-pro" /></label>
             <p class="model-field-help">填写接口官方返回的精确模型 ID，例如 MiMo 接口应填写 <code>mimo-v2.5-pro</code>。</p>
             <label>兼容接口地址<input v-model="modelForm.baseUrl" maxlength="512" type="url" spellcheck="false" placeholder="https://api.xiaomimimo.com/v1" required /></label>
-            <p class="model-field-help">填写 OpenAI-compatible API 的 Base URL，通常以 <code>/v1</code> 结尾。</p>
+            <p class="model-field-help">填写兼容接口的基础地址，通常以 <code>/v1</code> 结尾。</p>
             <label>API 密钥<input v-model="modelForm.apiKey" required type="password" autocomplete="new-password" placeholder="仅在保存时提交并加密保存" /></label>
             <button class="model-save-button">加密保存模型 <b>→</b></button>
           </form>
@@ -207,10 +207,10 @@
         <div v-if="insightBookId" class="insight-workspace">
           <aside class="insight-nav" aria-label="洞察功能">
             <span>功能导航</span>
-            <button v-for="item in [{ id: 'capsule', label: '剧情胶囊', note: '已读回顾' }, { id: 'graph', label: '知识图谱', note: '人物与故事' }, { id: 'clues', label: '线索板', note: '待解与已解' }, { id: 'map', label: '阅读地图', note: '事件脉络' }, { id: 'dna', label: '相似书 DNA', note: '作品气质' }]" :key="item.id" :class="{ active: insightMode === item.id }" type="button" @click="insightMode = item.id"><b>{{ item.label }}</b><small>{{ item.note }}</small></button>
+            <button v-for="item in [{ id: 'capsule', label: '剧情胶囊', note: '已读回顾' }, { id: 'graph', label: '知识图谱', note: '人物与故事' }, { id: 'clues', label: '线索板', note: '待解与已解' }, { id: 'map', label: '阅读地图', note: '事件脉络' }, { id: 'dna', label: '相似作品', note: '作品气质' }]" :key="item.id" :class="{ active: insightMode === item.id }" type="button" @click="insightMode = item.id"><b>{{ item.label }}</b><small>{{ item.note }}</small></button>
           </aside>
           <section class="insight-stage">
-            <header class="insight-stage-head"><div><span class="agent-eyebrow">{{ insightModeLabel }}</span><h3>{{ insightModeTitle }}</h3></div><div class="insight-stage-actions"><button v-if="insightLoaded" type="button" class="knowledge-manage-button" @click="exitInsightMode">退出洞察</button><button type="button" class="knowledge-manage-button" @click="router.push('/agent/knowledge-graphs')">管理知识图谱</button><button v-if="knowledgeBuild?.status !== 'READY'" type="button" class="build-index-button" @click="openKnowledgeBuildDialog">{{ knowledgeBuild?.status === 'RUNNING' || knowledgeBuild?.status === 'QUEUED' ? '查看构建任务' : '构建 AI 知识图谱' }}</button></div></header>
+            <header class="insight-stage-head"><div><span class="agent-eyebrow">{{ insightModeLabel }}</span><h3>{{ insightModeTitle }}</h3></div><div class="insight-stage-actions"><button v-if="insightLoaded" type="button" class="knowledge-manage-button" @click="exitInsightMode">退出洞察</button><button type="button" class="knowledge-manage-button" @click="router.push('/agent/knowledge-graphs')">管理知识图谱</button><button v-if="knowledgeBuild?.status !== 'READY'" type="button" class="build-index-button" @click="openKnowledgeBuildDialog">{{ knowledgeBuild?.status === 'RUNNING' || knowledgeBuild?.status === 'QUEUED' ? '查看构建任务' : '构建智能知识图谱' }}</button></div></header>
             <div v-if="insightError" class="card insight-error" role="alert"><strong>这次洞察没有完成</strong><p>{{ insightError }}</p><button class="btn btn-ghost btn-sm" type="button" @click="loadInsights">重新分析</button></div>
             <div v-else-if="insightLoaded" class="insight-grid">
           <article v-show="insightMode === 'capsule'" class="insight-card card capsule-card"><p class="capsule-lead">{{ capsule?.summary || '暂时没有可用的阶段剧情总结。' }}</p><details v-if="capsule?.timeline?.length" class="capsule-evidence"><summary>查看章节脉络与依据</summary><ul><li v-for="item in capsule.timeline.slice(-8)" :key="item"><span class="capsule-summary">{{ item }}</span><button class="evidence-jump" @click="openInsightChapter(timelineChapter(item))">打开章节</button></li></ul></details><small>{{ capsule?.safetyNote }} 回忆正文展示概括，章节依据默认折叠。</small></article>
@@ -220,10 +220,11 @@
             <template v-else>
               <div class="globe-toolbar">
                 <div class="graph-tools" aria-label="图谱类型筛选"><button v-for="type in graphTypes" :key="type" :class="{ active: graphTypeFilter === type }" @click="graphTypeFilter = type">{{ graphTypeLabel(type) }}</button></div>
-                <div class="globe-toolbar-status"><b>{{ visibleGraphNodes.length }}</b> 个节点 · <b>{{ visibleGraphEdges.length }}</b> 条已验证关系 <button v-if="focusedGraphNodeId" type="button" @click="clearGraphFocus">显示全部</button><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="globe-expand" @click="openRelationshipCanvas">全屏查看</button></div>
+                <div class="globe-toolbar-status"><label class="globe-node-search"><span>搜索节点</span><input v-model="graphSearch" type="search" placeholder="输入人物、地点或事件" @keydown.stop /></label><b>{{ visibleGraphNodes.length }}</b> 个节点 · <b>{{ visibleGraphEdges.length }}</b> 条已验证关系 <button v-if="focusedGraphNodeId || graphSearch" type="button" @click="clearGraphFocus">显示全部</button><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="globe-expand" @click="openRelationshipCanvas">全屏查看</button></div>
               </div>
               <div class="relationship-globe-shell">
                 <canvas ref="relationshipGlobe" class="relationship-globe" role="img" tabindex="0" aria-label="可旋转的小说知识图谱。拖动旋转，点击节点或连线查看依据。" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas>
+                <div v-if="graphSearch && !visibleGraphNodes.length" class="graph-search-empty">没有找到“{{ graphSearch.trim() }}”相关的节点</div>
                 <div class="globe-hud globe-hud-top"><span>知识星球</span><i></i><span>拖动旋转 · 点击查看依据</span></div>
                 <div class="globe-hud globe-hud-bottom"><span><i class="legend-dot character"></i>人物</span><span><i class="legend-dot location"></i>地点/组织</span><span><i class="legend-dot event"></i>事件/线索</span></div>
               </div>
@@ -257,7 +258,7 @@
           </article>
           <article v-show="insightMode === 'dna'" class="insight-card card"><p v-if="!similarBooks.length">目前没有足够的已读作品可供比较。</p><ul v-else><li v-for="book in similarBooks" :key="book.canonicalBookId"><strong>{{ book.title || `作品 #${book.canonicalBookId}` }}</strong><span v-if="book.author"> · {{ book.author }}</span> · 相似度 {{ Math.round(book.similarity * 100) }}%<br />{{ book.explanation }} <button class="btn btn-ghost btn-sm" @click="openRecommendedBook(book)">打开作品</button></li></ul><small>依据已索引的文本特征比较，不凭空添加标签。</small></article>
             </div>
-            <div v-else class="insight-empty-stage"><span>洞察工作台</span><h4>把已读内容整理成一张可追溯的故事地图</h4><p>剧情胶囊帮你快速回顾进展；知识图谱梳理人物、地点、组织与事件关系；线索板集中记录待解谜团；阅读地图串起事件脉络；相似书 DNA 则从已读作品中发现阅读偏好。选择作品和章节范围后，所有模块都会严格基于同一阅读边界生成结果。</p></div>
+            <div v-else class="insight-empty-stage"><span>洞察工作台</span><h4>把已读内容整理成一张可追溯的故事地图</h4><p>剧情胶囊帮你快速回顾进展；知识图谱梳理人物、地点、组织与事件关系；线索板集中记录待解谜团；阅读地图串起事件脉络；相似作品则从已读作品中发现阅读偏好。选择作品和章节范围后，所有模块都会严格基于同一阅读边界生成结果。</p></div>
           </section>
         </div>
       </section>
@@ -290,8 +291,8 @@
   </Teleport>
   <Teleport to="body">
     <section v-if="showRelationshipCanvas" class="relationship-canvas-dialog" role="dialog" aria-modal="true" aria-label="小说知识图谱全屏画布" @keydown.esc="closeRelationshipCanvas">
-      <header class="relationship-canvas-head"><div><span>知识图谱</span><h2>《{{ selectedInsightBook?.bookName || '当前作品' }}》的故事知识星球</h2><p>点击任意节点后只保留与它直接相连的内容；“显示全部”可返回人物、地点、组织、事件与线索的完整图谱。</p></div><div><span>{{ visibleGraphNodes.length }} 个节点</span><span>{{ visibleGraphEdges.length }} 条关联</span><button v-if="focusedGraphNodeId" type="button" @click="clearGraphFocus">显示全部</button><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="relationship-canvas-close" @click="closeRelationshipCanvas">退出全屏</button></div></header>
-      <div class="relationship-canvas-stage"><canvas ref="fullRelationshipGlobe" class="relationship-globe" tabindex="0" role="img" aria-label="可旋转的小说知识图谱全屏画布" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas><div class="canvas-corner-note">图谱均来自已读章节 · 点击可核验</div></div>
+      <header class="relationship-canvas-head"><div><span>知识图谱</span><h2>《{{ selectedInsightBook?.bookName || '当前作品' }}》的故事知识星球</h2><p>点击任意节点后只保留与它直接相连的内容；“显示全部”可返回人物、地点、组织、事件与线索的完整图谱。</p></div><div><label class="canvas-node-search"><span>搜索节点</span><input v-model="graphSearch" type="search" placeholder="人物、地点、事件" @keydown.stop /></label><span>{{ visibleGraphNodes.length }} 个节点</span><span>{{ visibleGraphEdges.length }} 条关联</span><button v-if="focusedGraphNodeId || graphSearch" type="button" @click="clearGraphFocus">显示全部</button><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="relationship-canvas-close" @click="closeRelationshipCanvas">退出全屏</button></div></header>
+      <div class="relationship-canvas-stage"><canvas ref="fullRelationshipGlobe" class="relationship-globe" tabindex="0" role="img" aria-label="可旋转的小说知识图谱全屏画布" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas><div v-if="graphSearch && !visibleGraphNodes.length" class="graph-search-empty graph-search-empty-canvas">没有找到“{{ graphSearch.trim() }}”相关的节点</div><div class="canvas-corner-note">图谱均来自已读章节 · 点击可核验</div></div>
       <footer class="relationship-canvas-foot"><div class="globe-hud-bottom"><span><i class="legend-dot character"></i>人物</span><span><i class="legend-dot location"></i>地点 / 组织</span><span><i class="legend-dot event"></i>事件 / 线索</span></div><div v-if="selectedGraphEvidence" class="canvas-selection"><span>已选中</span><b>{{ selectedGraphEvidence.label }}</b><small>第 {{ selectedGraphEvidence.chapter + 1 }} 章</small><button type="button" @click="showEvidenceSource(selectedGraphEvidence)">查看原文依据</button></div><p v-else>选中一条关系，查看它为什么会出现在图谱中。</p></footer>
     </section>
   </Teleport>
@@ -305,9 +306,9 @@
   <Teleport to="body">
     <div v-if="showKnowledgeBuildDialog" class="knowledge-build-backdrop" @click.self="showKnowledgeBuildDialog = false">
       <section class="knowledge-build-dialog" role="dialog" aria-modal="true" aria-labelledby="knowledge-build-title">
-        <span class="dialog-kicker">AI 知识图谱构建</span>
+        <span class="dialog-kicker">智能知识图谱构建</span>
         <h2 id="knowledge-build-title">只构建你选定章节的故事关系</h2>
-        <p v-if="knowledgeBuild">将读取第 {{ buildForm.startChapter || 1 }} 章至第 {{ buildForm.endChapter || knowledgeBuild.totalChapters || 1 }} 章，共 {{ knowledgeBuild.selectedChapters || 0 }} 章；约 {{ Number(knowledgeBuild.estimatedInputTokens || 0).toLocaleString() }} 输入 Token 与 {{ Number(knowledgeBuild.estimatedOutputTokens || 0).toLocaleString() }} 输出 Token。</p>
+        <p v-if="knowledgeBuild">将读取第 {{ buildForm.startChapter || 1 }} 章至第 {{ buildForm.endChapter || knowledgeBuild.totalChapters || 1 }} 章，共 {{ knowledgeBuild.selectedChapters || 0 }} 章；约 {{ Number(knowledgeBuild.estimatedInputTokens || 0).toLocaleString() }} 输入词元与 {{ Number(knowledgeBuild.estimatedOutputTokens || 0).toLocaleString() }} 输出词元。</p>
         <div class="build-cost-note"><b>预计 {{ knowledgeBuild?.estimatedCredits || 0 }} 平台积分</b><span>{{ knowledgeBuild?.creditRule }}</span></div>
         <div class="build-range"><label>起始章节<input v-model.number="buildForm.startChapter" min="1" inputmode="numeric" pattern="[0-9]*" @input="queueBuildEstimate" /></label><span>至</span><label>结束章节<input v-model.number="buildForm.endChapter" min="1" inputmode="numeric" pattern="[0-9]*" @input="queueBuildEstimate" /></label></div>
         <label>构建模型<select v-model="buildForm.modelMode"><option value="PLATFORM">平台模型（消耗预估积分）</option><option value="BYOK">我的模型（不消耗平台积分）</option></select></label>
@@ -375,6 +376,7 @@ const shelfBooks = ref([])
 const shelfPlanApplying = ref(false)
 const starterPrompts = ['帮我回忆最近的剧情', '分析当前人物关系', '推荐一本适合今晚读的书', '这本书有哪些未解伏笔？']
 const graphTypeFilter = ref('ALL')
+const graphSearch = ref('')
 const focusedGraphNodeId = ref(null)
 const clueStateFilter = ref('OPEN')
 const readingMapBranch = ref('ALL')
@@ -420,7 +422,7 @@ const insightModeMeta = {
   graph: { label: '知识图谱', title: '小说知识图谱' },
   clues: { label: '线索板', title: '明确未解的线索' },
   map: { label: '阅读地图', title: '故事事件脉络' },
-  dna: { label: '相似书 DNA', title: '相似作品与阅读偏好' },
+  dna: { label: '相似作品', title: '相似作品与阅读偏好' },
   shelf: { label: '书架管家', title: '书架安排与阅读计划' }
 }
 const insightModeLabel = computed(() => insightModeMeta[insightMode.value]?.label || '书籍洞察')
@@ -443,6 +445,7 @@ const visibleGraph = computed(() => {
   const nodeById = new Map(nodes.map(node => [String(node.id), node]))
   const allEdges = (graph.value.edges || []).filter(edge => nodeById.has(String(edge.source)) && nodeById.has(String(edge.target)))
   const isAllTypes = graphTypeFilter.value === 'ALL'
+  const searchTerm = graphSearch.value.trim().toLocaleLowerCase()
   const primaryIds = new Set(nodes
     .filter(node => isAllTypes || node.type === graphTypeFilter.value)
     .map(node => String(node.id)))
@@ -457,6 +460,24 @@ const visibleGraph = computed(() => {
     eligibleEdges.forEach(edge => { neighborIds.add(String(edge.source)); neighborIds.add(String(edge.target)) })
     return { nodes: nodes.filter(node => neighborIds.has(String(node.id))), edges: eligibleEdges }
   }
+  if (searchTerm) {
+    const matchedIds = new Set(nodes.filter(node => primaryIds.has(String(node.id)) && graphNodeSearchText(node).includes(searchTerm))
+      .map(node => String(node.id)))
+    const neighborIds = new Set(matchedIds)
+    eligibleEdges.forEach(edge => {
+      if (matchedIds.has(String(edge.source)) || matchedIds.has(String(edge.target))) {
+        neighborIds.add(String(edge.source)); neighborIds.add(String(edge.target))
+      }
+    })
+    return {
+      nodes: nodes.filter(node => neighborIds.has(String(node.id))).sort((left, right) => {
+        const leftMatched = matchedIds.has(String(left.id)) ? 1 : 0
+        const rightMatched = matchedIds.has(String(right.id)) ? 1 : 0
+        return rightMatched - leftMatched || String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN')
+      }),
+      edges: eligibleEdges.filter(edge => neighborIds.has(String(edge.source)) && neighborIds.has(String(edge.target)))
+    }
+  }
   const degree = new Map(nodes.map(node => [String(node.id), 0]))
   eligibleEdges.forEach(edge => {
     degree.set(String(edge.source), (degree.get(String(edge.source)) || 0) + 1)
@@ -470,11 +491,7 @@ const visibleGraph = computed(() => {
     if (chapterDifference) return chapterDifference
     return Number(right.confidence || 0) - Number(left.confidence || 0)
   }
-  // The embedded card stays intentionally compact; the full-screen canvas must honor "全部"
-  // literally so users can explore every node returned by the spoiler-bounded graph API.
-  if (isAllTypes && showRelationshipCanvas.value) {
-    return { nodes: [...nodes].sort(compareNodes), edges: eligibleEdges }
-  }
+  // Both canvases intentionally share the same focused graph; full-screen only changes canvas size.
   const selectedIds = new Set()
   // Select complete high-value relations first; this prevents the old "top 12 nodes, zero edges" result.
   const rankedEdges = [...eligibleEdges].sort((left, right) => {
@@ -514,8 +531,21 @@ const visibleReadingMapLinks = computed(() => {
   return (readingMap.value.links || []).filter(link => ids.has(link.source) && ids.has(link.target))
 })
 function statusDot(value) { return value ? 'status-dot online' : 'status-dot pending' }
+function retrievalArchitectureLabel(value) {
+  const text = String(value || '').trim()
+  if (!text) return '多路知识检索'
+  return text.replace(/LightRAG/gi, '多路知识检索').replace(/RAG/gi, '知识检索')
+}
 function graphTypeLabel(type) {
   return ({ ALL: '全部', CHARACTER: '人物', LOCATION: '地点', ORGANIZATION: '组织', EVENT: '事件', CLUE: '线索' })[type] || '其他'
+}
+function graphNodeSearchText (node) {
+  const aliases = Array.isArray(node?.aliases) ? node.aliases : [node?.aliases]
+  return [node?.name, graphTypeLabel(node?.type), node?.evidence, ...aliases]
+    .filter(Boolean)
+    .map(value => String(value))
+    .join(' ')
+    .toLocaleLowerCase()
 }
 function clueStatusLabel(status) {
   return ({ OPEN: '待解开', PARTIALLY_RESOLVED: '部分揭示', RESOLVED: '已解决' })[status] || '待确认'
@@ -592,6 +622,8 @@ function openEvidenceChapter () {
 function graphRelationLabel (relation) {
   return ({
     PARTICIPATES_IN: '参与事件',
+    SUPPORTS: '支持',
+    OPPOSES: '对立',
     MEMBER_OF: '隶属于',
     SERVES: '侍奉 / 效忠',
     TEACHER_OF: '老师 / 学生',
@@ -602,6 +634,13 @@ function graphRelationLabel (relation) {
     FRIEND_OF: '朋友',
     COMPANION_OF: '同伴',
     KNOWS: '明确相识',
+    NEIGHBOR_OF: '邻居',
+    GUIDES: '引导',
+    HELPS: '帮助',
+    PROTECTS: '保护',
+    TRAVELS_WITH: '共同同行',
+    CARETAKES: '照看',
+    EMPLOYS: '雇佣',
     OWNS: '拥有',
     VISITS: '到访',
     LIVES_IN: '居住于',
@@ -731,7 +770,7 @@ function drawGlobeArrow (context, from, to, color, alpha) {
 
 function renderRelationshipGlobe () {
   const canvas = showRelationshipCanvas.value ? fullRelationshipGlobe.value : relationshipGlobe.value
-  if (!canvas || !visibleGraphNodes.value.length) return
+  if (!canvas) return
   activeGlobeCanvas = canvas
   const bounds = canvas.getBoundingClientRect()
   if (!bounds.width || !bounds.height) return
@@ -745,6 +784,7 @@ function renderRelationshipGlobe () {
   const context = canvas.getContext('2d')
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
   context.clearRect(0, 0, width, height)
+  if (!visibleGraphNodes.value.length) return
   const centerX = width / 2
   const centerY = height / 2
   const radius = Math.min(width * 0.39, height * 0.43) * globeZoom
@@ -900,9 +940,17 @@ function resetRelationshipGlobe () {
 function clearGraphFocus () {
   focusedGraphNodeId.value = null
   selectedGraphEvidence.value = null
+  graphSearch.value = ''
   requestRelationshipGlobeRender()
 }
 
+watch(graphSearch, () => {
+  // Entering a query clears an older click focus so search always shows its own results.
+  if (focusedGraphNodeId.value) {
+    focusedGraphNodeId.value = null
+    selectedGraphEvidence.value = null
+  }
+})
 watch([visibleGraphNodes, visibleGraphEdges, insightMode, showRelationshipCanvas], () => nextTick(requestRelationshipGlobeRender), { deep: true })
 
 async function load() {
@@ -1422,7 +1470,7 @@ async function loadInsights() {
     effectiveInsightChapter.value = Number.isInteger(throughChapter) && throughChapter >= 0 ? throughChapter + 1 : null
     insightLoaded.value = true
     if (unavailable === results.length) {
-      insightError.value = 'Agent 洞察接口均未返回结果。请确认网关与 Agent 的共享密钥一致，并检查这本书是否已经完成 LightRAG 索引。'
+      insightError.value = '阅读洞察接口均未返回结果。请确认网关与智能服务的共享密钥一致，并检查这本书是否已经完成知识索引。'
     } else if (unavailable) {
       toast.error(`${unavailable} 项洞察暂不可用，已展示其余阅读安全结果。`)
     }
@@ -1441,13 +1489,28 @@ function exitInsightMode () {
 }
 function isShelfPlan (content) {
   const text = String(content || '')
-  return /书架整理方案|子目录一|子目录二/.test(text) && /《[^》]+》/.test(text)
+  const shelfTitles = usableShelfBooks.value
+    .map(book => String(book.bookName || '').trim())
+    .filter(Boolean)
+  return (/(?:书架|分类|归类|整理)/.test(text) || /^\s{0,3}#{2,6}\s+.+/m.test(text))
+    && shelfTitles.some(title => text.includes(title))
+}
+function plannedShelfTitle (line, sortedTitles) {
+  const wrapped = line.match(/《([^》]+)》/)
+  if (wrapped && sortedTitles.includes(wrapped[1].trim())) return wrapped[1].trim()
+  const bold = line.match(/\*\*([^*]+)\*\*/)
+  if (bold && sortedTitles.includes(bold[1].trim())) return bold[1].trim()
+  return sortedTitles.find(title => line.includes(title)) || ''
 }
 async function applyShelfPlan (content) {
   if (shelfPlanApplying.value) return
   const text = String(content || '')
   const assignments = []
   const lines = text.split(/\r?\n/)
+  const shelfTitles = usableShelfBooks.value
+    .map(book => String(book.bookName || '').trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
   let groupName = ''
   for (const line of lines) {
     const heading = line.match(/^\s{0,3}#{2,6}\s*(?:子目录[^：:]*[：:]\s*)?(.+)$/)
@@ -1455,8 +1518,8 @@ async function applyShelfPlan (content) {
       groupName = heading[1].replace(/[*_`]/g, '').trim()
       continue
     }
-    const book = line.match(/《([^》]+)》/)
-    if (book && groupName) assignments.push({ title: book[1].trim(), groupName })
+    const title = plannedShelfTitle(line, shelfTitles)
+    if (title && groupName) assignments.push({ title, groupName })
   }
   if (!assignments.length) return toast.error('没有识别到可执行的书架分类')
   shelfPlanApplying.value = true
@@ -1543,7 +1606,7 @@ onBeforeUnmount(() => {
     var(--agent-sand);
 }
 .agent-center::before {
-  content: 'READER INTELLIGENCE';
+  content: '阅读智能';
   position: absolute;
   top: 220px;
   right: -92px;
@@ -1591,9 +1654,9 @@ onBeforeUnmount(() => {
 .center-message { max-width: min(79%, 680px); padding: 13px 15px; border-radius: 15px 15px 15px 3px; line-height: 1.75; box-shadow: 0 5px 14px rgba(16,44,50,.04); }.center-message.assistant { border: 1px solid rgba(16,44,50,.09); background: #fffdf7; color: var(--agent-ink); }.center-message.user { border-radius: 15px 15px 3px 15px; background: var(--agent-ink); color: #fffaf0; }.citation-list { border-top-color: rgba(16,44,50,.1); }.citation-link { color: #54796d; font-size: .7rem; }.center-message.user .citation-link { color: var(--agent-lime); }
 .center-input { gap: 10px; padding: 14px 18px 18px; border-top: 1px solid rgba(16,44,50,.11); background: #fffdf7; }.context-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 0; border-radius: 9px; background: rgba(184,214,125,.25); color: var(--agent-ink); }.context-orbit { width: 8px; height: 8px; border-radius: 50%; background: var(--agent-coral); box-shadow: 0 0 0 3px rgba(212,97,69,.13); }.context-bar b { font-weight: 800; }.context-bar button { margin-left: auto; float: none; color: var(--agent-coral); }.chat-tools { gap: 6px; }.chat-tool,.plugin-action { border-color: rgba(16,44,50,.12); padding: 6px 9px; color: var(--agent-ink-soft); background: #fffdf7; font-size: .67rem; }.chat-tool.primary-tool { color: #fffaf0; background: var(--agent-ink); }.chat-tool.primary-tool.active { border-color: var(--agent-ink); background: var(--agent-coral); }.chat-tool.protected { border-color: rgba(184,214,125,.75); color: #47612f; background: rgba(184,214,125,.21); cursor: default; }.chat-reference { margin-left: 2px; color: var(--agent-coral); font-size: .72rem; font-weight: 700; }.chat-plugin-panel { gap: 7px; border-color: rgba(16,44,50,.11); border-radius: 11px; padding: 10px; background: var(--agent-sand); }.chat-plugin-panel label { color: var(--agent-ink); font-weight: 700; }.chat-plugin-panel select { border-color: rgba(16,44,50,.14); background: #fffdf7; }.plugin-divider { width: 1px; height: 23px; background: rgba(16,44,50,.12); }.plugin-action:hover { border-color: var(--agent-coral); color: var(--agent-coral); }.center-input textarea { min-height: 62px; border-color: rgba(16,44,50,.14); border-radius: 12px; padding: 12px; color: var(--agent-ink); background: #fffefa; }.center-input textarea:focus { outline: 2px solid rgba(212,97,69,.18); border-color: var(--agent-coral); }.chat-model-select { flex-basis: 158px; justify-content: end; color: var(--agent-ink-soft); font-size: .62rem; font-weight: 700; letter-spacing: .05em; }.chat-model-select select { border-color: rgba(16,44,50,.14); background: #fffefa; color: var(--agent-ink); }.send-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-width: 112px; border: 0; border-radius: 12px; padding: 0 14px; color: #fffaf0; background: var(--agent-coral); box-shadow: 0 7px 14px rgba(212,97,69,.19); cursor: pointer; font: inherit; font-size: .76rem; font-weight: 800; }.send-button b { font-size: 1.1rem; }.send-button:disabled { opacity: .48; cursor: not-allowed; box-shadow: none; }
 .workspace-notes { display: flex; flex-direction: column; gap: 16px; }.workspace-notes .card { padding: 19px; background: rgba(255,253,247,.78); }.note-index { color: var(--agent-coral); font-size: .58rem; font-weight: 800; letter-spacing: .13em; }.workspace-notes h3 { margin: 8px 0 13px; color: var(--agent-ink); font-family: var(--font-serif); font-size: 1.2rem; letter-spacing: -.03em; }.context-card strong { color: var(--agent-ink); font-size: .9rem; }.context-card p { margin: 5px 0 13px; color: var(--ink-4); font-size: .74rem; line-height: 1.6; }.reading-meter { height: 4px; overflow: hidden; border-radius: 99px; background: rgba(16,44,50,.12); }.reading-meter i { display: block; height: 100%; border-radius: inherit; background: var(--agent-coral); }.context-card small { display: block; margin-top: 8px; color: #54796d; font-size: .68rem; }.text-action { border: 0; padding: 0; background: transparent; color: var(--agent-coral); cursor: pointer; font: inherit; font-size: .74rem; font-weight: 800; }.shortcut-card { padding: 0!important; overflow: hidden; }.shortcut-card > .note-index,.shortcut-card > h3 { display: block; margin-left: 19px; margin-right: 19px; }.shortcut-card > .note-index { margin-top: 19px; }.shortcut-card button { display: grid; gap: 3px; width: 100%; border: 0; border-top: 1px solid rgba(16,44,50,.1); padding: 13px 19px; background: transparent; color: var(--agent-ink); text-align: left; cursor: pointer; font: inherit; }.shortcut-card button:hover { background: rgba(184,214,125,.18); }.shortcut-card button b { font-size: .76rem; }.shortcut-card button span { color: var(--ink-4); font-size: .67rem; }.privacy-note { margin-top: auto; padding: 0 5px; color: var(--agent-ink-soft); font-size: .65rem; line-height: 1.55; }.privacy-note .status-dot { display: inline-block; margin-right: 5px; vertical-align: middle; }
-.model-layout,.privacy-layout { gap: 16px; }.model-layout .card,.privacy-layout .card,.insight-query,.insight-card { border: 1px solid rgba(16,44,50,.11); border-radius: 20px; box-shadow: 0 12px 28px rgba(16,44,50,.055); }.model-intro { position: relative; overflow: hidden; padding: 30px; color: #fffaf0; background: var(--agent-ink)!important; }.model-intro::after { content: 'BYOK'; position: absolute; right: -8px; bottom: -35px; color: rgba(184,214,125,.13); font-family: var(--font-serif); font-size: 8rem; font-weight: 700; letter-spacing: -.08em; }.model-intro > * { position: relative; z-index: 1; }.model-intro h2 { color: #fffaf0; font-family: var(--font-serif); font-size: 2.1rem; letter-spacing: -.06em; }.model-intro p,.model-intro ul { color: rgba(247,242,233,.72)!important; line-height: 1.75; }.model-form,.saved-model { background: rgba(255,253,247,.86); }.model-form { padding: 26px; }.model-form h2,.saved-models h2,.privacy-layout h2 { color: var(--agent-ink); font-family: var(--font-serif); letter-spacing: -.04em; }.model-form label,.preference-form label { color: var(--agent-ink-soft); font-weight: 700; }.model-form input,.model-form select,.preference-form input,.preference-form select { border-color: rgba(16,44,50,.14); background: #fffefa; }.saved-models { padding: 24px; background: rgba(255,253,247,.86); }.saved-model { border-bottom-color: rgba(16,44,50,.1); }.saved-model strong { color: var(--agent-ink); }.model-actions .btn { border-color: rgba(16,44,50,.16); color: var(--agent-ink-soft); }
+.model-layout,.privacy-layout { gap: 16px; }.model-layout .card,.privacy-layout .card,.insight-query,.insight-card { border: 1px solid rgba(16,44,50,.11); border-radius: 20px; box-shadow: 0 12px 28px rgba(16,44,50,.055); }.model-intro { position: relative; overflow: hidden; padding: 30px; color: #fffaf0; background: var(--agent-ink)!important; }.model-intro::after { content: '自配'; position: absolute; right: -8px; bottom: -35px; color: rgba(184,214,125,.13); font-family: var(--font-serif); font-size: 8rem; font-weight: 700; letter-spacing: -.08em; }.model-intro > * { position: relative; z-index: 1; }.model-intro h2 { color: #fffaf0; font-family: var(--font-serif); font-size: 2.1rem; letter-spacing: -.06em; }.model-intro p,.model-intro ul { color: rgba(247,242,233,.72)!important; line-height: 1.75; }.model-form,.saved-model { background: rgba(255,253,247,.86); }.model-form { padding: 26px; }.model-form h2,.saved-models h2,.privacy-layout h2 { color: var(--agent-ink); font-family: var(--font-serif); letter-spacing: -.04em; }.model-form label,.preference-form label { color: var(--agent-ink-soft); font-weight: 700; }.model-form input,.model-form select,.preference-form input,.preference-form select { border-color: rgba(16,44,50,.14); background: #fffefa; }.saved-models { padding: 24px; background: rgba(255,253,247,.86); }.saved-model { border-bottom-color: rgba(16,44,50,.1); }.saved-model strong { color: var(--agent-ink); }.model-actions .btn { border-color: rgba(16,44,50,.16); color: var(--agent-ink-soft); }
 .insights-panel { gap: 16px; }.insight-query { grid-template-columns: minmax(0, 1fr) 210px 190px auto; padding: 26px; background: var(--agent-ink); color: #fffaf0; }.insight-query-copy h2 { color: #fffaf0; font-family: var(--font-serif); font-size: 2.35rem; letter-spacing: -.06em; }.insight-query-copy p { color: rgba(247,242,233,.72); line-height: 1.65; }.insight-query label { color: rgba(247,242,233,.82); font-weight: 700; }.insight-query input,.insight-query select { border-color: rgba(247,242,233,.18); color: #fffaf0; background: rgba(247,242,233,.1); }.insight-query option { color: var(--agent-ink); }.field-hint { color: rgba(247,242,233,.58)!important; }.insight-steps span { background: rgba(247,242,233,.1); color: rgba(247,242,233,.82); }.insight-steps b { color: var(--agent-lime); }.insight-query .btn { align-self: end; min-height: 42px; border: 0; border-radius: 10px; background: var(--agent-lime); color: var(--agent-ink); font-weight: 800; }.insight-grid { grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }.insight-card { position: relative; min-height: 210px; padding: 22px; overflow: hidden; background: rgba(255,253,247,.86); }.insight-card::before { content: ''; position: absolute; right: -30px; top: -30px; width: 100px; height: 100px; border-radius: 50%; background: rgba(184,214,125,.18); }.insight-card > * { position: relative; z-index: 1; }.insight-card > span { color: var(--agent-coral); font-family: var(--font-serif); font-size: 1.9rem; letter-spacing: -.07em; }.insight-card h2 { color: var(--agent-ink); font-family: var(--font-serif); font-size: 1.38rem; letter-spacing: -.045em; }.insight-card p,.insight-card li { color: var(--agent-ink-soft); line-height: 1.6; }.insight-card small { color: #54796d; }.graph-card,.reading-map-card { grid-column: span 2; }.relationship-map { border: 1px solid rgba(16,44,50,.1); background: linear-gradient(135deg, #f8f3e7, #dceac4); }.graph-tools button,.graph-card li button { border-color: rgba(16,44,50,.14); background: #fffdf7; }.graph-tools button.active { border-color: var(--agent-ink); background: var(--agent-ink); }.insight-error { border-left-color: var(--agent-coral); background: rgba(255,253,247,.86); }
-.insights-panel { gap: 22px; }.insight-query { position: relative; grid-template-columns: minmax(0, 1.2fr) 236px 176px; gap: 18px; overflow: hidden; padding: 32px; border-radius: 26px!important; background: linear-gradient(123deg, #102c32 0%, #173e42 62%, #274950 100%); box-shadow: 0 24px 44px rgba(16,44,50,.15)!important; }.insight-query::after { content: 'READ'; position: absolute; right: -20px; top: -37px; color: rgba(184,214,125,.08); font-family: var(--font-serif); font-size: 10rem; font-weight: 700; letter-spacing: -.1em; }.insight-query-copy,.insight-query label,.insight-query .btn { position: relative; z-index: 1; }.insight-query-copy h2 { max-width: 360px; font-size: clamp(2.5rem,5vw,4.3rem); line-height: .92; }.insight-query-copy p { max-width: 610px; font-size: .88rem; }.insight-query .btn { grid-column: 2 / 4; min-height: 46px; border-radius: 12px; box-shadow: 0 9px 16px rgba(0,0,0,.14); }.insight-grid { grid-template-columns: repeat(12,minmax(0,1fr)); gap: 18px; align-items: stretch; }.insight-card { min-height: 230px; padding: 25px; border: 0!important; border-radius: 22px!important; background: rgba(255,253,247,.84); box-shadow: 0 14px 31px rgba(16,44,50,.07)!important; }.insight-card::before { width: 150px; height: 150px; right: -55px; top: -62px; background: rgba(184,214,125,.2); }.insight-card::after { content: ''; position: absolute; left: 0; top: 26px; bottom: 26px; width: 3px; border-radius: 0 3px 3px 0; background: var(--agent-coral); }.insight-card > span { display: block; margin-bottom: 11px; color: var(--agent-coral); font-size: 2.5rem; line-height: .8; }.insight-card h2 { margin: 0 0 14px; font-size: clamp(1.45rem,2vw,2rem); line-height: 1; }.insight-card ul { max-height: 210px; padding-right: 7px; overflow: auto; }.insight-card li { padding-bottom: 9px; border-bottom: 1px solid rgba(16,44,50,.08); }.insight-card li:last-child { border-bottom: 0; }.insight-card:nth-child(1) { grid-column: span 4; background: #f7efe0; }.insight-card:nth-child(2) { grid-column: span 8; min-height: 400px; background: linear-gradient(135deg,#fffdf7,#e6f0d1); }.insight-card:nth-child(3) { grid-column: span 4; min-height: 290px; background: #f5e3d8; }.insight-card:nth-child(4) { grid-column: span 8; min-height: 290px; }.insight-card:nth-child(5) { grid-column: span 4; }.insight-card:nth-child(6) { grid-column: span 4; background: #e4efe8; }.insight-card:nth-child(7) { grid-column: span 4; }.insight-card:nth-child(8) { grid-column: span 12; min-height: 156px; display: grid; grid-template-columns: 185px minmax(0,1fr); column-gap: 22px; }.insight-card:nth-child(8)::after { top: 19px; bottom: 19px; }.insight-card:nth-child(8) > span { grid-row: 1 / span 2; margin: 0; align-self: center; font-size: 4rem; }.insight-card:nth-child(8) h2 { align-self: end; margin: 0; }.insight-card:nth-child(8) p,.insight-card:nth-child(8) ul { grid-column: 2; margin: 5px 0; }.graph-card,.reading-map-card { grid-column: auto; }.relationship-map,.cytoscape-graph { height: 250px!important; margin-top: 13px!important; border: 0!important; border-radius: 15px!important; background: rgba(255,253,247,.7)!important; }.graph-tools { margin: 0 0 9px; }.reading-map-events { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; max-height: 205px; padding: 0; overflow: auto; list-style: none; }.reading-map-events li { margin: 0; padding: 10px 12px!important; border: 1px solid rgba(16,44,50,.1)!important; border-radius: 11px; background: rgba(255,253,247,.65); }.insight-boundary-note { margin: -8px 0 0; border-radius: 13px; box-shadow: 0 8px 20px rgba(16,44,50,.04); }.spoiler-dialog-backdrop { position: fixed; inset: 0; z-index: 5000; display: grid; place-items: center; padding: 20px; background: rgba(9,27,31,.72); backdrop-filter: blur(7px); }.spoiler-dialog { position: relative; width: min(100%, 510px); padding: 34px; border: 1px solid rgba(255,253,247,.25); border-radius: 24px; color: #fffaf0; background: #173e42; box-shadow: 0 30px 85px rgba(0,0,0,.35); }.spoiler-dialog-mark { display: grid; width: 39px; height: 39px; place-items: center; border-radius: 50%; color: #173e42; background: var(--agent-lime); font-family: var(--font-serif); font-size: 1.75rem; }.spoiler-dialog-kicker { margin: 22px 0 6px; color: var(--agent-lime); font-size: .67rem; font-weight: 800; letter-spacing: .16em; }.spoiler-dialog h2 { margin: 0; color: #fffaf0; font-family: var(--font-serif); font-size: clamp(2rem,5vw,3rem); line-height: .96; letter-spacing: -.06em; }.spoiler-dialog > p:not(.spoiler-dialog-kicker) { color: rgba(255,250,240,.76); line-height: 1.8; }.spoiler-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 9px; margin-top: 26px; }.spoiler-dialog-actions .btn { border-radius: 10px; padding: 10px 14px; }.spoiler-dialog-actions .btn-primary { border: 0; color: var(--agent-ink); background: var(--agent-lime); }
+.insights-panel { gap: 22px; }.insight-query { position: relative; grid-template-columns: minmax(0, 1.2fr) 236px 176px; gap: 18px; overflow: hidden; padding: 32px; border-radius: 26px!important; background: linear-gradient(123deg, #102c32 0%, #173e42 62%, #274950 100%); box-shadow: 0 24px 44px rgba(16,44,50,.15)!important; }.insight-query::after { content: '阅读'; position: absolute; right: -20px; top: -37px; color: rgba(184,214,125,.08); font-family: var(--font-serif); font-size: 10rem; font-weight: 700; letter-spacing: -.1em; }.insight-query-copy,.insight-query label,.insight-query .btn { position: relative; z-index: 1; }.insight-query-copy h2 { max-width: 360px; font-size: clamp(2.5rem,5vw,4.3rem); line-height: .92; }.insight-query-copy p { max-width: 610px; font-size: .88rem; }.insight-query .btn { grid-column: 2 / 4; min-height: 46px; border-radius: 12px; box-shadow: 0 9px 16px rgba(0,0,0,.14); }.insight-grid { grid-template-columns: repeat(12,minmax(0,1fr)); gap: 18px; align-items: stretch; }.insight-card { min-height: 230px; padding: 25px; border: 0!important; border-radius: 22px!important; background: rgba(255,253,247,.84); box-shadow: 0 14px 31px rgba(16,44,50,.07)!important; }.insight-card::before { width: 150px; height: 150px; right: -55px; top: -62px; background: rgba(184,214,125,.2); }.insight-card::after { content: ''; position: absolute; left: 0; top: 26px; bottom: 26px; width: 3px; border-radius: 0 3px 3px 0; background: var(--agent-coral); }.insight-card > span { display: block; margin-bottom: 11px; color: var(--agent-coral); font-size: 2.5rem; line-height: .8; }.insight-card h2 { margin: 0 0 14px; font-size: clamp(1.45rem,2vw,2rem); line-height: 1; }.insight-card ul { max-height: 210px; padding-right: 7px; overflow: auto; }.insight-card li { padding-bottom: 9px; border-bottom: 1px solid rgba(16,44,50,.08); }.insight-card li:last-child { border-bottom: 0; }.insight-card:nth-child(1) { grid-column: span 4; background: #f7efe0; }.insight-card:nth-child(2) { grid-column: span 8; min-height: 400px; background: linear-gradient(135deg,#fffdf7,#e6f0d1); }.insight-card:nth-child(3) { grid-column: span 4; min-height: 290px; background: #f5e3d8; }.insight-card:nth-child(4) { grid-column: span 8; min-height: 290px; }.insight-card:nth-child(5) { grid-column: span 4; }.insight-card:nth-child(6) { grid-column: span 4; background: #e4efe8; }.insight-card:nth-child(7) { grid-column: span 4; }.insight-card:nth-child(8) { grid-column: span 12; min-height: 156px; display: grid; grid-template-columns: 185px minmax(0,1fr); column-gap: 22px; }.insight-card:nth-child(8)::after { top: 19px; bottom: 19px; }.insight-card:nth-child(8) > span { grid-row: 1 / span 2; margin: 0; align-self: center; font-size: 4rem; }.insight-card:nth-child(8) h2 { align-self: end; margin: 0; }.insight-card:nth-child(8) p,.insight-card:nth-child(8) ul { grid-column: 2; margin: 5px 0; }.graph-card,.reading-map-card { grid-column: auto; }.relationship-map,.cytoscape-graph { height: 250px!important; margin-top: 13px!important; border: 0!important; border-radius: 15px!important; background: rgba(255,253,247,.7)!important; }.graph-tools { margin: 0 0 9px; }.reading-map-events { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; max-height: 205px; padding: 0; overflow: auto; list-style: none; }.reading-map-events li { margin: 0; padding: 10px 12px!important; border: 1px solid rgba(16,44,50,.1)!important; border-radius: 11px; background: rgba(255,253,247,.65); }.insight-boundary-note { margin: -8px 0 0; border-radius: 13px; box-shadow: 0 8px 20px rgba(16,44,50,.04); }.spoiler-dialog-backdrop { position: fixed; inset: 0; z-index: 5000; display: grid; place-items: center; padding: 20px; background: rgba(9,27,31,.72); backdrop-filter: blur(7px); }.spoiler-dialog { position: relative; width: min(100%, 510px); padding: 34px; border: 1px solid rgba(255,253,247,.25); border-radius: 24px; color: #fffaf0; background: #173e42; box-shadow: 0 30px 85px rgba(0,0,0,.35); }.spoiler-dialog-mark { display: grid; width: 39px; height: 39px; place-items: center; border-radius: 50%; color: #173e42; background: var(--agent-lime); font-family: var(--font-serif); font-size: 1.75rem; }.spoiler-dialog-kicker { margin: 22px 0 6px; color: var(--agent-lime); font-size: .67rem; font-weight: 800; letter-spacing: .16em; }.spoiler-dialog h2 { margin: 0; color: #fffaf0; font-family: var(--font-serif); font-size: clamp(2rem,5vw,3rem); line-height: .96; letter-spacing: -.06em; }.spoiler-dialog > p:not(.spoiler-dialog-kicker) { color: rgba(255,250,240,.76); line-height: 1.8; }.spoiler-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 9px; margin-top: 26px; }.spoiler-dialog-actions .btn { border-radius: 10px; padding: 10px 14px; }.spoiler-dialog-actions .btn-primary { border: 0; color: var(--agent-ink); background: var(--agent-lime); }
 .privacy-layout { grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); }.preference-form { padding: 28px; background: rgba(255,253,247,.86); }.privacy-danger { padding: 28px; border: 1px solid rgba(212,97,69,.26)!important; background: linear-gradient(145deg, #fffaf0, #f7dfd5)!important; }.privacy-danger p { color: var(--agent-ink-soft); }.privacy-danger .btn { border-color: var(--agent-coral); color: var(--agent-coral); }
 @media (max-width: 1160px) { .agent-workbench { grid-template-columns: 230px minmax(0, 1fr); }.workspace-notes { display: grid; grid-column: 1 / -1; grid-template-columns: 1fr 1fr auto; align-items: stretch; }.privacy-note { margin: 0; align-self: end; }.insight-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (min-width: 761px) and (max-width: 1160px) { .insight-query { grid-template-columns: minmax(0,1fr) 210px; }.insight-query .btn { grid-column: 1 / -1; }.insight-grid { grid-template-columns: repeat(6,minmax(0,1fr)); }.insight-card:nth-child(1),.insight-card:nth-child(3),.insight-card:nth-child(5),.insight-card:nth-child(6),.insight-card:nth-child(7) { grid-column: span 3; }.insight-card:nth-child(2),.insight-card:nth-child(4) { grid-column: span 6; }.insight-card:nth-child(8) { grid-column: span 6; } }
@@ -1939,6 +2002,7 @@ onBeforeUnmount(() => {
 @media (min-width:1080px) { .insight-stage .graph-card { min-height:0!important; }.relationship-globe-shell { min-height:0; }.insight-stage .graph-card .relationship-globe { height:100%!important; margin:0!important; border:0!important; border-radius:0!important; background:transparent!important; } }
 @media (max-width:900px) { .relationship-globe-shell { flex-basis:430px; }.graph-inspector { grid-template-columns:1fr; }.graph-node-list { grid-template-columns:repeat(5,minmax(100px,1fr)); overflow-x:auto; padding-bottom:3px; }.graph-node-list button { min-width:100px; } }
 @media (max-width:600px) { .graph-card-title > span { font-size:1.9rem!important; }.graph-card-title p { font-size:.7rem; }.globe-toolbar-status { width:100%; justify-content:space-between; }.relationship-globe-shell { flex-basis:390px; min-height:390px; border-radius:15px; }.globe-hud-top { top:11px; left:12px; }.globe-hud-top span:last-child { display:none; }.globe-hud-bottom { right:11px; bottom:10px; gap:7px; font-size:.53rem; }.graph-inspector { margin-top:9px; }.graph-evidence,.graph-evidence.graph-evidence-empty { min-height:0; }.graph-node-list { display:none; } }
+@media (max-width:760px) { .relationship-canvas-head { gap:14px; padding:18px 18px 14px; }.relationship-canvas-head > div:last-child { max-width:none; justify-content:flex-start; }.canvas-node-search { flex:1 1 100%; justify-content:space-between; }.canvas-node-search input { flex:1; width:auto; }.relationship-canvas-foot { align-items:flex-start; flex-direction:column; gap:9px; padding:11px 18px; } }
 </style>
 
 <style scoped>
@@ -1947,6 +2011,17 @@ onBeforeUnmount(() => {
 .globe-toolbar-status b { color:#365f38; text-shadow:none; }
 .globe-toolbar-status button { border-color:rgba(16,44,50,.2); color:#24434c; background:#f4f0df; }
 .globe-toolbar-status button:hover { border-color:#547a45; color:#315f37; background:#edf4d7; }
+.globe-node-search { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+.globe-node-search span,.canvas-node-search span { color:inherit; font-size:.62rem; font-weight:800; white-space:nowrap; }
+.globe-node-search input { width:155px; min-width:0; border:1px solid rgba(16,44,50,.18); border-radius:99px; padding:6px 9px; color:#24434c; background:#fffefa; outline:0; font:inherit; font-size:.67rem; }
+.globe-node-search input::placeholder { color:#789096; }
+.globe-node-search input:focus { border-color:#547a45; box-shadow:0 0 0 3px rgba(84,122,69,.13); }
+.canvas-node-search { display:inline-flex; align-items:center; gap:6px; min-width:0; color:#d9f1e7; }
+.canvas-node-search input { width:150px; min-width:0; border:1px solid rgba(255,253,247,.34); border-radius:99px; padding:7px 10px; color:#fffdf2; background:rgba(4,24,33,.62); outline:0; font:inherit; font-size:.68rem; }
+.canvas-node-search input::placeholder { color:rgba(255,253,247,.63); }
+.canvas-node-search input:focus { border-color:#dbf19c; box-shadow:0 0 0 3px rgba(219,241,156,.14); }
+.graph-search-empty { position:absolute; z-index:3; top:50%; left:50%; transform:translate(-50%,-50%); width:min(80%,320px); border:1px solid rgba(219,241,156,.34); border-radius:12px; padding:14px 16px; color:#edf7ef; background:rgba(4,24,33,.78); box-shadow:0 10px 28px rgba(0,0,0,.2); text-align:center; font-size:.77rem; font-weight:800; pointer-events:none; }
+.graph-search-empty-canvas { top:46%; }
 .globe-hud { border:1px solid rgba(255,253,247,.18); border-radius:7px; padding:5px 7px; color:rgba(255,253,247,.95); background:rgba(4,24,33,.7); box-shadow:0 2px 9px rgba(0,0,0,.18); text-shadow:0 1px 2px rgba(0,0,0,.75); }
 .relationship-canvas-head { border-bottom-color:rgba(255,253,247,.18); background:linear-gradient(100deg,#0b2935,#154653); }
 .relationship-canvas-head > div:first-child > span { color:#dbf19c; }
@@ -2038,6 +2113,11 @@ onBeforeUnmount(() => {
     height:auto;
     min-height:0;
   }
+}
+
+@media (max-width:600px) {
+  .globe-node-search { flex:1 1 100%; justify-content:space-between; }
+  .globe-node-search input { width:min(58vw,220px); }
 }
 
 </style>

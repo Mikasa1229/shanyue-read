@@ -21,4 +21,14 @@ class AgentPromptAdvisorChainTest {
         assertThat(chain.instructions(new com.shanyuefang.agent.domain.dto.ChatMessageDTO(), null))
                 .anyMatch(value -> value.contains("版权规则"));
     }
+
+    @Test
+    void instructsShelfPlansToUseParseableMarkdownInsteadOfInlineFormatting() {
+        com.shanyuefang.agent.domain.dto.ChatMessageDTO dto = new com.shanyuefang.agent.domain.dto.ChatMessageDTO();
+        dto.setContent("请读取我的书架，整理并分类作品");
+
+        assertThat(chain.instructions(dto, null)).anyMatch(value -> value.contains("标题前后各保留一个空行")
+                && value.contains("每本书必须单独一行"));
+        assertThat(chain.instructions(dto, null)).anyMatch(value -> value.contains("输出规则：使用规范 Markdown"));
+    }
 }
