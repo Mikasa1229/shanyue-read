@@ -87,7 +87,7 @@
 
             <!-- 书籍网格 -->
             <div class="book-grid">
-              <div v-for="(book, idx) in pagedResults" :key="idx" class="book-card">
+              <div v-for="book in pagedResults" :key="bookResultKey(book)" class="book-card">
                 <div class="book-cover-wrap" @click="goToDetail(book)">
                   <img
                     v-if="book.coverUrl"
@@ -169,6 +169,36 @@ const pagedResults = computed(() => {
   return results.value.slice(start, start + pageSize)
 })
 
+function normalizeBookField(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase()
+}
+
+function bookResultKey(book) {
+  return `${book.sourceId || ''}|${book.bookUrl || ''}|${normalizeBookField(book.name)}|${normalizeBookField(book.author)}`
+}
+
+function deduplicateSearchResults(items) {
+  const unique = new Map()
+  const coverKeys = new Map()
+  for (const book of items || []) {
+    if (!book) continue
+    const title = normalizeBookField(book.name)
+    const author = normalizeBookField(book.author)
+    const cover = normalizeBookField(book.coverUrl)
+    const sourceUrlKey = `${book.sourceId || ''}|${book.bookUrl || ''}`
+    const key = title && title !== '未知书名'
+      ? `title|${title}|${author}`
+      : cover ? `cover|${cover}|${author}` : `source|${sourceUrlKey}`
+    const canonicalKey = cover ? (coverKeys.get(`cover|${cover}|${author}`) || key) : key
+    const previous = unique.get(canonicalKey)
+    const quality = [book.name && book.name !== '未知书名', book.author, book.intro, book.coverUrl, book.bookUrl].filter(Boolean).length
+    const previousQuality = previous ? [previous.name && previous.name !== '未知书名', previous.author, previous.intro, previous.coverUrl, previous.bookUrl].filter(Boolean).length : -1
+    if (!previous || quality > previousQuality) unique.set(canonicalKey, book)
+    if (cover) coverKeys.set(`cover|${cover}|${author}`, canonicalKey)
+  }
+  return [...unique.values()]
+}
+
 // 生成显示页码（带省略号）
 const pageNums = computed(() => {
   const total = totalPages.value
@@ -210,7 +240,7 @@ async function doSearch() {
   startProgress()
   try {
     const res = await apiAggregateSearch(q)
-    const searchResults = res ?? []
+    const searchResults = deduplicateSearchResults(res ?? [])
     results.value = searchResults
     // Book-source results are already usable. Knowledge status is optional metadata from
     // another service, so it must never hold the visible search response hostage.

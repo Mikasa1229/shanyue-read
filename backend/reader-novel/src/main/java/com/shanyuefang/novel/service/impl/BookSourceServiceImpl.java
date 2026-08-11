@@ -670,11 +670,58 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                 }
                 })
                 .collect(java.util.stream.Collectors.toList());
+        results = deduplicateAggregateResults(results);
         resolveCanonicalIds(results);
         AGGREGATE_SEARCH_CACHE.put(cacheKey, results);
         log.info("聚合搜索完成: keyword={}, sources={}, results={}, elapsedMs={}", keyword, sources.size(), results.size(),
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt));
         return results;
+    }
+
+    private List<SearchBookVO> deduplicateAggregateResults(List<SearchBookVO> books) {
+        Map<String, SearchBookVO> unique = new java.util.LinkedHashMap<>();
+        Map<String, String> coverIdentities = new HashMap<>();
+        for (SearchBookVO book : books) {
+            if (book == null) continue;
+            String key = aggregateIdentity(book);
+            String coverIdentity = coverIdentity(book);
+            if (!coverIdentity.isBlank()) key = coverIdentities.getOrDefault(coverIdentity, key);
+            SearchBookVO existing = unique.get(key);
+            if (existing == null || resultQuality(book) > resultQuality(existing)) unique.put(key, book);
+            if (!coverIdentity.isBlank()) coverIdentities.put(coverIdentity, key);
+        }
+        return new ArrayList<>(unique.values());
+    }
+
+    private String aggregateIdentity(SearchBookVO book) {
+        String title = normalizedBookField(book.getName());
+        String author = normalizedBookField(book.getAuthor());
+        if (!title.isBlank() && !"未知书名".equals(title)) return "title|" + title + "|" + author;
+        String cover = normalizedBookField(book.getCoverUrl());
+        String intro = normalizedBookField(book.getIntro());
+        if (!cover.isBlank()) return "cover|" + cover + "|" + author;
+        if (book.getSourceId() != null && StringUtils.hasText(book.getBookUrl())) return "source|" + book.getSourceId() + "|" + book.getBookUrl();
+        return "fallback|" + author + "|" + intro + "|" + System.identityHashCode(book);
+    }
+
+    private String coverIdentity(SearchBookVO book) {
+        String cover = normalizedBookField(book.getCoverUrl());
+        if (cover.isBlank()) return "";
+        return cover + "|" + normalizedBookField(book.getAuthor());
+    }
+
+    private int resultQuality(SearchBookVO book) {
+        int score = 0;
+        if (StringUtils.hasText(book.getName()) && !"未知书名".equals(book.getName().trim())) score += 8;
+        if (StringUtils.hasText(book.getAuthor())) score += 2;
+        if (StringUtils.hasText(book.getIntro())) score += 2;
+        if (StringUtils.hasText(book.getCoverUrl())) score += 1;
+        if (StringUtils.hasText(book.getBookUrl())) score += 1;
+        return score;
+    }
+
+    private String normalizedBookField(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", "").trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     private CompletableFuture<List<SearchBookVO>> searchSourceAsync(BookSource source, String keyword, int page) {
