@@ -22,6 +22,13 @@ public class RabbitMQConfig {
     /** 小说服务消费打卡事件的队列 */
     public static final String NOVEL_CHECKIN_QUEUE = "q.novel.checkin";
 
+    /** Re-fetches bounded chapter ranges when downstream evidence was intentionally repaired. */
+    public static final String CONTENT_RECOVERY_QUEUE = "reader.novel.content-recovery";
+    public static final String CONTENT_RECOVERY_DEAD_LETTER_QUEUE = "reader.novel.content-recovery.dlq";
+    public static final String AGENT_EVENTS_EXCHANGE = "reader.agent.events";
+    public static final String CONTENT_RECOVERY_ROUTING_KEY = "knowledge.chapter.recover";
+    public static final String CONTENT_RECOVERY_DEAD_LETTER_ROUTING_KEY = "knowledge.chapter.recover.failed";
+
     @Bean
     public TopicExchange topicExchange() {
         return ExchangeBuilder.topicExchange(TOPIC_EXCHANGE).durable(true).build();
@@ -68,6 +75,36 @@ public class RabbitMQConfig {
     @Bean
     public Binding novelCheckinBinding(@Qualifier("novelCheckinQueue") Queue novelCheckinQueue, TopicExchange topicExchange) {
         return BindingBuilder.bind(novelCheckinQueue).to(topicExchange).with("checkin.#");
+    }
+
+    @Bean
+    public TopicExchange agentEventsExchange() {
+        return ExchangeBuilder.topicExchange(AGENT_EVENTS_EXCHANGE).durable(true).build();
+    }
+
+    @Bean
+    public Queue contentRecoveryQueue() {
+        return QueueBuilder.durable(CONTENT_RECOVERY_QUEUE)
+                .withArgument("x-dead-letter-exchange", AGENT_EVENTS_EXCHANGE)
+                .withArgument("x-dead-letter-routing-key", CONTENT_RECOVERY_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    public Queue contentRecoveryDeadLetterQueue() {
+        return QueueBuilder.durable(CONTENT_RECOVERY_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    public Binding contentRecoveryBinding(@Qualifier("contentRecoveryQueue") Queue contentRecoveryQueue,
+                                          @Qualifier("agentEventsExchange") TopicExchange agentEventsExchange) {
+        return BindingBuilder.bind(contentRecoveryQueue).to(agentEventsExchange).with(CONTENT_RECOVERY_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding contentRecoveryDeadLetterBinding(@Qualifier("contentRecoveryDeadLetterQueue") Queue contentRecoveryDeadLetterQueue,
+                                                    @Qualifier("agentEventsExchange") TopicExchange agentEventsExchange) {
+        return BindingBuilder.bind(contentRecoveryDeadLetterQueue).to(agentEventsExchange).with(CONTENT_RECOVERY_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean

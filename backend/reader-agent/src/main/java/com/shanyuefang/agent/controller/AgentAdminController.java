@@ -21,6 +21,8 @@ import com.shanyuefang.agent.service.RecommendationExperimentService;
 import com.shanyuefang.agent.service.AgentEvaluationService;
 import com.shanyuefang.agent.service.KnowledgeService;
 import com.shanyuefang.agent.service.BookKnowledgeBuildService;
+import com.shanyuefang.agent.feign.ContentRecoveryFeignClient;
+import com.shanyuefang.agent.config.AgentProperties;
 import com.shanyuefang.agent.domain.dto.AgentAnswerEvaluationDTO;
 import com.shanyuefang.agent.domain.dto.GraphClaimReviewDTO;
 import com.shanyuefang.agent.domain.vo.GraphReviewClaimVO;
@@ -72,6 +74,8 @@ public class AgentAdminController {
     private final AgentEvaluationService evaluationService;
     private final KnowledgeService knowledgeService;
     private final BookKnowledgeBuildService bookKnowledgeBuildService;
+    private final ContentRecoveryFeignClient contentRecoveryClient;
+    private final AgentProperties agentProperties;
     @GetMapping("/overview")
     public R<Map<String, Object>> overview(@RequestHeader("X-User-Id") long userId) {
         adminAccess.require(userId);
@@ -117,6 +121,24 @@ public class AgentAdminController {
         rabbitTemplate.convertAndSend(KnowledgeMessagingConfig.EXCHANGE,
                 KnowledgeMessagingConfig.EMBEDDING_REBUILD_ROUTING_KEY, Map.of("jobId", job.getId()));
         return R.ok(Map.of("canonicalBookId", canonicalBookId, "jobId", job.getId(), "status", "QUEUED"));
+    }
+    /** Repairs chapter evidence previously removed by the historic graph-delete implementation. */
+    @PostMapping("/books/{canonicalBookId}/chapter-evidence:recover")
+    public R<Map<String, Object>> recoverChapterEvidence(@RequestHeader("X-User-Id") long userId,
+                                                           @PathVariable long canonicalBookId,
+                                                           @RequestParam int startChapter,
+                                                           @RequestParam int endChapter) {
+        adminAccess.requireAdmin(userId);
+        if (canonicalBookId <= 0 || startChapter < 0 || endChapter < startChapter || endChapter - startChapter + 1 > 200) {
+            return R.fail(ResultCode.PARAM_ERROR, "Invalid chapter recovery range");
+        }
+        var response = contentRecoveryClient.recover(agentProperties.getInternalToken(), canonicalBookId, startChapter, endChapter);
+        if (response == null || response.getCode() != 200) {
+            return R.fail(ResultCode.INTERNAL_ERROR, response == null ? "Novel service did not accept the recovery task" : response.getMessage());
+        }
+        Map<String, Object> task = response.getData() == null ? Map.of() : response.getData();
+        return R.ok(Map.of("canonicalBookId", canonicalBookId, "startChapter", startChapter,
+                "endChapter", endChapter, "status", "QUEUED", "task", task));
     }
 
     private String routingKey(long jobId) {

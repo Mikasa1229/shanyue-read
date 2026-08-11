@@ -14,6 +14,8 @@ import com.shanyuefang.agent.service.ModelRouteService;
 import com.shanyuefang.agent.service.PromptVersionService;
 import com.shanyuefang.agent.service.RecommendationExperimentService;
 import com.shanyuefang.agent.service.BookKnowledgeBuildService;
+import com.shanyuefang.agent.feign.ContentRecoveryFeignClient;
+import com.shanyuefang.agent.config.AgentProperties;
 import com.shanyuefang.agent.config.KnowledgeMessagingConfig;
 import com.shanyuefang.agent.domain.entity.KnowledgeIndexJob;
 import com.shanyuefang.common.result.R;
@@ -52,6 +54,8 @@ class AgentAdminControllerTest {
     @Mock private AgentEvaluationService evaluationService;
     @Mock private KnowledgeService knowledgeService;
     @Mock private BookKnowledgeBuildService bookKnowledgeBuildService;
+    @Mock private ContentRecoveryFeignClient contentRecoveryClient;
+    @Mock private AgentProperties agentProperties;
 
     @InjectMocks private AgentAdminController controller;
 
@@ -106,5 +110,19 @@ class AgentAdminControllerTest {
         verify(rabbitTemplate).convertAndSend(KnowledgeMessagingConfig.EXCHANGE,
                 KnowledgeMessagingConfig.EMBEDDING_REBUILD_ROUTING_KEY, Map.of("jobId", 88L));
         org.mockito.Mockito.verifyNoInteractions(knowledgeService);
+    }
+
+    @Test
+    void chapterEvidenceRecoveryDelegatesToTheNovelServiceQueue() {
+        doNothing().when(adminAccess).requireAdmin(42L);
+        when(agentProperties.getInternalToken()).thenReturn("internal-token");
+        when(contentRecoveryClient.recover("internal-token", 9L, 0, 99))
+                .thenReturn(R.ok(Map.of("id", 88L, "status", "PENDING")));
+
+        R<Map<String, Object>> response = controller.recoverChapterEvidence(42L, 9L, 0, 99);
+
+        assertEquals(200, response.getCode());
+        assertEquals("QUEUED", response.getData().get("status"));
+        verify(contentRecoveryClient).recover("internal-token", 9L, 0, 99);
     }
 }

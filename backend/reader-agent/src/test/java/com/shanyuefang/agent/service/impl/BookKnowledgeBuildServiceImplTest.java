@@ -199,7 +199,7 @@ class BookKnowledgeBuildServiceImplTest {
     }
 
     @Test
-    void deletingAnOwnedGraphDeletesAllBookKnowledgeAssets() {
+    void deletingAnOwnedGraphPreservesReusableChapterEvidence() {
         BookKnowledgeSpace space = new BookKnowledgeSpace();
         space.setCanonicalBookId(9L);
         space.setOwnerUserId(1L);
@@ -216,8 +216,8 @@ class BookKnowledgeBuildServiceImplTest {
 
         service.deleteOwnedGraph(1L, 9L);
 
-        verify(knowledgeService).deleteBookKnowledge(9L);
-        verify(knowledgeService, never()).clearGraph(9L);
+        verify(knowledgeService).clearGraph(9L);
+        verify(knowledgeService, never()).deleteBookKnowledge(9L);
         verify(coverageMapper).delete(any(Wrapper.class));
         ArgumentCaptor<BookKnowledgeSpace> saved = ArgumentCaptor.forClass(BookKnowledgeSpace.class);
         verify(spaceMapper).updateById(saved.capture());
