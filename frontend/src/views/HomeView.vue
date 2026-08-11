@@ -210,15 +210,21 @@ async function doSearch() {
   startProgress()
   try {
     const res = await apiAggregateSearch(q)
-    results.value = res ?? []
-    const ids = [...new Set(results.value.map(book => book.canonicalBookId).filter(Boolean))]
-    if (ids.length) {
-      try {
-        const statuses = await apiGetBookKnowledgeStatuses(ids)
-        results.value = results.value.map(book => ({ ...book, knowledgeStatus: statuses?.[book.canonicalBookId]?.status }))
-      } catch (_) { /* Search remains available if the optional Agent service is offline. */ }
-    }
+    const searchResults = res ?? []
+    results.value = searchResults
+    // Book-source results are already usable. Knowledge status is optional metadata from
+    // another service, so it must never hold the visible search response hostage.
     searched.value = true
+    const ids = [...new Set(searchResults.map(book => book.canonicalBookId).filter(Boolean))]
+    if (ids.length) {
+      void apiGetBookKnowledgeStatuses(ids)
+        .then(statuses => {
+          // Ignore an older asynchronous response after the user starts another search.
+          if (lastKeyword.value !== q) return
+          results.value = searchResults.map(book => ({ ...book, knowledgeStatus: statuses?.[book.canonicalBookId]?.status }))
+        })
+        .catch(() => { /* Search remains available if the optional Agent service is offline. */ })
+    }
   } catch (e) {
     show(e.message)
     results.value = []
