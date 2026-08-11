@@ -31,8 +31,9 @@ public class FavoriteController {
     /** 取消收藏 */
     @DeleteMapping
     public R<Void> remove(@RequestHeader("X-User-Id") Long userId,
-                          @RequestParam String bookUrl) {
-        favoriteService.removeFavorite(userId, bookUrl);
+                          @RequestParam(required = false) Long canonicalBookId,
+                          @RequestParam(required = false) String bookUrl) {
+        favoriteService.removeFavorite(userId, canonicalBookId, bookUrl);
         return R.ok();
     }
 

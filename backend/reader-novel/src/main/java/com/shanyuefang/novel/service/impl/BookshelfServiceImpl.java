@@ -21,11 +21,12 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -39,8 +40,9 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
     private final StringRedisTemplate stringRedisTemplate;
     private final CanonicalBookService canonicalBookService;
 
-    /** 热门书籍 ZSET：成员=bookUrl，分值=加入书架的用户数 */
+    /** 热门书籍 ZSET：成员为规范作品身份（旧 URL 缓存会在读取时迁移）。 */
     private static final String HOT_BOOKS_ZSET = "ranking:hot_books";
+    private static final String CANONICAL_RANKING_PREFIX = "canonical:";
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -51,13 +53,17 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
                 .eq(BookshelfBook::getCanonicalBookId, canonicalBookId).one();
         if (existing == null) existing = lambdaQuery().eq(BookshelfBook::getUserId, userId).eq(BookshelfBook::getBookUrl, dto.getBookUrl()).one();
         if (existing != null) {
+            String previousBookUrl = existing.getBookUrl();
+            String previousRankingMember = rankingMember(existing.getCanonicalBookId(), previousBookUrl);
             existing.setSourceId(dto.getSourceId());
             existing.setCanonicalBookId(canonicalBookId);
             existing.setSourceName(dto.getSourceName());
             existing.setBookName(dto.getBookName());
             existing.setAuthor(dto.getAuthor());
             existing.setCoverUrl(dto.getCoverUrl());
+            existing.setBookUrl(dto.getBookUrl());
             updateById(existing);
+            moveHotBookScore(previousRankingMember, rankingMember(canonicalBookId, dto.getBookUrl()));
             return;
         }
         BookshelfBook book = new BookshelfBook();
@@ -74,29 +80,53 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
 
         // 新书入架：热门排行 +1
         try {
-            stringRedisTemplate.opsForZSet().incrementScore(HOT_BOOKS_ZSET, dto.getBookUrl(), 1);
+            stringRedisTemplate.opsForZSet().incrementScore(HOT_BOOKS_ZSET, rankingMember(canonicalBookId, dto.getBookUrl()), 1);
         } catch (Exception e) {
             log.warn("更新热门书籍 ZSET 失败（不影响主流程）: bookUrl={}, err={}", dto.getBookUrl(), e.getMessage());
         }
     }
 
+    private String rankingMember(Long canonicalBookId, String bookUrl) {
+        return canonicalBookId == null ? bookUrl : CANONICAL_RANKING_PREFIX + canonicalBookId;
+    }
+
+    // Move an old source-url score only when its logical work identity changes.
+    private void moveHotBookScore(String previousMember, String currentMember) {
+        if (previousMember == null || previousMember.equals(currentMember)) return;
+        try {
+            Double score = stringRedisTemplate.opsForZSet().score(HOT_BOOKS_ZSET, previousMember);
+            if (score != null && score > 0) {
+                stringRedisTemplate.opsForZSet().incrementScore(HOT_BOOKS_ZSET, previousMember, -1);
+                stringRedisTemplate.opsForZSet().incrementScore(HOT_BOOKS_ZSET, currentMember, 1);
+            }
+        } catch (Exception e) {
+            log.warn("迁移热门书籍缓存失败（不影响主流程）: from={}, to={}, err={}", previousMember, currentMember, e.getMessage());
+        }
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void removeBook(long userId, String bookUrl) {
-        boolean removed = lambdaUpdate()
-                .eq(BookshelfBook::getUserId, userId)
-                .eq(BookshelfBook::getBookUrl, bookUrl)
-                .remove();
+    public void removeBook(long userId, Long canonicalBookId, String bookUrl) {
+        if (canonicalBookId == null && (bookUrl == null || bookUrl.isBlank())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "需要提供规范作品 ID 或书源地址");
+        }
+        BookshelfBook existing = canonicalBookId == null ? null : lambdaQuery()
+                .eq(BookshelfBook::getUserId, userId).eq(BookshelfBook::getCanonicalBookId, canonicalBookId).one();
+        if (existing == null && bookUrl != null && !bookUrl.isBlank()) existing = lambdaQuery()
+                .eq(BookshelfBook::getUserId, userId).eq(BookshelfBook::getBookUrl, bookUrl).one();
+        if (existing == null) throw new BusinessException(ResultCode.NOT_FOUND, "书架中没有该书");
+        boolean removed = removeById(existing.getId());
         if (!removed) throw new BusinessException(ResultCode.NOT_FOUND, "书架中没有该书");
 
         // 移出书架：热门排行 -1（最低为 0）
         try {
-            Double score = stringRedisTemplate.opsForZSet().score(HOT_BOOKS_ZSET, bookUrl);
+            String rankingMember = rankingMember(existing.getCanonicalBookId(), existing.getBookUrl());
+            Double score = stringRedisTemplate.opsForZSet().score(HOT_BOOKS_ZSET, rankingMember);
             if (score != null && score > 0) {
-                stringRedisTemplate.opsForZSet().incrementScore(HOT_BOOKS_ZSET, bookUrl, -1);
+                stringRedisTemplate.opsForZSet().incrementScore(HOT_BOOKS_ZSET, rankingMember, -1);
             }
         } catch (Exception e) {
-            log.warn("更新热门书籍 ZSET 失败（不影响主流程）: bookUrl={}, err={}", bookUrl, e.getMessage());
+            log.warn("更新热门书籍 ZSET 失败（不影响主流程）: rankingMember={}, err={}", rankingMember(existing.getCanonicalBookId(), existing.getBookUrl()), e.getMessage());
         }
     }
 
@@ -151,26 +181,26 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateProgress(long userId, UpdateProgressDTO dto) {
-        var update = lambdaUpdate().eq(BookshelfBook::getUserId, userId);
-        if (dto.getCanonicalBookId() != null) update.eq(BookshelfBook::getCanonicalBookId, dto.getCanonicalBookId());
-        else update.eq(BookshelfBook::getBookUrl, dto.getBookUrl());
-        update
-                .set(dto.getSourceId() != null, BookshelfBook::getSourceId, dto.getSourceId())
-                .set(StringUtils.hasText(dto.getSourceName()), BookshelfBook::getSourceName, dto.getSourceName())
-                .set(StringUtils.hasText(dto.getBookUrl()), BookshelfBook::getBookUrl, dto.getBookUrl())
-                .set(BookshelfBook::getLastChapterName, dto.getChapterName())
-                .set(BookshelfBook::getLastChapterUrl, dto.getChapterUrl())
-                .set(BookshelfBook::getLastReadAt, LocalDateTime.now());
-        if (dto.getChapterIndex() != null) {
-            update.set(BookshelfBook::getLastChapterIndex, dto.getChapterIndex());
-        }
-        if (dto.getTotalChapters() != null && dto.getTotalChapters() > 0) {
-            update.set(BookshelfBook::getTotalChapters, dto.getTotalChapters());
-        }
-        boolean updated = update.update();
-        if (!updated) {
+        BookshelfBook existing = dto.getCanonicalBookId() == null ? null : lambdaQuery()
+                .eq(BookshelfBook::getUserId, userId).eq(BookshelfBook::getCanonicalBookId, dto.getCanonicalBookId()).one();
+        if (existing == null) existing = lambdaQuery().eq(BookshelfBook::getUserId, userId)
+                .eq(BookshelfBook::getBookUrl, dto.getBookUrl()).one();
+        if (existing == null) {
             throw new BusinessException(ResultCode.NOT_FOUND, "书架中没有该书，无法更新进度");
         }
+        String previousRankingMember = rankingMember(existing.getCanonicalBookId(), existing.getBookUrl());
+        if (dto.getSourceId() != null) existing.setSourceId(dto.getSourceId());
+        if (StringUtils.hasText(dto.getSourceName())) existing.setSourceName(dto.getSourceName());
+        if (StringUtils.hasText(dto.getBookUrl())) existing.setBookUrl(dto.getBookUrl());
+        existing.setLastChapterName(dto.getChapterName());
+        existing.setLastChapterUrl(dto.getChapterUrl());
+        existing.setLastReadAt(LocalDateTime.now());
+        if (dto.getChapterIndex() != null) existing.setLastChapterIndex(dto.getChapterIndex());
+        if (dto.getTotalChapters() != null && dto.getTotalChapters() > 0) existing.setTotalChapters(dto.getTotalChapters());
+        if (!updateById(existing)) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "书架中没有该书，无法更新进度");
+        }
+        moveHotBookScore(previousRankingMember, rankingMember(existing.getCanonicalBookId(), existing.getBookUrl()));
     }
 
     @Override
@@ -190,32 +220,66 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
             return dbResult;
         }
 
-        // 2. 收集 bookUrl 及分值
-        List<String> bookUrls = new ArrayList<>();
-        Map<String, Long> countMap = new HashMap<>();
+        // 2. Canonical members are the normal path. URL members are from the pre-canonical
+        // cache and are translated using their durable shelf row before being shown.
+        List<Long> canonicalIds = new ArrayList<>();
+        List<String> legacyUrls = new ArrayList<>();
+        Map<String, Long> countMap = new LinkedHashMap<>();
         for (ZSetOperations.TypedTuple<String> t : tuples) {
-            String url = t.getValue();
+            String member = t.getValue();
             Double score = t.getScore();
-            if (url != null && score != null && score >= 1) {
-                bookUrls.add(url);
-                countMap.put(url, score.longValue());
+            if (member != null && score != null && score >= 1) {
+                if (member.startsWith(CANONICAL_RANKING_PREFIX)) {
+                    try {
+                        canonicalIds.add(Long.parseLong(member.substring(CANONICAL_RANKING_PREFIX.length())));
+                        countMap.put(member, score.longValue());
+                    } catch (NumberFormatException ignored) {
+                        try {
+                            stringRedisTemplate.opsForZSet().remove(HOT_BOOKS_ZSET, member);
+                        } catch (Exception e) {
+                            log.debug("清理格式错误的热门书籍缓存失败: {}", e.getMessage());
+                        }
+                    }
+                } else {
+                    legacyUrls.add(member);
+                }
             }
         }
-        if (bookUrls.isEmpty()) return List.of();
+        Map<Long, BookshelfBook> canonicalMeta = (canonicalIds.isEmpty() ? List.<BookshelfBook>of() : baseMapper.selectMetaByCanonicalIds(canonicalIds)).stream()
+                .collect(Collectors.toMap(BookshelfBook::getCanonicalBookId, book -> book, (a, b) -> a));
+        Map<String, BookshelfBook> legacyMeta = (legacyUrls.isEmpty() ? List.<BookshelfBook>of() : baseMapper.selectMetaByUrls(legacyUrls)).stream()
+                .collect(Collectors.toMap(BookshelfBook::getBookUrl, book -> book, (a, b) -> a));
+        for (String legacyUrl : legacyUrls) {
+            BookshelfBook book = legacyMeta.get(legacyUrl);
+            Double score = stringRedisTemplate.opsForZSet().score(HOT_BOOKS_ZSET, legacyUrl);
+            if (book == null || score == null || score < 1) continue;
+            String member = rankingMember(book.getCanonicalBookId(), legacyUrl);
+            if (!member.equals(legacyUrl)) {
+                try {
+                    stringRedisTemplate.opsForZSet().incrementScore(HOT_BOOKS_ZSET, member, score);
+                    stringRedisTemplate.opsForZSet().remove(HOT_BOOKS_ZSET, legacyUrl);
+                } catch (Exception e) {
+                    log.debug("迁移旧热门书籍缓存失败: {}", e.getMessage());
+                }
+            }
+            countMap.merge(member, score.longValue(), Long::sum);
+            if (book.getCanonicalBookId() != null) canonicalMeta.putIfAbsent(book.getCanonicalBookId(), book);
+        }
+        if (countMap.isEmpty()) return List.of();
 
-        // 3. 批量查询元数据（每个 bookUrl 取最新一条）
-        List<BookshelfBook> metaList = baseMapper.selectMetaByUrls(bookUrls);
-        Map<String, BookshelfBook> metaMap = metaList.stream()
-                .collect(Collectors.toMap(BookshelfBook::getBookUrl, b -> b, (a, b) -> a));
-
-        // Redis can retain entries after test data or old shelf rows are removed. Never expose
-        // an orphaned URL as an "unknown" book; remove it so later requests stay clean.
-        List<String> orphanedUrls = bookUrls.stream()
-                .filter(url -> !metaMap.containsKey(url))
+        // 3. Redis can retain entries after data removal. Clear entries without a durable row.
+        List<String> orphanedMembers = countMap.keySet().stream()
+                .filter(member -> {
+                    if (member.startsWith(CANONICAL_RANKING_PREFIX)) {
+                        try { return !canonicalMeta.containsKey(Long.parseLong(member.substring(CANONICAL_RANKING_PREFIX.length()))); }
+                        catch (NumberFormatException ignored) { return true; }
+                    }
+                    return !legacyMeta.containsKey(member);
+                })
                 .toList();
-        if (!orphanedUrls.isEmpty()) {
+        if (!orphanedMembers.isEmpty()) {
             try {
-                stringRedisTemplate.opsForZSet().remove(HOT_BOOKS_ZSET, orphanedUrls.toArray());
+                stringRedisTemplate.opsForZSet().remove(HOT_BOOKS_ZSET, orphanedMembers.toArray());
             } catch (Exception e) {
                 log.debug("清理失效热门书籍缓存失败: {}", e.getMessage());
             }
@@ -223,15 +287,23 @@ public class BookshelfServiceImpl extends ServiceImpl<BookshelfBookMapper, Books
 
         // 4. 组装结果
         List<HotBookVO> result = new ArrayList<>();
-        int rank = 1;
-        for (String bookUrl : bookUrls) {
-            HotBookVO vo = new HotBookVO();
-            vo.setRank(rank++);
-            vo.setBookUrl(bookUrl);
-            vo.setShelfCount(countMap.getOrDefault(bookUrl, 0L));
-
-            BookshelfBook meta = metaMap.get(bookUrl);
+        for (Map.Entry<String, Long> entry : countMap.entrySet()) {
+            String member = entry.getKey();
+            if (orphanedMembers.contains(member)) continue;
+            BookshelfBook meta;
+            Long canonicalBookId = null;
+            if (member.startsWith(CANONICAL_RANKING_PREFIX)) {
+                canonicalBookId = Long.parseLong(member.substring(CANONICAL_RANKING_PREFIX.length()));
+                meta = canonicalMeta.get(canonicalBookId);
+            } else {
+                meta = legacyMeta.get(member);
+                canonicalBookId = meta == null ? null : meta.getCanonicalBookId();
+            }
             if (meta == null) continue;
+            HotBookVO vo = new HotBookVO();
+            vo.setCanonicalBookId(canonicalBookId);
+            vo.setBookUrl(meta.getBookUrl());
+            vo.setShelfCount(entry.getValue());
             vo.setBookName(meta.getBookName());
             vo.setAuthor(meta.getAuthor());
             vo.setCoverUrl(meta.getCoverUrl());

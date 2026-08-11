@@ -138,7 +138,7 @@ function goChapters(book) {
 async function removeBook(book) {
   if (!confirm(`确认将「${book.bookName}」移出书架？`)) return
   try {
-    await apiRemoveFromShelf(book.bookUrl)
+    await apiRemoveFromShelf(book)
     show('已移出书架')
     await loadPage(currentPage.value)
   } catch (e) {

@@ -10,7 +10,12 @@ public interface FavoriteService {
     void addFavorite(long userId, AddFavoriteDTO dto);
 
     /** 取消收藏，不存在时抛异常 */
-    void removeFavorite(long userId, String bookUrl);
+    void removeFavorite(long userId, Long canonicalBookId, String bookUrl);
+
+    /** Legacy URL-only removal for callers that predate canonical work identity. */
+    default void removeFavorite(long userId, String bookUrl) {
+        removeFavorite(userId, null, bookUrl);
+    }
 
     /** 分页查询我的收藏列表 */
     Page<FavoriteBookVO> listMyFavorites(long userId, int page, int size);

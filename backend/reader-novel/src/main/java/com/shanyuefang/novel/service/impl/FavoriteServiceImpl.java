@@ -38,6 +38,7 @@ public class FavoriteServiceImpl extends ServiceImpl<FavoriteBookMapper, Favorit
             existing.setBookName(dto.getBookName());
             existing.setAuthor(dto.getAuthor());
             existing.setCoverUrl(dto.getCoverUrl());
+            existing.setBookUrl(dto.getBookUrl());
             updateById(existing);
             return;
         }
@@ -56,12 +57,15 @@ public class FavoriteServiceImpl extends ServiceImpl<FavoriteBookMapper, Favorit
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void removeFavorite(long userId, String bookUrl) {
-        boolean removed = lambdaUpdate()
-                .eq(FavoriteBook::getUserId, userId)
-                .eq(FavoriteBook::getBookUrl, bookUrl)
-                .remove();
-        if (!removed) {
+    public void removeFavorite(long userId, Long canonicalBookId, String bookUrl) {
+        if (canonicalBookId == null && (bookUrl == null || bookUrl.isBlank())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "需要提供规范作品 ID 或书源地址");
+        }
+        FavoriteBook existing = canonicalBookId == null ? null : lambdaQuery()
+                .eq(FavoriteBook::getUserId, userId).eq(FavoriteBook::getCanonicalBookId, canonicalBookId).one();
+        if (existing == null && bookUrl != null && !bookUrl.isBlank()) existing = lambdaQuery()
+                .eq(FavoriteBook::getUserId, userId).eq(FavoriteBook::getBookUrl, bookUrl).one();
+        if (existing == null || !removeById(existing.getId())) {
             throw new BusinessException(ResultCode.NOT_FOUND, "收藏中没有该书");
         }
     }

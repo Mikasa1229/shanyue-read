@@ -26,8 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Locale;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Set;
-import java.util.HashSet;
+import java.util.Comparator;
 
 @Service
 @RequiredArgsConstructor
@@ -91,16 +90,59 @@ public class CanonicalBookServiceImpl implements CanonicalBookService {
         if ("APPROVE".equals(dto.getAction())) {
             mappingMapper.update(null, Wrappers.<BookSourceMapping>lambdaUpdate()
                     .eq(BookSourceMapping::getCanonicalBookId, source.getId()).set(BookSourceMapping::getCanonicalBookId, review.getCandidateCanonicalBookId()));
-            // Keep historical personal records navigable after two works are consolidated.
-            bookshelfBookMapper.update(null, Wrappers.<BookshelfBook>lambdaUpdate()
-                    .eq(BookshelfBook::getCanonicalBookId, source.getId()).set(BookshelfBook::getCanonicalBookId, review.getCandidateCanonicalBookId()));
-            favoriteBookMapper.update(null, Wrappers.<FavoriteBook>lambdaUpdate()
-                    .eq(FavoriteBook::getCanonicalBookId, source.getId()).set(FavoriteBook::getCanonicalBookId, review.getCandidateCanonicalBookId()));
+            mergePersonalRecords(source.getId(), review.getCandidateCanonicalBookId());
             source.setMergeStatus("MERGED");
         } else source.setMergeStatus("VERIFIED");
         canonicalBookMapper.updateById(source);
         review.setStatus(dto.getAction().equals("APPROVE") ? "APPROVED" : "REJECTED");
         review.setReviewedAt(LocalDateTime.now()); review.setUpdatedAt(LocalDateTime.now()); reviewMapper.updateById(review);
+    }
+
+    /**
+     * V9 enforces one shelf/favorite projection per user and canonical work. Merge per-user
+     * records before changing their identity so an approved work merge cannot violate that key.
+     */
+    private void mergePersonalRecords(long sourceCanonicalBookId, long targetCanonicalBookId) {
+        for (BookshelfBook source : bookshelfBookMapper.selectList(Wrappers.<BookshelfBook>lambdaQuery()
+                .eq(BookshelfBook::getCanonicalBookId, sourceCanonicalBookId))) {
+            BookshelfBook target = bookshelfBookMapper.selectOne(Wrappers.<BookshelfBook>lambdaQuery()
+                    .eq(BookshelfBook::getUserId, source.getUserId())
+                    .eq(BookshelfBook::getCanonicalBookId, targetCanonicalBookId));
+            if (target == null) {
+                source.setCanonicalBookId(targetCanonicalBookId);
+                bookshelfBookMapper.updateById(source);
+            } else if (isNewerShelf(source, target)) {
+                bookshelfBookMapper.deleteById(target.getId());
+                source.setCanonicalBookId(targetCanonicalBookId);
+                bookshelfBookMapper.updateById(source);
+            } else {
+                bookshelfBookMapper.deleteById(source.getId());
+            }
+        }
+        for (FavoriteBook source : favoriteBookMapper.selectList(Wrappers.<FavoriteBook>lambdaQuery()
+                .eq(FavoriteBook::getCanonicalBookId, sourceCanonicalBookId))) {
+            FavoriteBook target = favoriteBookMapper.selectOne(Wrappers.<FavoriteBook>lambdaQuery()
+                    .eq(FavoriteBook::getUserId, source.getUserId())
+                    .eq(FavoriteBook::getCanonicalBookId, targetCanonicalBookId));
+            if (target == null) {
+                source.setCanonicalBookId(targetCanonicalBookId);
+                favoriteBookMapper.updateById(source);
+            } else if (Comparator.nullsLast(Comparator.<LocalDateTime>naturalOrder()).compare(source.getCreatedAt(), target.getCreatedAt()) > 0) {
+                favoriteBookMapper.deleteById(target.getId());
+                source.setCanonicalBookId(targetCanonicalBookId);
+                favoriteBookMapper.updateById(source);
+            } else {
+                favoriteBookMapper.deleteById(source.getId());
+            }
+        }
+    }
+
+    private boolean isNewerShelf(BookshelfBook candidate, BookshelfBook existing) {
+        int lastRead = Comparator.nullsLast(Comparator.<LocalDateTime>naturalOrder())
+                .compare(candidate.getLastReadAt(), existing.getLastReadAt());
+        if (lastRead != 0) return lastRead > 0;
+        return Comparator.nullsLast(Comparator.<LocalDateTime>naturalOrder())
+                .compare(candidate.getCreatedAt(), existing.getCreatedAt()) > 0;
     }
 
     @Override

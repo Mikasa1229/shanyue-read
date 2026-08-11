@@ -9,7 +9,7 @@
         <div class="topbar-chapter">{{ currentChapterName }}</div>
       </div>
       <div class="topbar-actions">
-        <button v-if="userStore.isLoggedIn" class="topbar-btn topbar-collect" :class="{ 'collected': isFavorited }" @click="addToShelf">
+        <button v-if="userStore.isLoggedIn" class="topbar-btn topbar-collect" :class="{ 'collected': isFavorited }" @click="addFavorite">
           {{ isFavorited ? '♥' : '♡' }}
         </button>
         <button class="topbar-btn" title="写书评" @click="shareOpen = true">书评</button>
@@ -426,7 +426,7 @@ function setChapterChunkRef(el, chapterUrl) {
 }
 
 // ─── 收藏 ────────────────────────────────────────────────────
-async function addToShelf() {
+async function addFavorite() {
   if (isFavorited.value) return
   try {
     await apiAddFavorite({

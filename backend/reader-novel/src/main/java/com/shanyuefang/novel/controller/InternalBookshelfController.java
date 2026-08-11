@@ -38,12 +38,13 @@ public class InternalBookshelfController {
     public R<List<Map<String, Object>>> hot(@RequestHeader("X-Agent-Internal-Token") String token, @RequestParam(defaultValue = "12") int limit) {
         internalAccess.require(token);
         return R.ok(bookshelfService.getHotBooks(Math.max(1, Math.min(limit, 20))).stream().map(book -> {
-            BookSourceMapping mapping = mappingMapper.selectOne(com.baomidou.mybatisplus.core.toolkit.Wrappers.<BookSourceMapping>lambdaQuery()
-                    .eq(BookSourceMapping::getSourceId, book.getSourceId()).eq(BookSourceMapping::getSourceBookUrl, book.getBookUrl()));
+            BookSourceMapping mapping = book.getCanonicalBookId() == null ? mappingMapper.selectOne(com.baomidou.mybatisplus.core.toolkit.Wrappers.<BookSourceMapping>lambdaQuery()
+                    .eq(BookSourceMapping::getSourceId, book.getSourceId()).eq(BookSourceMapping::getSourceBookUrl, book.getBookUrl())) : null;
             java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
             result.put("title", book.getBookName()); result.put("author", book.getAuthor() == null ? "" : book.getAuthor());
             result.put("sourceId", book.getSourceId() == null ? 0L : book.getSourceId()); result.put("bookUrl", book.getBookUrl()); result.put("shelfCount", book.getShelfCount());
-            if (mapping != null) result.put("canonicalBookId", mapping.getCanonicalBookId());
+            if (book.getCanonicalBookId() != null) result.put("canonicalBookId", book.getCanonicalBookId());
+            else if (mapping != null) result.put("canonicalBookId", mapping.getCanonicalBookId());
             return result;
         }).toList());
     }

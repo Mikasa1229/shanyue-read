@@ -6,7 +6,7 @@
     <!-- 根据 bookUrl 列表获取各书的代表性元数据（每个 bookUrl 取最新一条记录） -->
     <select id="selectMetaByUrls" resultType="com.shanyuefang.novel.domain.entity.BookshelfBook">
         SELECT DISTINCT ON (book_url)
-            id, book_url, book_name, author, cover_url, source_id, source_name, created_at
+            id, canonical_book_id, book_url, book_name, author, cover_url, source_id, source_name, created_at
         FROM t_bookshelf_book
         WHERE book_url IN
         <foreach item="url" collection="urls" open="(" separator="," close=")">
@@ -15,10 +15,23 @@
         ORDER BY book_url, created_at DESC
     </select>
 
+    <!-- 每个规范作品选择最近使用的书源，作为热门榜的当前可读入口。 -->
+    <select id="selectMetaByCanonicalIds" resultType="com.shanyuefang.novel.domain.entity.BookshelfBook">
+        SELECT DISTINCT ON (canonical_book_id)
+            id, canonical_book_id, book_url, book_name, author, cover_url, source_id, source_name, created_at
+        FROM t_bookshelf_book
+        WHERE canonical_book_id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        ORDER BY canonical_book_id, last_read_at DESC NULLS LAST, created_at DESC
+    </select>
+
     <!-- 热门书籍：按加入书架的用户数排序（DB 兜底查询，ZSET 为空时使用） -->
     <select id="selectHotBooks" resultType="com.shanyuefang.novel.domain.vo.HotBookVO">
         SELECT
-            book_url      AS bookUrl,
+            CASE WHEN canonical_book_id IS NULL THEN NULL ELSE canonical_book_id END AS canonicalBookId,
+            MAX(book_url) AS bookUrl,
             MAX(book_name) AS bookName,
             MAX(author)    AS author,
             MAX(cover_url) AS coverUrl,
@@ -26,7 +39,7 @@
             MAX(source_name) AS sourceName,
             COUNT(DISTINCT user_id) AS shelfCount
         FROM t_bookshelf_book
-        GROUP BY book_url
+        GROUP BY canonical_book_id, CASE WHEN canonical_book_id IS NULL THEN book_url END
         ORDER BY shelfCount DESC
         LIMIT #{limit}
     </select>

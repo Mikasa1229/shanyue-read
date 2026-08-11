@@ -10,7 +10,12 @@ import java.util.List;
 
 public interface BookshelfService {
     void addBook(long userId, AddToShelfDTO dto);
-    void removeBook(long userId, String bookUrl);
+    void removeBook(long userId, Long canonicalBookId, String bookUrl);
+
+    /** Legacy URL-only removal for callers that predate canonical work identity. */
+    default void removeBook(long userId, String bookUrl) {
+        removeBook(userId, null, bookUrl);
+    }
     Page<ShelfBookVO> listMyShelf(long userId, int page, int size);
     boolean isOnShelf(long userId, String bookUrl);
     boolean isOnShelf(long userId, Long canonicalBookId, String bookUrl);

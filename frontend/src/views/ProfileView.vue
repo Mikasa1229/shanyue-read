@@ -347,7 +347,7 @@ function goReadFav(book) {
 
 async function removeFav(book) {
   try {
-    await apiRemoveFavorite(book.bookUrl)
+    await apiRemoveFavorite(book)
     favorites.value = favorites.value.filter(b => b.id !== book.id)
     show('已取消收藏')
   } catch (e) {
