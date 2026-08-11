@@ -109,6 +109,19 @@ public class KnowledgeIndexJobServiceImpl implements KnowledgeIndexJobService {
     }
 
     @Override
+    public KnowledgeIndexJob find(long jobId) { return jobMapper.selectById(jobId); }
+
+    @Override
+    public List<KnowledgeIndexJob> pendingEmbeddingRebuilds() {
+        return jobMapper.selectList(Wrappers.<KnowledgeIndexJob>lambdaQuery()
+                .eq(KnowledgeIndexJob::getJobType, "EMBEDDING_REBUILD")
+                .eq(KnowledgeIndexJob::getStatus, "PENDING"));
+    }
+
+    @Override
+    public void recoverInterruptedEmbeddingRebuilds() { jobMapper.recoverInterruptedEmbeddingRebuilds(); }
+
+    @Override
     public void complete(long jobId) {
         updateStatus(jobId, "COMPLETED", null);
     }
@@ -165,6 +178,12 @@ public class KnowledgeIndexJobServiceImpl implements KnowledgeIndexJobService {
     public boolean isDeleteJob(long jobId) {
         KnowledgeIndexJob job = jobMapper.selectById(jobId);
         return job != null && "BOOK_DELETE".equals(job.getJobType());
+    }
+
+    @Override
+    public boolean isEmbeddingRebuildJob(long jobId) {
+        KnowledgeIndexJob job = jobMapper.selectById(jobId);
+        return job != null && "EMBEDDING_REBUILD".equals(job.getJobType());
     }
 
     private void updateStatus(long jobId, String status, String errorMessage) {

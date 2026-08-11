@@ -11,4 +11,8 @@ public interface KnowledgeIndexJobMapper extends BaseMapper<KnowledgeIndexJob> {
     @Update("UPDATE t_knowledge_index_job SET status = 'PROCESSING', updated_at = CURRENT_TIMESTAMP "
             + "WHERE id = #{jobId} AND status = 'PENDING'")
     int claimEmbeddingRebuild(@Param("jobId") long jobId);
+
+    @Update("UPDATE t_knowledge_index_job SET status = 'PENDING', updated_at = CURRENT_TIMESTAMP " +
+            "WHERE job_type = 'EMBEDDING_REBUILD' AND status = 'PROCESSING'")
+    int recoverInterruptedEmbeddingRebuilds();
 }

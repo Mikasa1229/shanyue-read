@@ -48,8 +48,8 @@ public class InternalAgentOperationsController {
     public R<Void> retry(@RequestHeader("X-Agent-Internal-Token") String token, @PathVariable long jobId) {
         internalAccess.require(token);
         Map<String, Object> payload = indexJobService.prepareRetry(jobId);
-        rabbitTemplate.convertAndSend(KnowledgeMessagingConfig.EXCHANGE,
-                indexJobService.isDeleteJob(jobId) ? KnowledgeMessagingConfig.DELETE_ROUTING_KEY : KnowledgeMessagingConfig.ROUTING_KEY, payload);
+        rabbitTemplate.convertAndSend(KnowledgeMessagingConfig.EXCHANGE, routingKey(jobId),
+                indexJobService.isEmbeddingRebuildJob(jobId) ? Map.of("jobId", jobId) : payload);
         return R.ok();
     }
 
@@ -74,4 +74,11 @@ public class InternalAgentOperationsController {
         value.setUpdatedAt(job.getUpdatedAt());
         return value;
     }
+
+    private String routingKey(long jobId) {
+        if (indexJobService.isDeleteJob(jobId)) return KnowledgeMessagingConfig.DELETE_ROUTING_KEY;
+        if (indexJobService.isEmbeddingRebuildJob(jobId)) return KnowledgeMessagingConfig.EMBEDDING_REBUILD_ROUTING_KEY;
+        return KnowledgeMessagingConfig.ROUTING_KEY;
+    }
+
 }

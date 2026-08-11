@@ -49,7 +49,6 @@ import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Comparator;
 import java.time.LocalDateTime;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import com.shanyuefang.common.result.ResultCode;
 import jakarta.validation.Valid;
@@ -91,8 +90,8 @@ public class AgentAdminController {
     public R<Void> retry(@RequestHeader("X-User-Id") long userId, @PathVariable long jobId) {
         adminAccess.require(userId);
         Map<String, Object> payload = indexJobService.prepareRetry(jobId);
-        rabbitTemplate.convertAndSend(KnowledgeMessagingConfig.EXCHANGE,
-                indexJobService.isDeleteJob(jobId) ? KnowledgeMessagingConfig.DELETE_ROUTING_KEY : KnowledgeMessagingConfig.ROUTING_KEY, payload);
+        rabbitTemplate.convertAndSend(KnowledgeMessagingConfig.EXCHANGE, routingKey(jobId),
+                indexJobService.isEmbeddingRebuildJob(jobId) ? Map.of("jobId", jobId) : payload);
         return R.ok();
     }
     @PostMapping("/books/{canonicalBookId}/graph:rebuild")
@@ -115,19 +114,17 @@ public class AgentAdminController {
         adminAccess.requireAdmin(userId);
         if (canonicalBookId <= 0) return R.fail(ResultCode.PARAM_ERROR, "Canonical book ID must be positive");
         var job = indexJobService.beginEmbeddingRebuild(canonicalBookId);
-        if (!indexJobService.claimEmbeddingRebuild(job.getId())) {
-            return R.ok(Map.of("canonicalBookId", canonicalBookId, "jobId", job.getId(), "status", job.getStatus()));
-        }
-        CompletableFuture.runAsync(() -> {
-            try {
-                knowledgeService.reembedBookEvidence(canonicalBookId);
-                indexJobService.complete(job.getId());
-            } catch (Exception exception) {
-                indexJobService.fail(job.getId(), exception);
-            }
-        });
+        rabbitTemplate.convertAndSend(KnowledgeMessagingConfig.EXCHANGE,
+                KnowledgeMessagingConfig.EMBEDDING_REBUILD_ROUTING_KEY, Map.of("jobId", job.getId()));
         return R.ok(Map.of("canonicalBookId", canonicalBookId, "jobId", job.getId(), "status", "QUEUED"));
     }
+
+    private String routingKey(long jobId) {
+        if (indexJobService.isDeleteJob(jobId)) return KnowledgeMessagingConfig.DELETE_ROUTING_KEY;
+        if (indexJobService.isEmbeddingRebuildJob(jobId)) return KnowledgeMessagingConfig.EMBEDDING_REBUILD_ROUTING_KEY;
+        return KnowledgeMessagingConfig.ROUTING_KEY;
+    }
+
     @GetMapping("/books/{canonicalBookId}/graph-review-claims")
     public R<List<GraphReviewClaimVO>> graphReviewClaims(@RequestHeader("X-User-Id") long userId, @PathVariable long canonicalBookId,
                                                            @RequestParam(defaultValue = "30") int limit) {

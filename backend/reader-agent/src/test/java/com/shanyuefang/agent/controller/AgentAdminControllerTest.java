@@ -13,6 +13,9 @@ import com.shanyuefang.agent.service.ModelPricingService;
 import com.shanyuefang.agent.service.ModelRouteService;
 import com.shanyuefang.agent.service.PromptVersionService;
 import com.shanyuefang.agent.service.RecommendationExperimentService;
+import com.shanyuefang.agent.service.BookKnowledgeBuildService;
+import com.shanyuefang.agent.config.KnowledgeMessagingConfig;
+import com.shanyuefang.agent.domain.entity.KnowledgeIndexJob;
 import com.shanyuefang.common.result.R;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class AgentAdminControllerTest {
@@ -47,6 +51,7 @@ class AgentAdminControllerTest {
     @Mock private RecommendationExperimentService recommendationExperimentService;
     @Mock private AgentEvaluationService evaluationService;
     @Mock private KnowledgeService knowledgeService;
+    @Mock private BookKnowledgeBuildService bookKnowledgeBuildService;
 
     @InjectMocks private AgentAdminController controller;
 
@@ -86,5 +91,20 @@ class AgentAdminControllerTest {
         assertFalse(row.containsKey("sessionId"));
         assertFalse(row.containsKey("requestId"));
         assertFalse(row.containsKey("prompt"));
+    }
+
+    @Test
+    void embeddingRebuildIsEnqueuedInsteadOfRunningInTheWebRequestProcess() {
+        doNothing().when(adminAccess).requireAdmin(42L);
+        KnowledgeIndexJob job = new KnowledgeIndexJob(); job.setId(88L); job.setStatus("PENDING");
+        when(indexJobService.beginEmbeddingRebuild(9L)).thenReturn(job);
+
+        R<Map<String, Object>> response = controller.rebuildEmbeddings(42L, 9L);
+
+        assertEquals(200, response.getCode());
+        assertEquals("QUEUED", response.getData().get("status"));
+        verify(rabbitTemplate).convertAndSend(KnowledgeMessagingConfig.EXCHANGE,
+                KnowledgeMessagingConfig.EMBEDDING_REBUILD_ROUTING_KEY, Map.of("jobId", 88L));
+        org.mockito.Mockito.verifyNoInteractions(knowledgeService);
     }
 }
