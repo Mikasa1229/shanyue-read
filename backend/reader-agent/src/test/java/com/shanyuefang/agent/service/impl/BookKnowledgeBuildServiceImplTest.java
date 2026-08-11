@@ -195,6 +195,33 @@ class BookKnowledgeBuildServiceImplTest {
         assertEquals(false, result.get("requiresBuild"));
     }
 
+    @Test
+    void deletingAnOwnedGraphDeletesAllBookKnowledgeAssets() {
+        BookKnowledgeSpace space = new BookKnowledgeSpace();
+        space.setCanonicalBookId(9L);
+        space.setOwnerUserId(1L);
+        space.setStatus("READY");
+        space.setCompletedChapters(35);
+        BookKnowledgeSpaceMapper spaceMapper = mock(BookKnowledgeSpaceMapper.class);
+        BookKnowledgeChapterCoverageMapper coverageMapper = mock(BookKnowledgeChapterCoverageMapper.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        when(spaceMapper.selectById(9L)).thenReturn(space);
+        BookKnowledgeBuildServiceImpl service = new BookKnowledgeBuildServiceImpl(
+                mock(BookKnowledgeBuildTaskMapper.class), coverageMapper, spaceMapper, mock(KnowledgeChunkMapper.class),
+                mock(KnowledgeGraphNodeMapper.class), mock(UserModelConfigMapper.class), mock(ApiKeyCipher.class), new AgentProperties(),
+                knowledgeService, mock(UserCreditFeignClient.class), mock(CommentPublishFeignClient.class), mock(CanonicalBookFeignClient.class));
+
+        service.deleteOwnedGraph(1L, 9L);
+
+        verify(knowledgeService).deleteBookKnowledge(9L);
+        verify(knowledgeService, never()).clearGraph(9L);
+        verify(coverageMapper).delete(any(Wrapper.class));
+        ArgumentCaptor<BookKnowledgeSpace> saved = ArgumentCaptor.forClass(BookKnowledgeSpace.class);
+        verify(spaceMapper).updateById(saved.capture());
+        assertEquals("NOT_BUILT", saved.getValue().getStatus());
+        assertEquals(0, saved.getValue().getCompletedChapters());
+    }
+
     private KnowledgeChunk chunk(int chapter, String content) {
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setChapterIndex(chapter);

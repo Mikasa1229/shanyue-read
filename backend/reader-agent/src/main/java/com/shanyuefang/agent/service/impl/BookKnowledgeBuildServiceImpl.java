@@ -187,7 +187,8 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         if ("QUEUED".equals(space.getStatus()) || "RUNNING".equals(space.getStatus())) {
             throw new BusinessException(ResultCode.CONFLICT, "图谱构建中，不能删除");
         }
-        knowledgeService.clearGraph(canonicalBookId);
+        // A user-initiated deletion must remove the indexed source and vectors too, not only its graph projection.
+        knowledgeService.deleteBookKnowledge(canonicalBookId);
         coverageMapper.delete(Wrappers.<BookKnowledgeChapterCoverage>lambdaQuery()
                 .eq(BookKnowledgeChapterCoverage::getCanonicalBookId, canonicalBookId));
         space.setStatus("NOT_BUILT"); space.setCompletedChapters(0); space.setFailureMessage(null);

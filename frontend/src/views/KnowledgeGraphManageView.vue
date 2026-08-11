@@ -13,11 +13,11 @@
           <img v-if="item.book.coverUrl" :src="item.book.coverUrl" :alt="item.book.bookName" />
           <div class="graph-book"><span>{{ statusLabel(item.status?.status) }}</span><h2>《{{ item.book.bookName }}》</h2><p>{{ item.book.author || '作者信息待补充' }} · 已读至第 {{ Number(item.book.lastChapterIndex || 0) + 1 }} 章</p></div>
           <div class="graph-range"><small>知识覆盖</small><strong>{{ coverageLabel(item.status) }}</strong><i><b :style="{ width: `${coveragePercent(item.status)}%` }" /></i></div>
-          <div class="graph-sharing"><small>可见范围</small><strong>{{ item.status?.isPublic ? '公开共享' : item.status?.isOwner ? '仅自己可见' : '公共图谱' }}</strong></div>
+          <div class="graph-sharing"><small>可见范围</small><strong>{{ sharingLabel(item.status) }}</strong></div>
           <div class="graph-actions">
             <button type="button" @click="openInsight(item.book)">查看</button>
-            <button v-if="item.status?.isOwner" type="button" @click="toggleSharing(item)">{{ item.status.isPublic ? '转为私有' : '公开共享' }}</button>
-            <button v-if="item.status?.isOwner" type="button" class="danger" @click="removeGraph(item)">删除图谱</button>
+            <button v-if="canManageSharing(item.status)" type="button" @click="toggleSharing(item)">{{ item.status.isPublic ? '转为私有' : '公开共享' }}</button>
+            <button v-if="canDeleteGraph(item.status)" type="button" class="danger" @click="removeGraph(item)">删除图谱</button>
           </div>
         </article>
       </section>
@@ -39,6 +39,14 @@ const error = ref('')
 const items = ref([])
 
 function statusLabel(status) { return ({ READY: '已构建', RUNNING: '构建中', QUEUED: '等待构建', FAILED: '构建失败' })[status] || '尚未构建' }
+function sharingLabel(status) {
+  if (!status || status.status === 'NOT_BUILT') return '未创建'
+  if (status.status === 'QUEUED' || status.status === 'RUNNING') return '构建中不可共享'
+  if (status.status === 'FAILED') return '构建失败'
+  return status.isPublic ? '公开共享' : status.isOwner ? '仅自己可见' : '公共图谱'
+}
+function canManageSharing(status) { return status?.isOwner && status.status === 'READY' }
+function canDeleteGraph(status) { return status?.isOwner && ['READY', 'FAILED'].includes(status.status) }
 function coverageLabel(status) {
   if (!status?.coveredChapters) return '暂无覆盖'
   return `第 ${Number(status.startChapter || 1)} 至 ${Number(status.endChapter || status.coveredChapters)} 章`
@@ -55,8 +63,8 @@ async function toggleSharing(item) {
   catch (e) { toast.error(e.message || '共享设置更新失败') }
 }
 async function removeGraph(item) {
-  if (!window.confirm(`确定删除《${item.book.bookName}》的知识图谱吗？这会清除实体、关系、线索和事件数据。`)) return
-  try { await apiDeleteOwnedBookKnowledge(item.book.canonicalBookId); item.status = { status: 'NOT_BUILT', isOwner: false, isPublic: false, coveredChapters: 0 }; toast.success('知识图谱已删除') }
+  if (!window.confirm(`确定删除《${item.book.bookName}》的全部知识资产吗？这会清除已构建的文档、向量、实体、关系、线索和事件数据。`)) return
+  try { await apiDeleteOwnedBookKnowledge(item.book.canonicalBookId); item.status = { ...item.status, status: 'NOT_BUILT', isPublic: false, coveredChapters: 0 }; toast.success('该作品的全部知识资产已删除') }
   catch (e) { toast.error(e.message || '知识图谱删除失败') }
 }
 onMounted(async () => {
