@@ -214,13 +214,20 @@
             <div v-if="insightError" class="card insight-error" role="alert"><strong>这次洞察没有完成</strong><p>{{ insightError }}</p><button class="btn btn-ghost btn-sm" type="button" @click="loadInsights">重新分析</button></div>
             <div v-else-if="insightLoaded" class="insight-grid">
           <article v-show="insightMode === 'capsule'" class="insight-card card capsule-card"><p class="capsule-lead">{{ capsule?.summary || '暂时没有可用的阶段剧情总结。' }}</p><details v-if="capsule?.timeline?.length" class="capsule-evidence"><summary>查看章节脉络与依据</summary><ul><li v-for="item in capsule.timeline.slice(-8)" :key="item"><span class="capsule-summary">{{ item }}</span><button class="evidence-jump" @click="openInsightChapter(timelineChapter(item))">打开章节</button></li></ul></details><small>{{ capsule?.safetyNote }} 回忆正文展示概括，章节依据默认折叠。</small></article>
-          <article v-show="insightMode === 'graph'" class="insight-card card graph-card">
+          <article v-if="insightMode === 'graph'" class="insight-card card graph-card">
             <p class="graph-intro">汇集人物、地点、组织、事件与线索。人物之间只标注稳定关系；剧情动作通过事件节点表达，并保留参与、发生地点和事件推进等关联。</p>
             <p v-if="!graph.nodes?.length">当前还没有足够的已读内容来建立知识图谱。</p>
             <template v-else>
               <div class="globe-toolbar">
-                <div class="graph-tools" aria-label="图谱类型筛选"><button v-for="type in graphTypes" :key="type" :class="{ active: graphTypeFilter === type }" @click="graphTypeFilter = type">{{ graphTypeLabel(type) }}</button></div>
-                <div class="globe-toolbar-status"><label class="globe-node-search"><span>搜索节点</span><input v-model="graphSearch" type="search" placeholder="输入人物、地点或事件" @keydown.stop /></label><b>{{ visibleGraphNodes.length }}</b> 个节点 · <b>{{ visibleGraphEdges.length }}</b> 条已验证关系 <button v-if="focusedGraphNodeId || graphSearch" type="button" @click="clearGraphFocus">显示全部</button><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="globe-expand" @click="openRelationshipCanvas">全屏查看</button></div>
+                <div class="globe-toolbar-row globe-toolbar-query">
+                  <div class="graph-tools" aria-label="图谱类型筛选"><button v-for="type in graphTypes" :key="type" :class="{ active: graphTypeFilter === type }" @click="graphTypeFilter = type">{{ graphTypeLabel(type) }}</button></div>
+                  <label class="globe-node-search"><span>搜索节点</span><input v-model="graphSearch" type="search" placeholder="输入人物、地点或事件" @keydown.stop /></label>
+                </div>
+                <div class="globe-toolbar-row globe-toolbar-status">
+                  <div class="globe-stats"><span><b>{{ visibleGraphNodes.length }}</b>节点</span><span><b>{{ visibleGraphEdges.length }}</b>关系</span></div>
+                  <span v-if="!focusedGraphNodeId && !graphSearch" class="globe-primary-note">主要关系预览 <i></i> 全部图谱请全屏查看</span>
+                  <div class="globe-toolbar-actions"><button v-if="focusedGraphNodeId || graphSearch" type="button" @click="clearGraphFocus">显示全部</button><button type="button" @click="resetRelationshipGlobe">回到正面</button><button type="button" class="globe-expand" @click="openRelationshipCanvas">全屏查看</button></div>
+                </div>
               </div>
               <div class="relationship-globe-shell">
                 <canvas ref="relationshipGlobe" class="relationship-globe" role="img" tabindex="0" aria-label="可旋转的小说知识图谱。拖动旋转，点击节点或连线查看依据。" @pointerdown="onGlobePointerDown" @pointermove="onGlobePointerMove" @pointerup="onGlobePointerUp" @pointercancel="onGlobePointerUp" @wheel.prevent="onGlobeWheel"></canvas>
@@ -465,6 +472,35 @@ const visibleGraph = computed(() => {
   if (searchTerm) {
     const matchedIds = new Set(nodes.filter(node => primaryIds.has(String(node.id)) && graphNodeSearchText(node).includes(searchTerm))
       .map(node => String(node.id)))
+    // The embedded globe is a preview, so a broad search must not turn it into the full graph.
+    // Full screen intentionally retains every matching node and its surrounding context.
+    if (!showRelationshipCanvas.value) {
+      const degree = new Map(nodes.map(node => [String(node.id), 0]))
+      eligibleEdges.forEach(edge => {
+        degree.set(String(edge.source), (degree.get(String(edge.source)) || 0) + 1)
+        degree.set(String(edge.target), (degree.get(String(edge.target)) || 0) + 1)
+      })
+      const compareMatch = (left, right) => {
+        const leftMatched = matchedIds.has(String(left.id)) ? 1 : 0
+        const rightMatched = matchedIds.has(String(right.id)) ? 1 : 0
+        if (leftMatched !== rightMatched) return rightMatched - leftMatched
+        return (degree.get(String(right.id)) || 0) - (degree.get(String(left.id)) || 0)
+      }
+      const selectedIds = new Set([...matchedIds].slice(0, 8))
+      const rankedEdges = [...eligibleEdges].sort((left, right) => Number(right.confidence || 0) - Number(left.confidence || 0))
+      for (const edge of rankedEdges) {
+        const touchesMatch = matchedIds.has(String(edge.source)) || matchedIds.has(String(edge.target))
+        const additions = [String(edge.source), String(edge.target)].filter(id => !selectedIds.has(id))
+        if (!touchesMatch || selectedIds.size + additions.length > 12) continue
+        additions.forEach(id => selectedIds.add(id))
+      }
+      const selectedNodes = nodes.filter(node => selectedIds.has(String(node.id))).sort(compareMatch)
+      const selectedNodeIds = new Set(selectedNodes.map(node => String(node.id)))
+      return {
+        nodes: selectedNodes,
+        edges: eligibleEdges.filter(edge => selectedNodeIds.has(String(edge.source)) && selectedNodeIds.has(String(edge.target)))
+      }
+    }
     const neighborIds = new Set(matchedIds)
     eligibleEdges.forEach(edge => {
       if (matchedIds.has(String(edge.source)) || matchedIds.has(String(edge.target))) {
@@ -493,7 +529,11 @@ const visibleGraph = computed(() => {
     if (chapterDifference) return chapterDifference
     return Number(right.confidence || 0) - Number(left.confidence || 0)
   }
-  // Both canvases intentionally share the same focused graph; full-screen only changes canvas size.
+  // Keep the embedded globe legible by showing its strongest relations. The full-screen canvas
+  // is the explicit route to inspect every returned node and relation.
+  if (isAllTypes && showRelationshipCanvas.value) {
+    return { nodes: [...nodes].sort(compareNodes), edges: eligibleEdges }
+  }
   const selectedIds = new Set()
   // Select complete high-value relations first; this prevents the old "top 12 nodes, zero edges" result.
   const rankedEdges = [...eligibleEdges].sort((left, right) => {
@@ -958,7 +998,11 @@ watch(graphSearch, () => {
     selectedGraphEvidence.value = null
   }
 })
-watch([visibleGraphNodes, visibleGraphEdges, insightMode, showRelationshipCanvas], () => nextTick(requestRelationshipGlobeRender), { deep: true })
+watch([
+  () => insightMode.value === 'graph' && visibleGraphNodes.value,
+  () => insightMode.value === 'graph' && visibleGraphEdges.value,
+  showRelationshipCanvas
+], () => nextTick(requestRelationshipGlobeRender), { deep: true })
 
 async function load() {
   pageLoading.value = true
@@ -1464,6 +1508,10 @@ async function loadInsights() {
     ])
     const [graphResult, clueResult, timelineResult, readingMapResult, similarResult, capsuleResult] = results
     const unavailable = results.filter(result => result.status === 'rejected').length
+    // Do not carry a previous search into newly loaded graph data: it expands the result set
+    // and makes the first insight render needlessly expensive.
+    graphSearch.value = ''
+    focusedGraphNodeId.value = null
     graph.value = graphResult.status === 'fulfilled' ? graphResult.value : { nodes: [], edges: [] }
     graphTypeFilter.value = 'ALL'
     selectedGraphEvidence.value = null
@@ -1981,11 +2029,17 @@ onBeforeUnmount(() => {
 .graph-card-title > span { min-width:34px; margin:4px 0 0!important; color:var(--agent-coral)!important; font-family:var(--font-serif); font-size:2.4rem!important; line-height:.78; }
 .graph-card-title h2 { margin:0 0 8px!important; }
 .graph-card-title p { max-width:680px; margin:0!important; color:var(--agent-ink-soft)!important; font-size:.78rem; line-height:1.55!important; }
-.globe-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; flex:0 0 auto; margin:17px 0 10px; }
-.globe-toolbar .graph-tools { margin:0; }
-.globe-toolbar-status { display:flex; align-items:center; gap:5px; color:rgba(255,250,240,.66); font-size:.68rem; }
-.globe-toolbar-status b { color:var(--agent-lime); font-family:var(--font-serif); font-size:1rem; }
-.globe-toolbar-status button { margin-left:7px; border:1px solid rgba(255,250,240,.24); border-radius:99px; padding:5px 8px; color:#fffaf0; background:rgba(255,253,247,.08); cursor:pointer; font:inherit; font-size:.64rem; font-weight:800; }
+.globe-toolbar { --globe-toolbar-font-size:.82rem; display:block; flex:0 0 auto; margin:17px 0 10px; }
+.globe-toolbar .graph-tools { display:flex; flex:0 0 auto; margin:0; }
+.globe-toolbar .graph-tools button { font-size:var(--globe-toolbar-font-size); }
+.globe-toolbar-row { display:flex; align-items:center; gap:10px; width:100%; box-sizing:border-box; }
+.globe-toolbar-query { min-height:38px; padding:0 5px; font-size:var(--globe-toolbar-font-size); }
+.globe-toolbar-status { min-height:40px; padding:7px 9px; color:#36505a; font-size:var(--globe-toolbar-font-size); }
+.globe-toolbar-status b { display:inline; color:#365f38; font-family:inherit; font-size:inherit; line-height:inherit; }
+.globe-stats { display:flex; align-items:center; gap:8px; color:#547078; font-size:inherit; font-weight:800; white-space:nowrap; }.globe-toolbar .globe-stats span { color:inherit; font-family:inherit; font-size:var(--globe-toolbar-font-size); white-space:nowrap; }.globe-toolbar .globe-stats span + span { border-left:1px solid rgba(16,44,50,.13); padding-left:8px; }
+.globe-toolbar .globe-primary-note { display:flex; align-items:center; min-width:0; gap:7px; margin-left:auto; color:#987234; font-family:inherit; font-size:var(--globe-toolbar-font-size); font-weight:800; line-height:1.2; white-space:nowrap; }.globe-primary-note i { display:block; flex:0 0 auto; width:16px; height:1px; background:#c79b50; }
+.globe-toolbar-actions { display:flex; align-items:center; justify-content:flex-end; gap:5px; }
+.globe-toolbar-status button { margin-left:7px; border:1px solid rgba(255,250,240,.24); border-radius:99px; padding:5px 8px; color:#fffaf0; background:rgba(255,253,247,.08); cursor:pointer; font:inherit; font-size:var(--globe-toolbar-font-size); font-weight:800; }
 .globe-toolbar-status button:hover { border-color:var(--agent-lime); color:var(--agent-lime); }
 .relationship-globe-shell { position:relative; flex:1 1 370px; min-height:360px; overflow:hidden; border:1px solid rgba(184,214,125,.34); border-radius:20px; background:radial-gradient(circle at 50% 45%,#173f4d 0,#102f3b 46%,#09232f 100%); box-shadow:inset 0 0 70px rgba(0,0,0,.26),0 16px 34px rgba(16,44,50,.14); }
 .relationship-globe-shell::before { content:''; position:absolute; inset:0; pointer-events:none; opacity:.45; background-image:radial-gradient(rgba(230,255,238,.6) 1px,transparent 1.4px),radial-gradient(rgba(230,255,238,.35) 1px,transparent 1.4px); background-position:18px 26px,86px 62px; background-size:132px 132px,196px 196px; }
@@ -2010,7 +2064,8 @@ onBeforeUnmount(() => {
 .reading-map-card .reading-map-events.story-thread { display:grid; grid-template-columns:1fr; gap:0; max-height:none; margin:0; padding:4px 0 0; overflow:auto; list-style:none; }.story-thread li { position:relative; display:grid!important; grid-template-columns:46px minmax(0,1fr); gap:0 12px; margin:0!important; padding:0!important; border:0!important; border-radius:0!important; background:transparent!important; }.event-marker { position:relative; z-index:1; display:grid; place-items:start center; padding-top:14px; }.event-marker::after { content:''; position:absolute; top:42px; bottom:-13px; width:1px; background:rgba(16,44,50,.15); }.story-thread li:last-child .event-marker::after { display:none; }.event-marker b { display:grid; width:29px; height:29px; place-items:center; border:1px solid rgba(212,97,69,.42); border-radius:50%; color:var(--agent-coral); background:#fffdf7; font-size:.62rem; }.event-card { margin-bottom:12px; border:1px solid rgba(16,44,50,.11); border-radius:12px; padding:13px 14px; background:rgba(255,253,247,.78); }.event-card > div { display:flex; align-items:center; gap:8px; }.event-card em { border-radius:99px; padding:3px 6px; color:#54796d; background:rgba(184,214,125,.22); font-size:.58rem; font-style:normal; font-weight:800; }.event-card strong { min-width:0; color:var(--agent-ink); font-family:var(--font-serif); font-size:.94rem; }.event-card p { margin:8px 0!important; font-size:.72rem!important; line-height:1.55!important; }.event-card footer { display:flex; align-items:center; gap:9px; }.event-card footer small { color:var(--agent-ink-soft); }.event-card footer > span { border-left:2px solid var(--agent-lime); padding-left:6px; color:#54796d; font-size:.62rem; font-weight:800; }.event-card .evidence-jump { margin:0 0 0 auto; }.event-connector { grid-column:2; position:relative; z-index:1; min-height:17px; padding:0 0 3px; color:#54796d; font-size:.6rem; font-weight:800; }.event-connector span { display:inline-block; padding:2px 6px; border-radius:5px; background:rgba(184,214,125,.18); }.map-footnote { margin-top:8px; }
 @media (min-width:1080px) { .insight-stage .graph-card { min-height:0!important; }.relationship-globe-shell { min-height:0; }.insight-stage .graph-card .relationship-globe { height:100%!important; margin:0!important; border:0!important; border-radius:0!important; background:transparent!important; } }
 @media (max-width:900px) { .relationship-globe-shell { flex-basis:430px; }.graph-inspector { grid-template-columns:1fr; }.graph-node-list { grid-template-columns:repeat(5,minmax(100px,1fr)); overflow-x:auto; padding-bottom:3px; }.graph-node-list button { min-width:100px; } }
-@media (max-width:600px) { .graph-card-title > span { font-size:1.9rem!important; }.graph-card-title p { font-size:.7rem; }.globe-toolbar-status { width:100%; justify-content:space-between; }.relationship-globe-shell { flex-basis:390px; min-height:390px; border-radius:15px; }.globe-hud-top { top:11px; left:12px; }.globe-hud-top span:last-child { display:none; }.globe-hud-bottom { right:11px; bottom:10px; gap:7px; font-size:.53rem; }.graph-inspector { margin-top:9px; }.graph-evidence,.graph-evidence.graph-evidence-empty { min-height:0; }.graph-node-list { display:none; } }
+@media (max-width:1120px) { .globe-toolbar-status { flex-wrap:wrap; }.globe-primary-note { margin-left:0; }.globe-toolbar-actions { margin-left:auto; } }
+@media (max-width:600px) { .graph-card-title > span { font-size:1.9rem!important; }.graph-card-title p { font-size:.7rem; }.globe-toolbar-query { align-items:flex-start; flex-direction:column; padding:5px 0; }.globe-stats { display:none; }.globe-primary-note { flex-basis:100%; order:4; }.globe-toolbar-actions { width:100%; margin-left:0; justify-content:flex-start; }.relationship-globe-shell { flex-basis:390px; min-height:390px; border-radius:15px; }.globe-hud-top { top:11px; left:12px; }.globe-hud-top span:last-child { display:none; }.globe-hud-bottom { right:11px; bottom:10px; gap:7px; font-size:.53rem; }.graph-inspector { margin-top:9px; }.graph-evidence,.graph-evidence.graph-evidence-empty { min-height:0; }.graph-node-list { display:none; } }
 @media (max-width:760px) { .relationship-canvas-head { gap:14px; padding:18px 18px 14px; }.relationship-canvas-head > div:last-child { max-width:none; justify-content:flex-start; }.canvas-node-search { flex:1 1 100%; justify-content:space-between; }.canvas-node-search input { flex:1; width:auto; }.relationship-canvas-foot { align-items:flex-start; flex-direction:column; gap:9px; padding:11px 18px; } }
 </style>
 
@@ -2021,8 +2076,8 @@ onBeforeUnmount(() => {
 .globe-toolbar-status button { border-color:rgba(16,44,50,.2); color:#24434c; background:#f4f0df; }
 .globe-toolbar-status button:hover { border-color:#547a45; color:#315f37; background:#edf4d7; }
 .globe-node-search { display:inline-flex; align-items:center; gap:6px; min-width:0; }
-.globe-node-search span,.canvas-node-search span { color:inherit; font-size:.62rem; font-weight:800; white-space:nowrap; }
-.globe-node-search input { width:155px; min-width:0; border:1px solid rgba(16,44,50,.18); border-radius:99px; padding:6px 9px; color:#24434c; background:#fffefa; outline:0; font:inherit; font-size:.67rem; }
+.globe-toolbar .globe-node-search span { color:inherit; font-family:inherit; font-size:var(--globe-toolbar-font-size); font-weight:800; white-space:nowrap; }.canvas-node-search span { color:inherit; font-size:.62rem; font-weight:800; white-space:nowrap; }
+.globe-node-search input { width:155px; min-width:0; border:1px solid rgba(16,44,50,.18); border-radius:99px; padding:6px 9px; color:#24434c; background:#fffefa; outline:0; font:inherit; font-size:var(--globe-toolbar-font-size); }
 .globe-node-search input::placeholder { color:#789096; }
 .globe-node-search input:focus { border-color:#547a45; box-shadow:0 0 0 3px rgba(84,122,69,.13); }
 .canvas-node-search { display:inline-flex; align-items:center; gap:6px; min-width:0; color:#d9f1e7; }
