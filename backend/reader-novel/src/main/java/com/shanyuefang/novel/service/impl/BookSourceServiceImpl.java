@@ -142,7 +142,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                 log.warn("书源导入跳过（解析失败）: {}", e.getMessage());
             }
         }
-        AGGREGATE_SEARCH_CACHE.invalidateAll();
+        AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
         log.info("书源导入完成，共保存 {} 条", saved);
         return saved;
     }
@@ -166,7 +166,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         if (bs == null) throw new BusinessException(ResultCode.NOT_FOUND, "书源不存在");
         bs.setEnabled(!Boolean.TRUE.equals(bs.getEnabled()));
         updateById(bs);
-        AGGREGATE_SEARCH_CACHE.invalidateAll();
+        AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
     }
 
     @Override
@@ -175,7 +175,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         BookSource bs = getById(id);
         if (bs == null) throw new BusinessException(ResultCode.NOT_FOUND, "书源不存在");
         removeById(id);
-        AGGREGATE_SEARCH_CACHE.invalidateAll();
+        AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
         List<Long> orphanedWorks = canonicalBookService.detachSource(id);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCommit() { orphanedWorks.forEach(knowledgeIndexPublisher::publishDelete); }
@@ -636,7 +636,11 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
     @Override
     public List<SearchBookVO> aggregateSearch(String keyword, int page) {
-        return deduplicateAggregateResults(aggregateSourceResults(keyword, page));
+        return deduplicateAggregateResults(aggregateSourceResults(keyword, page)).stream()
+                .sorted(Comparator.<SearchBookVO>comparingInt(book -> searchRelevance(keyword, book.getName(), book.getAuthor()))
+                        .thenComparing(Comparator.comparingInt(this::resultQuality).reversed())
+                        .thenComparing(SearchBookVO::getName, Comparator.nullsLast(String::compareTo)))
+                .toList();
     }
 
     @Override
@@ -647,7 +651,8 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                 .collect(java.util.stream.Collectors.groupingBy(SearchBookVO::getCanonicalBookId,
                         LinkedHashMap::new, java.util.stream.Collectors.toList()));
         return grouped.entrySet().stream().map(entry -> aggregateBook(entry.getKey(), entry.getValue()))
-                .sorted(Comparator.comparingInt(AggregatedBookVO::getSourceCount).reversed()
+                .sorted(Comparator.<AggregatedBookVO>comparingInt(book -> searchRelevance(keyword, book.getName(), book.getAuthor()))
+                        .thenComparing(Comparator.comparingInt(AggregatedBookVO::getSourceCount).reversed())
                         .thenComparing(AggregatedBookVO::getName, Comparator.nullsLast(String::compareTo)))
                 .toList();
     }
@@ -793,6 +798,33 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         if (StringUtils.hasText(book.getCoverUrl())) score += 1;
         if (StringUtils.hasText(book.getBookUrl())) score += 1;
         return score;
+    }
+
+    /**
+     * Sort search results by what the reader typed before using metadata completeness or source count.
+     * This is deliberately based on fields returned by every source instead of source-specific rules.
+     */
+    static int searchRelevance(String keyword, String title, String author) {
+        String query = normalizedSearchText(keyword);
+        if (query.isEmpty()) return 0;
+        String normalizedTitle = normalizedSearchText(title);
+        if (normalizedTitle.equals(query)) return 0;
+        if (normalizedTitle.startsWith(query)) return 100 + normalizedTitle.length() - query.length();
+        int titleMatchIndex = normalizedTitle.indexOf(query);
+        if (titleMatchIndex >= 0) return 200 + titleMatchIndex;
+
+        String normalizedAuthor = normalizedSearchText(author);
+        if (normalizedAuthor.equals(query)) return 300;
+        if (normalizedAuthor.startsWith(query)) return 400 + normalizedAuthor.length() - query.length();
+        int authorMatchIndex = normalizedAuthor.indexOf(query);
+        if (authorMatchIndex >= 0) return 500 + authorMatchIndex;
+        return 1_000;
+    }
+
+    private static String normalizedSearchText(String value) {
+        if (value == null) return "";
+        // Ignore display punctuation such as 《》 and spaces so the visible title matches reader intent.
+        return value.replaceAll("[\\s\\p{P}\\p{S}]+", "").toLowerCase(java.util.Locale.ROOT);
     }
 
     private String normalizedBookField(String value) {
