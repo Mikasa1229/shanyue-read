@@ -136,6 +136,12 @@ public class AgentController {
                     } catch (IOException exception) {
                         throw new IllegalStateException("SSE client disconnected", exception);
                     }
+                }, status -> {
+                    try {
+                        emitter.send(SseEmitter.event().name("tool_status").data(Map.of("status", status)));
+                    } catch (IOException exception) {
+                        throw new IllegalStateException("SSE client disconnected", exception);
+                    }
                 });
                 // Structured UI data stays outside model prose; optional previews cannot fail an answered chat.
                 try {

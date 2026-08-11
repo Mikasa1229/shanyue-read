@@ -25,7 +25,8 @@ public interface AgentService {
     Map<String, Object> exportSession(long userId, long sessionId);
     void deleteSession(long userId, long sessionId);
     AgentReplyVO chat(long userId, long sessionId, ChatMessageDTO dto);
-    AgentReplyVO streamChat(long userId, long sessionId, ChatMessageDTO dto, Consumer<String> onDelta);
+    AgentReplyVO streamChat(long userId, long sessionId, ChatMessageDTO dto, Consumer<String> onDelta,
+                            Consumer<String> onStatus);
     UserModelConfigVO saveModelConfig(long userId, SaveModelConfigDTO dto);
     List<UserModelConfigVO> listModelConfigs(long userId);
     UserModelConfigVO setModelConfigEnabled(long userId, long configId, boolean enabled);
