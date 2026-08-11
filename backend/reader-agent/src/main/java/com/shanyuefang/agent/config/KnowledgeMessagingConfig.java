@@ -9,6 +9,7 @@ import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.retry.RepublishMessageRecoverer;
 import org.springframework.amqp.rabbit.config.RetryInterceptorBuilder;
+import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -49,6 +50,19 @@ public class KnowledgeMessagingConfig {
     @Bean Binding graphBuildDeadLetterBinding() { return BindingBuilder.bind(graphBuildDeadLetterQueue()).to(agentEventsExchange()).with(GRAPH_BUILD_DEAD_LETTER_ROUTING_KEY); }
     @Bean Binding embeddingRebuildBinding() { return BindingBuilder.bind(embeddingRebuildQueue()).to(agentEventsExchange()).with(EMBEDDING_REBUILD_ROUTING_KEY); }
     @Bean Binding embeddingRebuildDeadLetterBinding() { return BindingBuilder.bind(embeddingRebuildDeadLetterQueue()).to(agentEventsExchange()).with(EMBEDDING_REBUILD_DEAD_LETTER_ROUTING_KEY); }
+
+    /** All Agent producers and listeners exchange JSON; the default Java serialization cannot be read by ObjectMapper listeners. */
+    @Bean
+    Jackson2JsonMessageConverter agentMessageConverter() {
+        return new Jackson2JsonMessageConverter();
+    }
+
+    @Bean
+    RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory, Jackson2JsonMessageConverter agentMessageConverter) {
+        RabbitTemplate template = new RabbitTemplate(connectionFactory);
+        template.setMessageConverter(agentMessageConverter);
+        return template;
+    }
 
     @Bean
     SimpleRabbitListenerContainerFactory agentRabbitListenerContainerFactory(ConnectionFactory connectionFactory,

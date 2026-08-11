@@ -3,12 +3,38 @@ package com.shanyuefang.agent.service;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.shanyuefang.agent.config.AgentProperties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StructuredGraphExtractorTest {
+    @Test
+    void graphModelClientDisablesNestedProviderRetries() throws Exception {
+        StructuredGraphExtractor extractor = new StructuredGraphExtractor(new AgentProperties(), new ObjectMapper());
+        java.lang.reflect.Method method = StructuredGraphExtractor.class.getDeclaredMethod("chatClient", StructuredGraphExtractor.ModelConfig.class,
+                org.springframework.ai.openai.OpenAiChatOptions.class);
+        method.setAccessible(true);
+        org.springframework.ai.openai.OpenAiChatClient client = (org.springframework.ai.openai.OpenAiChatClient) method.invoke(extractor,
+                new StructuredGraphExtractor.ModelConfig("test", "test-model", "https://example.invalid", "test-key"),
+                new org.springframework.ai.openai.OpenAiChatOptions());
+
+        AtomicInteger attempts = new AtomicInteger();
+        try {
+            client.retryTemplate.execute(context -> {
+                attempts.incrementAndGet();
+                throw new IllegalStateException("simulated provider failure");
+            });
+        } catch (IllegalStateException ignored) {
+            // Expected: the configured retry template must propagate the first provider failure.
+        }
+        assertEquals(1, attempts.get());
+    }
+
     @Test
     void keepsOnlyModelFactsWithVerbatimChapterEvidence() {
         String chapter = "年轻的林默在雨夜与守卫周青相遇，林默将铜钥匙交给周青。";

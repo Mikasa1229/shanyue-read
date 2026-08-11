@@ -10,7 +10,9 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatClient;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.model.function.FunctionCallbackContext;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -497,26 +499,25 @@ public class StructuredGraphExtractor {
         requestFactory.setReadTimeout(timeout);
         OpenAiApi api = new OpenAiApi(baseUrl, modelConfig.apiKey(),
                 RestClient.builder().requestFactory(requestFactory));
-        return new OpenAiChatClient(api, options);
+        // Spring AI enables provider retries by default. Graph tasks already have an explicit user retry
+        // path, so retrying a 120-second timeout internally would hide the failure for several minutes.
+        RetryTemplate noRetry = new RetryTemplate();
+        noRetry.setRetryPolicy(new org.springframework.retry.policy.SimpleRetryPolicy(1));
+        return new OpenAiChatClient(api, options, new FunctionCallbackContext(), noRetry);
     }
 
     private ModelExtraction callExtractionWithRetry(OpenAiChatClient client, OpenAiChatOptions options,
                                                     String instructions, String userContent) throws Exception {
-        Exception lastFailure = null;
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            try {
-                String retryInstruction = attempt == 1 ? instructions : instructions + "\n这是第" + attempt
-                        + "次格式重试：上次响应被截断或不符合 schema。请减少实体和关系数量，优先保证 JSON 闭合；type 不得使用 PERSON、PLACE 等未允许值。";
-                String json = client.call(new Prompt(List.of(new SystemMessage(retryInstruction),
-                        new UserMessage(userContent)), options)).getResult().getOutput().getContent();
-                return objectMapper.readValue(stripFence(json), ModelExtraction.class);
-            } catch (Exception failure) {
-                lastFailure = failure;
-                log.warn("Graph extraction provider response rejected (attempt {}/3): {}", attempt, failure.getMessage());
-                if (attempt < 3) Thread.sleep(250L * attempt);
-            }
+        try {
+            String json = client.call(new Prompt(List.of(new SystemMessage(instructions),
+                    new UserMessage(userContent)), options)).getResult().getOutput().getContent();
+            return objectMapper.readValue(stripFence(json), ModelExtraction.class);
+        } catch (Exception failure) {
+            // A graph build is intentionally fail-fast: one 120-second provider timeout is enough.
+            // Retrying it three times keeps a task at 0% for six minutes and blocks the sole consumer.
+            log.warn("Graph extraction provider response rejected: {}", failure.getMessage());
+            throw failure;
         }
-        throw lastFailure == null ? new IllegalStateException("Empty graph extraction response") : lastFailure;
     }
 
     private StoryEvent sanitizeStoryEvent(ModelStoryEvent value, List<ChapterFact> facts) {
