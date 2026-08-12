@@ -52,3 +52,6 @@ __pycache__/
 
 # Local recovery snapshot created while repairing an editor encoding failure.
 *.mojibake-backup
+
+# Personal resume and interview preparation materials.
+docs/resume/
