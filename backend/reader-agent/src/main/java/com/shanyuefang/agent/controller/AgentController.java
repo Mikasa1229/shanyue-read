@@ -32,6 +32,7 @@ import com.shanyuefang.agent.domain.dto.StartBookKnowledgeBuildDTO;
 import com.shanyuefang.agent.domain.entity.BookKnowledgeBuildTask;
 import com.shanyuefang.agent.config.AgentProperties;
 import com.shanyuefang.agent.feign.CanonicalBookFeignClient;
+import com.shanyuefang.agent.feign.ContentRecoveryFeignClient;
 import com.shanyuefang.common.result.R;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -62,6 +63,7 @@ public class AgentController {
     private final ShelfGroupService shelfGroupService;
     private final ModelRouteService modelRouteService;
     private final BookKnowledgeBuildService bookKnowledgeBuildService;
+    private final ContentRecoveryFeignClient contentRecoveryClient;
 
     @PostMapping("/sessions")
     public R<AgentSessionVO> createSession(@RequestHeader("X-User-Id") Long userId,
@@ -249,6 +251,56 @@ public class AgentController {
                                                          @RequestParam(required = false) Integer startChapter,
                                                          @RequestParam(required = false) Integer endChapter) {
         return R.ok(bookKnowledgeBuildService.prepare(userId, canonicalBookId, startChapter, endChapter));
+    }
+
+    /** Starts a durable, source-side fetch for missing chapter bodies before graph construction. */
+    @PostMapping("/books/{canonicalBookId}/knowledge-build:prepare-content")
+    public R<Map<String, Object>> prepareKnowledgeContent(@RequestHeader("X-User-Id") long userId,
+                                                           @PathVariable long canonicalBookId,
+                                                           @RequestParam int startChapter,
+                                                           @RequestParam int endChapter) {
+        if (startChapter < 1 || endChapter < startChapter || endChapter - startChapter + 1 > 10_000) {
+            return R.fail(com.shanyuefang.common.result.ResultCode.PARAM_ERROR, "一次最多自动补齐 10000 章正文");
+        }
+        Map<String, Object> preparation = bookKnowledgeBuildService.prepare(userId, canonicalBookId, startChapter, endChapter);
+        if (Boolean.TRUE.equals(preparation.get("canBuild"))) {
+            return R.ok(Map.of("status", "ALREADY_READY", "tasks", List.of()));
+        }
+        Object missing = preparation.get("missingChapterRanges");
+        if (!(missing instanceof List<?> ranges) || ranges.isEmpty()) {
+            return R.fail(com.shanyuefang.common.result.ResultCode.PARAM_ERROR, "没有可补齐的章节范围");
+        }
+        List<Map<String, Object>> tasks = new java.util.ArrayList<>();
+        for (Object item : ranges) {
+            if (!(item instanceof Map<?, ?> range)) continue;
+            Object rawStart = range.get("startChapter"); Object rawEnd = range.get("endChapter");
+            if (!(rawStart instanceof Number rangeStart) || !(rawEnd instanceof Number rangeEnd)) continue;
+            for (int chunkStart = rangeStart.intValue(); chunkStart <= rangeEnd.intValue(); chunkStart += 200) {
+                int chunkEnd = Math.min(rangeEnd.intValue(), chunkStart + 199);
+                var response = contentRecoveryClient.prefetch(agentProperties.getInternalToken(), canonicalBookId, userId,
+                        chunkStart - 1, chunkEnd - 1);
+                if (response == null || response.getCode() != 200 || response.getData() == null) {
+                    return R.fail(com.shanyuefang.common.result.ResultCode.INTERNAL_ERROR,
+                            response == null ? "小说服务未能创建正文补齐任务" : response.getMessage());
+                }
+                Map<String, Object> task = response.getData();
+                // Snowflake IDs exceed JavaScript's safe integer range. Return them as strings so
+                // the browser polls the exact durable task instead of a rounded value.
+                tasks.add(Map.of("taskId", String.valueOf(task.get("id")), "status", task.getOrDefault("status", "PENDING"),
+                        "startChapter", chunkStart, "endChapter", chunkEnd));
+            }
+        }
+        return R.ok(Map.of("status", "QUEUED", "tasks", tasks));
+    }
+
+    @GetMapping("/knowledge-build/content-tasks/{taskId}")
+    public R<Map<String, Object>> knowledgeContentTask(@RequestHeader("X-User-Id") long userId, @PathVariable long taskId) {
+        var response = contentRecoveryClient.prefetchTask(agentProperties.getInternalToken(), taskId, userId);
+        if (response == null || response.getCode() != 200) {
+            return R.fail(com.shanyuefang.common.result.ResultCode.NOT_FOUND,
+                    response == null ? "正文补齐任务不存在" : response.getMessage());
+        }
+        return R.ok(response.getData());
     }
 
     @PostMapping("/books/{canonicalBookId}/knowledge-build")

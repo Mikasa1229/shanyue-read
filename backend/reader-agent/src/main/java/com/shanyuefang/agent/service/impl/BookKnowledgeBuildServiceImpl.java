@@ -111,25 +111,39 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
     @Override
     public Map<String, Object> prepare(long userId, long canonicalBookId, Integer startChapter, Integer endChapter) {
         BookKnowledgeSpace existing = spaceMapper.selectById(canonicalBookId);
-        ChapterRange requestedRange = resolveRange(canonicalBookId, startChapter, endChapter);
+        IndexedChapterAvailability indexed = indexedChapters(canonicalBookId);
+        ChapterRange requestedRange = resolveRange(indexed, startChapter, endChapter);
+        List<ChapterRange> missingRanges = missingRanges(indexed, requestedRange);
         ChapterRange uncoveredRange = uncoveredRange(canonicalBookId, requestedRange);
-        Estimate estimate = estimate(canonicalBookId, uncoveredRange);
+        boolean canBuild = missingRanges.isEmpty();
+        Estimate estimate = canBuild ? estimate(canonicalBookId, uncoveredRange) : Estimate.empty();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("canonicalBookId", canonicalBookId);
         result.put("status", existing == null ? "NOT_BUILT" : existing.getStatus());
         result.put("isPublic", existing == null || Boolean.TRUE.equals(existing.getIsPublic()));
         result.put("isOwner", existing != null && Long.valueOf(userId).equals(existing.getOwnerUserId()));
-        result.put("totalChapters", requestedRange.availableChapters());
+        // Keep totalChapters for older clients, but expose the source of each count explicitly.
+        result.put("totalChapters", indexed.indexedChapterCount());
         result.put("startChapter", requestedRange.startChapter());
         result.put("endChapter", requestedRange.endChapter());
+        result.put("requestedChapterCount", requestedRange.chapterCount());
+        result.put("indexedChapterCount", indexed.indexedChapterCount());
+        result.put("availableIndexedChapters", indexed.countIn(requestedRange));
+        result.put("maxIndexedChapter", indexed.maxChapter());
+        result.put("missingChapterCount", requestedRange.chapterCount() - indexed.countIn(requestedRange));
+        result.put("missingChapterRanges", missingRanges.stream().map(range -> Map.of(
+                "startChapter", range.startChapter(), "endChapter", range.endChapter())).toList());
+        result.put("missingChapterSummary", formatRanges(missingRanges));
+        result.put("canBuild", canBuild);
+        result.put("buildBlockedReason", canBuild ? null : "所选范围缺少已加载并索引的章节正文：" + formatRanges(missingRanges));
         result.put("selectedChapters", estimate.chapters());
         result.put("coveredChapters", coveredChapterCount(canonicalBookId, requestedRange));
-        result.put("rangeCovered", estimate.chapters() == 0);
+        result.put("rangeCovered", canBuild && estimate.chapters() == 0);
         result.put("estimatedInputTokens", estimate.inputTokens());
         result.put("estimatedOutputTokens", estimate.outputTokens());
         result.put("estimatedCredits", estimate.credits());
         result.put("creditRule", "平台模型按约每 2000 Token 折算 1 积分；实际模型账单与平台积分并非一比一关系。");
-        result.put("requiresBuild", estimate.chapters() > 0);
+        result.put("requiresBuild", !canBuild || estimate.chapters() > 0);
         return result;
     }
 
@@ -137,7 +151,14 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
     @Transactional(rollbackFor = Exception.class)
     public BookKnowledgeBuildTask start(long userId, long canonicalBookId, StartBookKnowledgeBuildDTO dto) {
         String mode = normalizeMode(dto.getModelMode());
-        ChapterRange range = uncoveredRange(canonicalBookId, resolveRange(canonicalBookId, dto.getStartChapter(), dto.getEndChapter()));
+        IndexedChapterAvailability indexed = indexedChapters(canonicalBookId);
+        ChapterRange requestedRange = resolveRange(indexed, dto.getStartChapter(), dto.getEndChapter());
+        List<ChapterRange> missingRanges = missingRanges(indexed, requestedRange);
+        if (!missingRanges.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "所选范围缺少已加载并索引的章节正文：" + formatRanges(missingRanges)
+                    + "。阅读进度或跳转章节不会自动抓取中间正文，请先补齐章节内容。");
+        }
+        ChapterRange range = uncoveredRange(canonicalBookId, requestedRange);
         Estimate estimate = estimate(canonicalBookId, range);
         if (estimate.chapters() == 0) throw new BusinessException(ResultCode.PARAM_ERROR, "所选章节均已完成知识图谱构建，无需重复消耗积分。");
         BookKnowledgeSpace space = spaceMapper.selectById(canonicalBookId);
@@ -401,6 +422,11 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
             @Override public void stageCompleted(Stage stage) {
                 recordStage(task, stage, stageUnits(stage, task), stageUnits(stage, task), stageCompletedMessage(stage));
             }
+
+            @Override public void stageCompleted(Stage stage, int totalUnits) {
+                int total = Math.max(1, totalUnits);
+                recordStage(task, stage, total, total, stageCompletedMessage(stage));
+            }
         };
     }
 
@@ -516,18 +542,43 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         int chapters = (int) chunks.stream().map(KnowledgeChunk::getChapterIndex).distinct().count(); long chars = chunks.stream().mapToLong(item -> item.getContent() == null ? 0 : item.getContent().length()).sum();
         long input = Math.max(chapters, chars / 3); long output = Math.max(0, chapters * 500L); int credits = (int) Math.max(1, Math.ceil((input + output) / 2000.0D)); return new Estimate(chapters, input, output, credits);
     }
-    private ChapterRange resolveRange(long bookId, Integer requestedStart, Integer requestedEnd) {
+    private IndexedChapterAvailability indexedChapters(long bookId) {
         List<Integer> indexes = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
                         .eq(KnowledgeChunk::getCanonicalBookId, bookId).orderByAsc(KnowledgeChunk::getChapterIndex))
                 .stream().map(KnowledgeChunk::getChapterIndex).filter(java.util.Objects::nonNull).distinct().sorted().toList();
-        if (indexes.isEmpty()) throw new BusinessException(ResultCode.PARAM_ERROR, "这本书还没有可用于构建知识图谱的章节内容，请先打开并加载章节。");
-        int maxChapter = indexes.get(indexes.size() - 1) + 1;
+        return new IndexedChapterAvailability(indexes);
+    }
+    private ChapterRange resolveRange(IndexedChapterAvailability indexed, Integer requestedStart, Integer requestedEnd) {
+        int maxChapter = indexed.maxChapter();
         int start = requestedStart == null ? 1 : requestedStart;
         int end = requestedEnd == null ? maxChapter : requestedEnd;
-        if (start < 1 || end < start || end > maxChapter) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "请选择第 1 章到第 " + maxChapter + " 章之间的有效范围");
+        if (start < 1 || end < start || end - start >= 10_000) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, indexed.indexes().isEmpty()
+                    ? "请先选择要补齐正文的章节范围"
+                    : "请选择不超过 10000 章的有效范围");
         }
-        return new ChapterRange(start, end, indexes.size());
+        return new ChapterRange(start, end);
+    }
+    private List<ChapterRange> missingRanges(IndexedChapterAvailability indexed, ChapterRange range) {
+        java.util.ArrayList<ChapterRange> missing = new java.util.ArrayList<>();
+        int start = -1;
+        for (int chapter = range.startChapter(); chapter <= range.endChapter(); chapter++) {
+            if (!indexed.contains(chapter)) {
+                if (start < 0) start = chapter;
+            } else if (start >= 0) {
+                missing.add(new ChapterRange(start, chapter - 1));
+                start = -1;
+            }
+        }
+        if (start >= 0) missing.add(new ChapterRange(start, range.endChapter()));
+        return missing;
+    }
+    private String formatRanges(List<ChapterRange> ranges) {
+        if (ranges.isEmpty()) return "";
+        return ranges.stream().limit(4).map(range -> range.startChapter() == range.endChapter()
+                        ? "第 " + range.startChapter() + " 章"
+                        : "第 " + range.startChapter() + "–" + range.endChapter() + " 章")
+                .collect(Collectors.joining("、")) + (ranges.size() > 4 ? " 等" : "");
     }
     private ChapterRange uncoveredRange(long bookId, ChapterRange requested) {
         List<BookKnowledgeChapterCoverage> rows = coverageMapper.selectList(Wrappers.<BookKnowledgeChapterCoverage>lambdaQuery()
@@ -537,12 +588,12 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
                 .map(BookKnowledgeChapterCoverage::getChapterIndex).toList();
         int first = requested.startChapter();
         while (first <= requested.endChapter() && covered.contains(first - 1)) first++;
-        if (first > requested.endChapter()) return new ChapterRange(first, first - 1, requested.availableChapters());
+        if (first > requested.endChapter()) return new ChapterRange(first, first - 1);
         // A task represents one continuous missing segment. If a reader built a
         // later interval first, do not silently re-charge already covered chapters.
         int end = first;
         while (end < requested.endChapter() && !covered.contains(end)) end++;
-        return new ChapterRange(first, end, requested.availableChapters());
+        return new ChapterRange(first, end);
     }
     private int coveredChapterCount(long bookId, ChapterRange range) {
         if (range.endChapter() < range.startChapter()) return 0;
@@ -568,6 +619,18 @@ public class BookKnowledgeBuildServiceImpl implements BookKnowledgeBuildService 
         }
         return value.substring(0, Math.min(value.length(), 1000));
     }
-    private record Estimate(int chapters, long inputTokens, long outputTokens, int credits) { }
-    private record ChapterRange(int startChapter, int endChapter, int availableChapters) { }
+    private record Estimate(int chapters, long inputTokens, long outputTokens, int credits) {
+        private static Estimate empty() { return new Estimate(0, 0L, 0L, 0); }
+    }
+    private record ChapterRange(int startChapter, int endChapter) {
+        private int chapterCount() { return Math.max(0, endChapter - startChapter + 1); }
+    }
+    private record IndexedChapterAvailability(List<Integer> indexes) {
+        private int maxChapter() { return indexes.isEmpty() ? 0 : indexes.get(indexes.size() - 1) + 1; }
+        private int indexedChapterCount() { return indexes.size(); }
+        private boolean contains(int chapter) { return java.util.Collections.binarySearch(indexes, chapter - 1) >= 0; }
+        private int countIn(ChapterRange range) {
+            return (int) indexes.stream().filter(index -> index >= range.startChapter() - 1 && index <= range.endChapter() - 1).count();
+        }
+    }
 }

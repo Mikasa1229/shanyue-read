@@ -324,14 +324,16 @@
       <section class="knowledge-build-dialog" role="dialog" aria-modal="true" aria-labelledby="knowledge-build-title">
         <span class="dialog-kicker">智能知识图谱构建</span>
         <h2 id="knowledge-build-title">只构建你选定章节的故事关系</h2>
-        <p v-if="knowledgeBuild">将读取第 {{ buildForm.startChapter || 1 }} 章至第 {{ buildForm.endChapter || knowledgeBuild.totalChapters || 1 }} 章，共 {{ knowledgeBuild.selectedChapters || 0 }} 章；约 {{ Number(knowledgeBuild.estimatedInputTokens || 0).toLocaleString() }} 输入词元与 {{ Number(knowledgeBuild.estimatedOutputTokens || 0).toLocaleString() }} 输出词元。</p>
-        <div class="build-cost-note"><b>预计 {{ knowledgeBuild?.estimatedCredits || 0 }} 平台积分</b><span>{{ knowledgeBuild?.creditRule }}</span></div>
+        <p v-if="knowledgeBuild && !needsKnowledgeContent">将基于已加载并索引的第 {{ buildForm.startChapter || 1 }} 章至第 {{ buildForm.endChapter || knowledgeBuild.maxIndexedChapter || 1 }} 章正文构建故事关系，共 {{ knowledgeBuild.selectedChapters || 0 }} 章；约 {{ Number(knowledgeBuild.estimatedInputTokens || 0).toLocaleString() }} 输入词元与 {{ Number(knowledgeBuild.estimatedOutputTokens || 0).toLocaleString() }} 输出词元。</p>
+        <p v-else-if="knowledgeBuild">当前选择第 {{ buildForm.startChapter || 1 }} 章至第 {{ buildForm.endChapter || knowledgeBuild.maxIndexedChapter || 1 }} 章；其中仅 {{ knowledgeBuild.availableIndexedChapters || 0 }} / {{ knowledgeBuild.requestedChapterCount || 0 }} 章已加载并索引，暂不能构建。</p>
+        <div v-if="knowledgeBuild && !needsKnowledgeContent" class="build-cost-note"><b>预计 {{ knowledgeBuild?.estimatedCredits || 0 }} 平台积分</b><span>{{ knowledgeBuild?.creditRule }}</span></div>
+        <div v-else-if="knowledgeBuild" class="build-index-warning"><b>{{ contentPrepareRunning ? '正在补齐正文并建立检索索引' : contentPrepareIndexing ? '正在建立检索索引' : '需要先补齐正文' }}</b><span v-if="contentPrepareRunning || contentPrepareIndexing">章节抓取完成后会立刻进入索引队列，两条进度会并行刷新；索引完成前不会开启图谱构建。</span><div v-if="contentPrepareRunning || contentPrepareIndexing" class="content-prepare-progress" aria-label="正文补齐与检索索引进度"><div class="content-prepare-progress-row"><span>正文抓取</span><div><i :style="{ width: `${contentFetchProgressPercent}%` }"></i></div><small>{{ contentFetchProgressText }}</small></div><div class="content-prepare-progress-row"><span>检索索引</span><div><i :style="{ width: `${contentIndexProgressPercent}%` }"></i></div><small>{{ contentIndexProgressText }}</small></div></div><span v-else>{{ knowledgeBuildBlockReason }} 跳转到第 100 章只会加载当前章和少量预读章节，并不等于已加载第 1–100 章。</span></div>
         <div class="build-range"><label>起始章节<input v-model.number="buildForm.startChapter" min="1" inputmode="numeric" pattern="[0-9]*" @input="queueBuildEstimate" /></label><span>至</span><label>结束章节<input v-model.number="buildForm.endChapter" min="1" inputmode="numeric" pattern="[0-9]*" @input="queueBuildEstimate" /></label></div>
         <label>构建模型<select v-model="buildForm.modelMode"><option value="PLATFORM">平台模型（消耗预估积分）</option><option value="BYOK">我的模型（不消耗平台积分）</option></select></label>
         <label v-if="buildForm.modelMode === 'BYOK'">选择个人模型<select v-model="buildForm.modelConfigId"><option value="">请选择已启用的模型</option><option v-for="model in enabledModels" :key="model.id" :value="String(model.id)">{{ model.model }}</option></select></label>
         <label class="build-share"><input v-model="buildForm.sharePublic" type="checkbox" />公开这本书的知识图谱，完成后发布一条广场分享动态</label>
         <p class="dialog-help">公开的是实体、关系和摘要索引，不会公开小说原文、你的对话或个人模型密钥。</p>
-        <div class="spoiler-dialog-actions"><button type="button" class="btn btn-ghost" @click="showKnowledgeBuildDialog = false">暂不构建</button><button type="button" class="btn btn-primary" :disabled="buildSubmitting || (buildForm.modelMode === 'BYOK' && !buildForm.modelConfigId)" @click="startKnowledgeBuild">{{ buildSubmitting ? '正在创建任务…' : '确认开始构建' }}</button></div>
+        <div class="spoiler-dialog-actions"><button type="button" class="btn btn-ghost" @click="showKnowledgeBuildDialog = false">暂不构建</button><button v-if="needsKnowledgeContent" type="button" class="btn btn-primary" :disabled="contentPrepareSubmitting || contentPrepareRunning || contentPrepareIndexing" @click="prepareMissingKnowledgeContent">{{ contentPrepareSubmitting ? '正在创建补齐任务…' : contentPrepareRunning ? '正在补齐正文…' : contentPrepareIndexing ? '正在建立索引…' : '自动补齐缺失正文' }}</button><button v-else type="button" class="btn btn-primary" :disabled="buildSubmitting || (buildForm.modelMode === 'BYOK' && !buildForm.modelConfigId)" @click="startKnowledgeBuild">{{ buildSubmitting ? '正在创建任务…' : '确认开始构建' }}</button></div>
       </section>
     </div>
   </Teleport>
@@ -367,7 +369,7 @@ import { renderMarkdown } from '@/utils/markdown'
 import { apiAddToShelf } from '@/api/bookshelf'
 import { apiGetMyShelf } from '@/api/bookshelf'
 import { apiGetMyLevel } from '@/api/user'
-  import { apiCreateAgentSession, apiDeleteAgentModel, apiDeleteAgentSession, apiDeleteBookKnowledgeTask, apiDeleteOwnedBookKnowledge, apiEraseAgentPersonalData, apiExportAgentSession, apiGetAgentCredits, apiGetAgentGraph, apiGetAgentClues, apiGetAgentInfrastructure, apiGetAgentMessages, apiGetAgentPreferences, apiGetAgentTimeline, apiGetAgentReadingMap, apiGetAgentReadingPlan, apiGetAgentReaderLink, apiGetAgentShelfGroups, apiGetPlotCapsule, apiGetQuickRecommendations, apiGetSimilarBooks, apiListAgentModels, apiRenameAgentSession, apiSaveAgentModel, apiSaveAgentPreferences, apiSaveAgentShelfGroup, apiSaveRecommendationFeedback, apiSetAgentModelEnabled, apiTestAgentModel, apiListAgentSessions, apiSearchAgentSessions, apiPrepareBookKnowledgeBuild, apiStartBookKnowledgeBuild, apiGetBookKnowledgeStatus, apiGetBookKnowledgeTasks, apiUpdateAgentMessage, apiUpdateBookKnowledgeSharing, streamAgentMessage } from '@/api/agent'
+  import { apiCreateAgentSession, apiDeleteAgentModel, apiDeleteAgentSession, apiDeleteBookKnowledgeTask, apiDeleteOwnedBookKnowledge, apiEraseAgentPersonalData, apiExportAgentSession, apiGetAgentCredits, apiGetAgentGraph, apiGetAgentClues, apiGetAgentInfrastructure, apiGetAgentMessages, apiGetAgentPreferences, apiGetAgentTimeline, apiGetAgentReadingMap, apiGetAgentReadingPlan, apiGetAgentReaderLink, apiGetAgentShelfGroups, apiGetPlotCapsule, apiGetQuickRecommendations, apiGetSimilarBooks, apiListAgentModels, apiRenameAgentSession, apiSaveAgentModel, apiSaveAgentPreferences, apiSaveAgentShelfGroup, apiSaveRecommendationFeedback, apiSetAgentModelEnabled, apiTestAgentModel, apiListAgentSessions, apiSearchAgentSessions, apiPrepareBookKnowledgeBuild, apiPrepareBookKnowledgeContent, apiGetBookKnowledgeContentTask, apiStartBookKnowledgeBuild, apiGetBookKnowledgeStatus, apiGetBookKnowledgeTasks, apiUpdateAgentMessage, apiUpdateBookKnowledgeSharing, streamAgentMessage } from '@/api/agent'
 
 const toast = useToast()
 const { confirm } = useConfirmDialog()
@@ -447,12 +449,49 @@ const knowledgeBuild = ref(null)
 const buildTasks = ref([])
 const showKnowledgeBuildDialog = ref(false)
 const buildSubmitting = ref(false)
+const contentPrepareSubmitting = ref(false)
+const contentPrepareTasks = ref([])
 const showGraphDeleteConfirm = ref(false)
 const graphDeleting = ref(false)
 const buildForm = ref({ modelMode: 'PLATFORM', modelConfigId: '', sharePublic: true, startChapter: 1, endChapter: 1 })
 let taskPollTimer = null
 let conversationPollTimer = null
 let buildEstimateTimer = null
+let contentPreparePollTimer = null
+const contentPrepareRunning = computed(() => contentPrepareTasks.value.some(task => ['PENDING', 'PROCESSING'].includes(task.status)))
+// Old Agent instances do not expose canBuild. Treat an incomplete selected range as blocked,
+// never as permission to charge the user and start a graph build.
+const requestedKnowledgeChapterCount = computed(() => Math.max(0, Number(buildForm.value.endChapter || 0) - Number(buildForm.value.startChapter || 1) + 1))
+const needsKnowledgeContent = computed(() => {
+  if (!knowledgeBuild.value) return false
+  if (knowledgeBuild.value.canBuild === false) return true
+  if (knowledgeBuild.value.canBuild === true) return false
+  return Number(knowledgeBuild.value.selectedChapters || 0) < requestedKnowledgeChapterCount.value
+})
+const knowledgeBuildBlockReason = computed(() => knowledgeBuild.value?.buildBlockedReason || `所选范围内只有 ${Number(knowledgeBuild.value?.selectedChapters || 0)} / ${requestedKnowledgeChapterCount.value} 章正文可用于构建。`)
+const contentPrepareIndexing = computed(() => contentPrepareTasks.value.length > 0 && !contentPrepareRunning.value && needsKnowledgeContent.value)
+const contentFetchProgressText = computed(() => {
+  if (!contentPrepareTasks.value.length) return '正在创建正文补齐任务。'
+  const total = contentPrepareTasks.value.reduce((sum, task) => sum + Number(task.totalChapters || 0), 0)
+  const completed = contentPrepareTasks.value.reduce((sum, task) => sum + Number(task.completedChapters || 0), 0)
+  return `已抓取 ${completed} / ${total} 章正文`
+})
+const contentFetchProgressPercent = computed(() => {
+  const total = Math.max(1, contentPrepareTasks.value.reduce((sum, task) => sum + Number(task.totalChapters || 0), 0))
+  const completed = contentPrepareTasks.value.reduce((sum, task) => sum + Number(task.completedChapters || 0), 0)
+  return Math.min(100, Math.round(completed / total * 100))
+})
+const contentIndexProgressText = computed(() => {
+  if (!contentPrepareTasks.value.length) return '等待正文进入索引队列'
+  const requested = Math.max(1, Number(knowledgeBuild.value?.requestedChapterCount || requestedKnowledgeChapterCount.value))
+  const indexed = Math.min(requested, Math.max(0, Number(knowledgeBuild.value?.availableIndexedChapters || 0)))
+  return `已建立索引 ${indexed} / ${requested} 章`
+})
+const contentIndexProgressPercent = computed(() => {
+  const requested = Math.max(1, Number(knowledgeBuild.value?.requestedChapterCount || requestedKnowledgeChapterCount.value))
+  const indexed = Math.max(0, Number(knowledgeBuild.value?.availableIndexedChapters || 0))
+  return Math.min(100, Math.round(indexed / requested * 100))
+})
 const graphTypes = computed(() => ['ALL', ...new Set((graph.value.nodes || []).map(node => node.type).filter(Boolean))])
 const enabledModels = computed(() => models.value.filter(model => model.enabled))
 const selectedChatModelLabel = computed(() => enabledModels.value.find(model => String(model.id) === selectedModelConfigId.value)?.model || '平台模型')
@@ -1136,7 +1175,9 @@ async function selectInsightBook() {
   spoilersConfirmed.value = false
   insightError.value = ''
   buildForm.value.startChapter = 1
-  buildForm.value.endChapter = ''
+  // A reading boundary is a requested range, not proof that its bodies were indexed.
+  // It lets the dialog offer the durable automatic content preparation path on first use.
+  buildForm.value.endChapter = insightChapter.value
   await loadKnowledgeBuildPreparation()
 }
 
@@ -1148,8 +1189,79 @@ async function loadKnowledgeBuildPreparation () {
       endChapter: buildForm.value.endChapter || undefined
     })
     buildForm.value.startChapter = knowledgeBuild.value.startChapter || 1
-    buildForm.value.endChapter = knowledgeBuild.value.endChapter || knowledgeBuild.value.totalChapters || 1
+    buildForm.value.endChapter = knowledgeBuild.value.endChapter || knowledgeBuild.value.maxIndexedChapter || buildForm.value.endChapter || 1
   } catch (_) { knowledgeBuild.value = null }
+}
+
+async function prepareMissingKnowledgeContent () {
+  if (!insightBookId.value || !needsKnowledgeContent.value || contentPrepareSubmitting.value || contentPrepareRunning.value) return
+  contentPrepareSubmitting.value = true
+  try {
+    const result = await apiPrepareBookKnowledgeContent(insightBookId.value, {
+      startChapter: Number(buildForm.value.startChapter),
+      endChapter: Number(buildForm.value.endChapter)
+    })
+    const created = Array.isArray(result?.tasks) ? result.tasks : []
+    if (!created.length) {
+      await loadKnowledgeBuildPreparation()
+      return
+    }
+    contentPrepareTasks.value = created
+    toast.success(`已创建 ${created.length} 个正文补齐任务，正在从当前书源抓取缺失章节。`)
+    await pollKnowledgeContentTasks()
+  } catch (error) {
+    toast.error(error.message || '创建正文补齐任务失败')
+  } finally {
+    contentPrepareSubmitting.value = false
+  }
+}
+
+async function pollKnowledgeContentTasks () {
+  clearTimeout(contentPreparePollTimer)
+  if (!contentPrepareTasks.value.length) return
+  try {
+    // Fetch progress and refresh the Agent index snapshot in the same tick. Chapters are
+    // indexed as soon as they arrive, so waiting for every prefetch task to finish would hide
+    // real downstream progress from the user.
+    const [tasks] = await Promise.all([
+      Promise.all(contentPrepareTasks.value.map(async task => {
+        const latest = await apiGetBookKnowledgeContentTask(task.taskId)
+        return { ...task, ...latest }
+      })),
+      loadKnowledgeBuildPreparation()
+    ])
+    contentPrepareTasks.value = tasks
+    if (tasks.some(task => ['PENDING', 'PROCESSING'].includes(task.status))) {
+      contentPreparePollTimer = setTimeout(pollKnowledgeContentTasks, 1500)
+      return
+    }
+    const failed = tasks.filter(task => ['FAILED', 'PARTIAL_FAILED'].includes(task.status))
+    await loadKnowledgeBuildPreparation()
+    if (failed.length) {
+      toast.error(`正文补齐未完全成功：${failed.length} 个任务存在失败章节，请检查当前书源后重试。`)
+    } else {
+      toast.success('正文已抓取，正在建立检索索引；索引完成后可开始构建图谱。')
+      contentPreparePollTimer = setTimeout(waitForKnowledgeContentIndex, 1500)
+    }
+  } catch (error) {
+    contentPrepareTasks.value = []
+    toast.error(error.message || '查询正文补齐任务失败，请重新创建补齐任务。')
+  }
+}
+
+async function waitForKnowledgeContentIndex () {
+  clearTimeout(contentPreparePollTimer)
+  try {
+    await loadKnowledgeBuildPreparation()
+    if (needsKnowledgeContent.value) {
+      contentPreparePollTimer = setTimeout(waitForKnowledgeContentIndex, 1500)
+      return
+    }
+    contentPrepareTasks.value = []
+    toast.success('缺失章节已完成索引，现在可以开始构建知识图谱。')
+  } catch (_) {
+    contentPreparePollTimer = setTimeout(waitForKnowledgeContentIndex, 2000)
+  }
 }
 
 function queueBuildEstimate() {
@@ -1232,7 +1344,7 @@ async function loadBuildTasks () {
   function openKnowledgeBuildDialog () {
   if (!knowledgeBuild.value) return loadKnowledgeBuildPreparation().then(() => { showKnowledgeBuildDialog.value = true })
   buildForm.value.startChapter = knowledgeBuild.value.startChapter || 1
-  buildForm.value.endChapter = knowledgeBuild.value.endChapter || knowledgeBuild.value.totalChapters || 1
+  buildForm.value.endChapter = knowledgeBuild.value.endChapter || knowledgeBuild.value.maxIndexedChapter || buildForm.value.endChapter || 1
   showKnowledgeBuildDialog.value = true
 }
 
@@ -1270,11 +1382,15 @@ function taskStages (task) {
     if (index > currentIndex) return { ...stage, status: 'PENDING', progress: 0, detail: '等待执行' }
     const total = Math.max(1, Number(task?.stageTotalUnits || 1))
     const completed = Math.max(0, Number(task?.stageCompletedUnits || 0))
+    const unit = stage.key === 'EXTRACT' ? '章'
+      : ['CHARACTER_CALIBRATION', 'STORY_EVENTS', 'CLUE_SYNTHESIS'].includes(stage.key) ? '个分析窗口'
+        : stage.key === 'CLUE_LIFECYCLE' ? '条线索'
+          : stage.key === 'GRAPH_PROJECTION' ? '个同步步骤' : '项'
     return {
       ...stage,
       status: task?.status === 'FAILED' ? 'FAILED' : 'RUNNING',
       progress: Math.min(100, Math.round(completed / total * 100)),
-      detail: `${completed} / ${total} ${stage.key === 'EXTRACT' ? '章' : '项'}`
+      detail: `${completed} / ${total} ${unit}`
     }
   })
 }
@@ -1799,6 +1915,7 @@ onBeforeUnmount(() => {
   if (globeRenderFrame) window.cancelAnimationFrame(globeRenderFrame)
   clearTimeout(taskPollTimer)
   clearTimeout(buildEstimateTimer)
+  clearTimeout(contentPreparePollTimer)
   stopConversationPoll()
 })
 </script>
@@ -1909,7 +2026,7 @@ onBeforeUnmount(() => {
 .task-center-card span,.task-center-card strong,.task-center-card small { display:block; }.task-center-card span { color:var(--agent-coral); font-size:.65rem; font-weight:800; letter-spacing:.08em; }.task-center-card strong { margin:5px 0 3px; font-size:.88rem; }.task-center-card small { overflow:hidden; color:var(--agent-ink-soft); font-size:.67rem; white-space:nowrap; text-overflow:ellipsis; }.task-progress { height:4px; margin-top:11px; overflow:hidden; border-radius:99px; background:rgba(16,44,50,.12); }.task-progress i { display:block; height:100%; border-radius:inherit; background:var(--agent-coral); transition:width .45s ease; }
 .insight-commandbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid rgba(16,44,50,.11); border-radius:14px; background:rgba(255,253,247,.72); }.insight-mode-switcher { display:flex; min-width:0; gap:4px; overflow-x:auto; }.insight-mode-switcher button { flex:0 0 auto; border:0; border-radius:8px; padding:8px 10px; color:var(--agent-ink-soft); background:transparent; cursor:pointer; font:inherit; font-size:.72rem; font-weight:700; }.insight-mode-switcher button:hover { background:rgba(16,44,50,.06); }.insight-mode-switcher button.active { color:#fffaf0; background:var(--agent-ink); }.build-index-button { flex:0 0 auto; border:0; border-radius:9px; padding:9px 11px; color:var(--agent-ink); background:var(--agent-lime); cursor:pointer; font:inherit; font-size:.72rem; font-weight:800; }
 .insight-grid { grid-template-columns:minmax(0,1fr)!important; }.insight-card,.insight-card:nth-child(n) { grid-column:auto!important; min-height:300px; }.insight-card.graph-card { min-height:calc(100vh - 340px); }.graph-card .relationship-map,.graph-card .cytoscape-graph { height:min(62vh,680px)!important; }.reading-map-card { min-height:calc(100vh - 340px); }.reading-map-events { max-height:calc(100vh - 510px); }
-.knowledge-build-backdrop { position:fixed; inset:0; z-index:5100; display:grid; place-items:center; padding:20px; background:rgba(9,27,31,.72); backdrop-filter:blur(8px); }.knowledge-build-dialog { width:min(100%,580px); padding:32px; border:1px solid rgba(255,253,247,.2); border-radius:23px; color:#fffaf0; background:linear-gradient(145deg,#173e42,#102c32); box-shadow:0 30px 85px rgba(0,0,0,.35); }.knowledge-build-dialog h2 { margin:7px 0 14px; color:#fffaf0; font-family:var(--font-serif); font-size:clamp(2rem,5vw,3.1rem); line-height:.96; letter-spacing:-.06em; }.dialog-kicker { color:var(--agent-lime); font-size:.66rem; font-weight:800; letter-spacing:.14em; }.knowledge-build-dialog > p { color:rgba(255,250,240,.74); line-height:1.75; }.build-cost-note { display:grid; gap:5px; margin:18px 0; padding:13px; border-left:3px solid var(--agent-lime); border-radius:8px; background:rgba(184,214,125,.14); }.build-cost-note b { color:var(--agent-lime); }.build-cost-note span,.dialog-help { color:rgba(255,250,240,.7); font-size:.72rem; line-height:1.6; }.knowledge-build-dialog label { display:flex; flex-direction:column; gap:6px; margin-top:13px; color:rgba(255,250,240,.85); font-size:.78rem; font-weight:700; }.knowledge-build-dialog select { border:1px solid rgba(255,253,247,.2); border-radius:9px; padding:10px; color:#fffaf0; background:rgba(255,253,247,.1); font:inherit; }.knowledge-build-dialog option { color:var(--agent-ink); }.knowledge-build-dialog .build-share { flex-direction:row; align-items:center; line-height:1.45; }.knowledge-build-dialog .build-share input { accent-color:var(--agent-lime); }
+.knowledge-build-backdrop { position:fixed; inset:0; z-index:5100; display:grid; place-items:center; padding:20px; background:rgba(9,27,31,.72); backdrop-filter:blur(8px); }.knowledge-build-dialog { width:min(100%,580px); padding:32px; border:1px solid rgba(255,253,247,.2); border-radius:23px; color:#fffaf0; background:linear-gradient(145deg,#173e42,#102c32); box-shadow:0 30px 85px rgba(0,0,0,.35); }.knowledge-build-dialog h2 { margin:7px 0 14px; color:#fffaf0; font-family:var(--font-serif); font-size:clamp(2rem,5vw,3.1rem); line-height:.96; letter-spacing:-.06em; }.dialog-kicker { color:var(--agent-lime); font-size:.66rem; font-weight:800; letter-spacing:.14em; }.knowledge-build-dialog > p { color:rgba(255,250,240,.74); line-height:1.75; }.build-cost-note,.build-index-warning { display:grid; gap:5px; margin:18px 0; padding:13px; border-left:3px solid var(--agent-lime); border-radius:8px; background:rgba(184,214,125,.14); }.build-cost-note b { color:var(--agent-lime); }.build-index-warning { border-left-color:#f0b06f; background:rgba(240,176,111,.13); }.build-index-warning b { color:#ffd49d; }.build-cost-note span,.build-index-warning span,.dialog-help { color:rgba(255,250,240,.7); font-size:.72rem; line-height:1.6; }.content-prepare-progress { display:grid; gap:9px; margin-top:5px; }.content-prepare-progress-row { display:grid; grid-template-columns:54px minmax(0,1fr) auto; align-items:center; gap:8px; }.content-prepare-progress-row > span { color:#fff0ce; font-size:.67rem; font-weight:800; white-space:nowrap; }.content-prepare-progress-row > div { height:7px; overflow:hidden; border-radius:999px; background:rgba(255,250,240,.18); box-shadow:inset 0 1px rgba(255,255,255,.08); }.content-prepare-progress i { display:block; width:0; height:100%; border-radius:inherit; background:linear-gradient(90deg,#f0b06f,#dce98e); box-shadow:0 0 12px rgba(240,176,111,.38); transition:width .4s ease; }.content-prepare-progress-row:last-child i { background:linear-gradient(90deg,#8ccdc0,#dce98e); box-shadow:0 0 12px rgba(140,205,192,.34); }.content-prepare-progress small { color:#fff0ce; font-size:.66rem; font-variant-numeric:tabular-nums; white-space:nowrap; }.knowledge-build-dialog label { display:flex; flex-direction:column; gap:6px; margin-top:13px; color:rgba(255,250,240,.85); font-size:.78rem; font-weight:700; }.knowledge-build-dialog select { border:1px solid rgba(255,253,247,.2); border-radius:9px; padding:10px; color:#fffaf0; background:rgba(255,253,247,.1); font:inherit; }.knowledge-build-dialog option { color:var(--agent-ink); }.knowledge-build-dialog .build-share { flex-direction:row; align-items:center; line-height:1.45; }.knowledge-build-dialog .build-share input { accent-color:var(--agent-lime); }
 .graph-delete-backdrop { position:fixed; inset:0; z-index:5200; display:grid; place-items:center; padding:20px; background:rgba(9,27,31,.72); backdrop-filter:blur(8px); }.graph-delete-dialog { width:min(100%,540px); padding:31px; border:1px solid rgba(255,250,240,.18); border-radius:23px; color:#fffaf0; background:linear-gradient(145deg,#173e42,#102c32); box-shadow:0 30px 85px rgba(0,0,0,.35); }.graph-delete-dialog h2 { margin:7px 0 13px; color:#fffaf0; font-family:var(--font-serif); font-size:clamp(2rem,5vw,3rem); line-height:.96; letter-spacing:-.06em; }.graph-delete-dialog > p:not(.dialog-kicker) { margin:0; color:rgba(255,250,240,.76); line-height:1.75; }.graph-delete-retained { display:grid; gap:7px; margin-top:19px; padding:14px 15px; border:1px solid rgba(184,214,125,.3); border-radius:12px; background:rgba(184,214,125,.12); }.graph-delete-retained > span { color:var(--agent-lime); font-size:.68rem; font-weight:800; letter-spacing:.13em; }.graph-delete-retained ul { display:grid; gap:5px; margin:0; padding:0; list-style:none; color:#fffaf0; font-size:.8rem; font-weight:700; }.graph-delete-retained li::before { content:'✓'; margin-right:8px; color:var(--agent-lime); }.graph-delete-retained small { color:rgba(255,250,240,.72); font-size:.72rem; line-height:1.6; }.graph-delete-actions { margin-top:23px; }.graph-delete-confirm { border:1px solid #ed906b; color:#fffaf0; background:#b84d35; box-shadow:0 8px 17px rgba(105,35,24,.24); }.graph-delete-confirm:hover { background:#cf5c40; }.graph-delete-confirm:disabled { cursor:wait; opacity:.7; }
 @media (min-width: 1080px) { .agent-center .container { display:grid; grid-template-columns:210px minmax(0,1fr); column-gap:26px; align-items:start; }.agent-tabs { grid-column:1; grid-row:1 / span 10; position:sticky; top:76px; display:flex; flex-direction:column; align-items:stretch; gap:3px; margin:0; padding:12px 8px; border:1px solid rgba(16,44,50,.11); border-radius:16px; background:rgba(255,253,247,.72); }.agent-tabs button { border-radius:9px; padding:10px 12px; text-align:left; }.agent-tabs button.active { border:0; color:#fffaf0; background:var(--agent-ink); }.agent-hero,.agent-status-strip,.agent-page-loading,.agent-workbench,.model-layout,.insights-panel,.organize-panel,.privacy-layout,.agent-load-notice { grid-column:2; }.agent-hero { margin-bottom:22px; }.agent-status-strip { margin-top:0; }.agent-workbench { grid-template-columns:220px minmax(0,1fr); }.workspace-notes { display:none; } }
 @media (max-width:760px) { .task-center-card { width:100%; }.insight-commandbar { align-items:stretch; flex-direction:column; }.build-index-button { width:100%; }.knowledge-build-dialog { padding:27px 22px; }.insight-card.graph-card { min-height:520px; }.graph-card .relationship-map,.graph-card .cytoscape-graph { height:420px!important; } }

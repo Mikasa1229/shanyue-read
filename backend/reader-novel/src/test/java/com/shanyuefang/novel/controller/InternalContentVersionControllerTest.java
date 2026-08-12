@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.shanyuefang.novel.domain.dto.ContentVersionStatusDTO;
+import com.shanyuefang.novel.domain.entity.ContentRecoveryTask;
 import com.shanyuefang.novel.domain.entity.BookContentVersion;
 import com.shanyuefang.novel.service.ContentRecoveryService;
 import com.shanyuefang.novel.mapper.BookContentVersionMapper;
@@ -16,6 +17,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doNothing;
 
 class InternalContentVersionControllerTest {
     @org.junit.jupiter.api.BeforeAll
@@ -46,6 +48,19 @@ class InternalContentVersionControllerTest {
         int code = new InternalContentVersionController(access, versions, mock(ContentRecoveryService.class)).updateStatus("internal", request()).getCode();
 
         assertThat(code).isEqualTo(200);
+    }
+
+    @Test
+    void prefetchTaskIsOnlyVisibleToItsRequester() {
+        NovelInternalAccess access = mock(NovelInternalAccess.class);
+        ContentRecoveryService recovery = mock(ContentRecoveryService.class);
+        ContentRecoveryTask task = new ContentRecoveryTask();
+        task.setId(71L); task.setTaskType("PREFETCH"); task.setRequesterUserId(7L);
+        when(recovery.get(71L)).thenReturn(task);
+        InternalContentVersionController controller = new InternalContentVersionController(access, mock(BookContentVersionMapper.class), recovery);
+
+        assertThat(controller.prefetchTask("internal", 71L, 7L).getCode()).isEqualTo(200);
+        assertThat(controller.prefetchTask("internal", 71L, 8L).getCode()).isEqualTo(404);
     }
 
     private ContentVersionStatusDTO request() {

@@ -71,8 +71,8 @@ public class KnowledgeMessagingConfig {
         factory.setConnectionFactory(connectionFactory);
         // Chapter indexing is I/O-heavy (PostgreSQL plus optional vector projections); bounded
         // consumers keep a bulk import moving without allowing unbounded broker prefetch.
-        factory.setConcurrentConsumers(4);
-        factory.setMaxConcurrentConsumers(4);
+        factory.setConcurrentConsumers(8);
+        factory.setMaxConcurrentConsumers(8);
         factory.setPrefetchCount(1);
         factory.setAdviceChain(RetryInterceptorBuilder.stateless()
                 .maxAttempts(3)

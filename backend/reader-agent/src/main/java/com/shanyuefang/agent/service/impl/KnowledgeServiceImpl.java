@@ -69,6 +69,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -187,7 +188,17 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         document.setUpdatedAt(LocalDateTime.now());
         documentMapper.insert(document);
 
-        for (String chunkContent : chunks(normalized)) {
+        List<String> chunkContents = chunks(normalized);
+        List<List<Double>> vectors = embeddingService.embedAll(chunkContents);
+        if (vectors.size() != chunkContents.size()) {
+            throw new IllegalStateException("Embedding provider returned an incomplete chapter batch");
+        }
+        for (int index = 0; index < chunkContents.size(); index++) {
+            String chunkContent = chunkContents.get(index);
+            List<Double> vector = vectors.get(index);
+            if (vector == null || vector.size() != embeddingService.dimensions()) {
+                throw new IllegalStateException("Embedding provider returned an invalid chapter vector");
+            }
             KnowledgeChunk chunk = new KnowledgeChunk();
             chunk.setId(SnowflakeIdUtil.next());
             chunk.setDocumentId(document.getId());
@@ -195,7 +206,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             chunk.setChapterIndex(dto.getChapterIndex());
             chunk.setContent(chunkContent);
             chunk.setKeywords(String.join(" ", extractKeywords(chunkContent)));
-            chunk.setEmbeddingJson(writeVector(embeddingService.embed(chunkContent)));
+            chunk.setEmbeddingJson(writeVector(vector));
             chunk.setEmbeddingModelVersion(embeddingVersion);
             chunkMapper.insert(chunk);
             // These are raw, chapter-bounded evidence projections. They never select or expand
@@ -627,6 +638,11 @@ public class KnowledgeServiceImpl implements KnowledgeService {
      */
     private void synthesizeStoryEvents(long canonicalBookId, int startChapter, int endChapter,
                                        StructuredGraphExtractor.ModelConfig modelConfig) {
+        synthesizeStoryEvents(canonicalBookId, startChapter, endChapter, modelConfig, ignored -> { });
+    }
+
+    private void synthesizeStoryEvents(long canonicalBookId, int startChapter, int endChapter,
+                                       StructuredGraphExtractor.ModelConfig modelConfig, IntConsumer windowCompleted) {
         List<KnowledgeGraphNode> stale = nodeMapper.selectList(Wrappers.<KnowledgeGraphNode>lambdaQuery()
                 .eq(KnowledgeGraphNode::getCanonicalBookId, canonicalBookId)
                 .eq(KnowledgeGraphNode::getNodeType, "EVENT")
@@ -657,6 +673,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 .ge(KnowledgeGraphEdge::getConfidence, agentProperties.getMinGraphConfidence())
                 .orderByAsc(KnowledgeGraphEdge::getFirstChapter).last("LIMIT 320"));
         Map<String, StructuredGraphExtractor.StoryEvent> merged = new LinkedHashMap<>();
+        int completedWindows = 0;
         for (int windowStart = startChapter; windowStart <= endChapter; windowStart += STORY_EVENT_WINDOW_CHAPTERS - STORY_EVENT_WINDOW_OVERLAP) {
             int windowEnd = Math.min(endChapter, windowStart + STORY_EVENT_WINDOW_CHAPTERS - 1);
             int selectedWindowStart = windowStart;
@@ -672,6 +689,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 String key = event.name().replaceAll("\\s+", "") + ":" + event.startChapter() + ":" + event.endChapter();
                 merged.putIfAbsent(key, event);
             }
+            windowCompleted.accept(++completedWindows);
             if (windowEnd == endChapter) break;
         }
         for (StructuredGraphExtractor.StoryEvent event : merged.values()) {
@@ -924,17 +942,29 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             }
             listener.stageCompleted(GraphBuildProgressListener.Stage.EXTRACT);
             listener.stageStarted(GraphBuildProgressListener.Stage.CHARACTER_CALIBRATION);
-            calibrateCharacterKnowledge(canonicalBookId, chapters, modelConfig);
-            listener.stageCompleted(GraphBuildProgressListener.Stage.CHARACTER_CALIBRATION);
+            int characterTotal = characterCalibrationWindowCount(chapters);
+            listener.stageProgress(GraphBuildProgressListener.Stage.CHARACTER_CALIBRATION, 0, characterTotal);
+            calibrateCharacterKnowledge(canonicalBookId, chapters, modelConfig,
+                    completed -> listener.stageProgress(GraphBuildProgressListener.Stage.CHARACTER_CALIBRATION, completed, characterTotal));
+            listener.stageCompleted(GraphBuildProgressListener.Stage.CHARACTER_CALIBRATION, characterTotal);
             listener.stageStarted(GraphBuildProgressListener.Stage.STORY_EVENTS);
-            synthesizeStoryEvents(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
-            listener.stageCompleted(GraphBuildProgressListener.Stage.STORY_EVENTS);
+            int storyTotal = windowCount(startChapter - 1, endChapter - 1, STORY_EVENT_WINDOW_CHAPTERS - STORY_EVENT_WINDOW_OVERLAP);
+            listener.stageProgress(GraphBuildProgressListener.Stage.STORY_EVENTS, 0, storyTotal);
+            synthesizeStoryEvents(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig,
+                    completed -> listener.stageProgress(GraphBuildProgressListener.Stage.STORY_EVENTS, completed, storyTotal));
+            listener.stageCompleted(GraphBuildProgressListener.Stage.STORY_EVENTS, storyTotal);
             listener.stageStarted(GraphBuildProgressListener.Stage.CLUE_SYNTHESIS);
-            synthesizeClues(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
-            listener.stageCompleted(GraphBuildProgressListener.Stage.CLUE_SYNTHESIS);
+            int clueTotal = windowCount(startChapter - 1, endChapter - 1, 10);
+            listener.stageProgress(GraphBuildProgressListener.Stage.CLUE_SYNTHESIS, 0, clueTotal);
+            synthesizeClues(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig,
+                    completed -> listener.stageProgress(GraphBuildProgressListener.Stage.CLUE_SYNTHESIS, completed, clueTotal));
+            listener.stageCompleted(GraphBuildProgressListener.Stage.CLUE_SYNTHESIS, clueTotal);
             listener.stageStarted(GraphBuildProgressListener.Stage.CLUE_LIFECYCLE);
-            reconcileClueLifecycle(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig);
-            listener.stageCompleted(GraphBuildProgressListener.Stage.CLUE_LIFECYCLE);
+            int lifecycleTotal = Math.max(1, countOpenClues(canonicalBookId, endChapter - 1));
+            listener.stageProgress(GraphBuildProgressListener.Stage.CLUE_LIFECYCLE, 0, lifecycleTotal);
+            reconcileClueLifecycle(canonicalBookId, startChapter - 1, endChapter - 1, modelConfig,
+                    completed -> listener.stageProgress(GraphBuildProgressListener.Stage.CLUE_LIFECYCLE, completed, lifecycleTotal));
+            listener.stageCompleted(GraphBuildProgressListener.Stage.CLUE_LIFECYCLE, lifecycleTotal);
             listener.stageStarted(GraphBuildProgressListener.Stage.RAG_REFRESH);
             refreshBookProfile(canonicalBookId);
             listener.stageProgress(GraphBuildProgressListener.Stage.RAG_REFRESH, 1, 2);
@@ -942,8 +972,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             listener.stageCompleted(GraphBuildProgressListener.Stage.RAG_REFRESH);
             // The relational graph is authoritative; projection refresh keeps Neo4j complete after merging a range.
             listener.stageStarted(GraphBuildProgressListener.Stage.GRAPH_PROJECTION);
-            reprojectGraph(canonicalBookId);
-            listener.stageCompleted(GraphBuildProgressListener.Stage.GRAPH_PROJECTION);
+            listener.stageProgress(GraphBuildProgressListener.Stage.GRAPH_PROJECTION, 0, 4);
+            reprojectGraphWithProgress(canonicalBookId,
+                    completed -> listener.stageProgress(GraphBuildProgressListener.Stage.GRAPH_PROJECTION, completed, 4));
+            listener.stageCompleted(GraphBuildProgressListener.Stage.GRAPH_PROJECTION, 4);
         } finally {
             rebuildContext.remove();
         }
@@ -975,8 +1007,40 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         nodeMapper.delete(Wrappers.<KnowledgeGraphNode>lambdaQuery().eq(KnowledgeGraphNode::getCanonicalBookId, canonicalBookId));
     }
 
+    private int characterCalibrationWindowCount(Map<Integer, StringBuilder> chapters) {
+        if (chapters == null || chapters.isEmpty()) return 1;
+        int start = chapters.keySet().stream().mapToInt(Integer::intValue).min().orElse(0);
+        int end = chapters.keySet().stream().mapToInt(Integer::intValue).max().orElse(start);
+        int total = windowCount(start, end, CHARACTER_KNOWLEDGE_WINDOW_CHAPTERS - CHARACTER_KNOWLEDGE_WINDOW_OVERLAP);
+        int shiftedStart = Math.min(end, start + CHARACTER_KNOWLEDGE_WINDOW_CHAPTERS / 2);
+        if (shiftedStart > start && shiftedStart <= end) {
+            total += windowCount(shiftedStart, end, CHARACTER_KNOWLEDGE_WINDOW_CHAPTERS - CHARACTER_KNOWLEDGE_WINDOW_OVERLAP);
+        }
+        return total;
+    }
+
+    /** Counts the windows using the same inclusive range and stride as the extraction loops. */
+    private int windowCount(int startChapter, int endChapter, int stride) {
+        if (endChapter < startChapter) return 1;
+        return Math.max(1, ((endChapter - startChapter) / Math.max(1, stride)) + 1);
+    }
+
+    private int countOpenClues(long bookId, int endChapter) {
+        Long count = clueMapper.selectCount(Wrappers.<KnowledgeClue>lambdaQuery()
+                .eq(KnowledgeClue::getCanonicalBookId, bookId)
+                .in(KnowledgeClue::getStatus, List.of("OPEN", "PARTIALLY_RESOLVED"))
+                .le(KnowledgeClue::getChapterIndex, endChapter)
+                .eq(KnowledgeClue::getReviewStatus, APPROVED));
+        return Math.max(1, Math.toIntExact(count == null ? 0L : count));
+    }
+
     private void calibrateCharacterKnowledge(long bookId, Map<Integer, StringBuilder> chapters,
                                              StructuredGraphExtractor.ModelConfig modelConfig) {
+        calibrateCharacterKnowledge(bookId, chapters, modelConfig, ignored -> { });
+    }
+
+    private void calibrateCharacterKnowledge(long bookId, Map<Integer, StringBuilder> chapters,
+                                             StructuredGraphExtractor.ModelConfig modelConfig, IntConsumer windowCompleted) {
         if (chapters.isEmpty()) return;
         int start = chapters.keySet().stream().mapToInt(Integer::intValue).min().orElse(0);
         int end = chapters.keySet().stream().mapToInt(Integer::intValue).max().orElse(start);
@@ -991,18 +1055,27 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                         "MASTER_OF", "NEIGHBOR_OF", "GUIDES", "HELPS", "PROTECTS", "CARETAKES", "EMPLOYS"))
                 .inSql(KnowledgeGraphEdge::getSourceNodeId, "SELECT id FROM t_knowledge_graph_node WHERE node_type = 'CHARACTER'")
                 .inSql(KnowledgeGraphEdge::getTargetNodeId, "SELECT id FROM t_knowledge_graph_node WHERE node_type = 'CHARACTER'"));
-        calibrateCharacterKnowledgePass(bookId, chapters, modelConfig, start, end);
+        int[] completedWindows = {0};
+        calibrateCharacterKnowledgePass(bookId, chapters, modelConfig, start, end,
+                ignored -> windowCompleted.accept(++completedWindows[0]));
         // A half-window offset exposes boundary-spanning revelations to a different local context.
         // Both passes remain bounded LightRAG extraction and merge only evidence-verified facts.
         int shiftedStart = Math.min(end, start + CHARACTER_KNOWLEDGE_WINDOW_CHAPTERS / 2);
         if (shiftedStart > start && shiftedStart <= end) {
-            calibrateCharacterKnowledgePass(bookId, chapters, modelConfig, shiftedStart, end);
+            calibrateCharacterKnowledgePass(bookId, chapters, modelConfig, shiftedStart, end,
+                    ignored -> windowCompleted.accept(++completedWindows[0]));
         }
     }
 
     private void calibrateCharacterKnowledgePass(long bookId, Map<Integer, StringBuilder> chapters,
                                                   StructuredGraphExtractor.ModelConfig modelConfig,
                                                   int start, int end) {
+        calibrateCharacterKnowledgePass(bookId, chapters, modelConfig, start, end, ignored -> { });
+    }
+
+    private void calibrateCharacterKnowledgePass(long bookId, Map<Integer, StringBuilder> chapters,
+                                                  StructuredGraphExtractor.ModelConfig modelConfig,
+                                                  int start, int end, IntConsumer windowCompleted) {
         for (int windowStart = start; windowStart <= end;
              windowStart += CHARACTER_KNOWLEDGE_WINDOW_CHAPTERS - CHARACTER_KNOWLEDGE_WINDOW_OVERLAP) {
             int windowEnd = Math.min(end, windowStart + CHARACTER_KNOWLEDGE_WINDOW_CHAPTERS - 1);
@@ -1045,6 +1118,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                         relation.confidence(), CHARACTER_KNOWLEDGE_VERSION_PREFIX + modelConfig.model());
                 if (!isGenericCharacterRelation(relation.type())) deleteGenericCharacterRelations(bookId, source.getId(), target.getId());
             }
+            windowCompleted.accept(1);
             if (windowEnd == end) break;
         }
     }
@@ -1342,9 +1416,15 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     }
 
     private void synthesizeClues(long bookId, int startChapter, int endChapter, StructuredGraphExtractor.ModelConfig modelConfig) {
+        synthesizeClues(bookId, startChapter, endChapter, modelConfig, ignored -> { });
+    }
+
+    private void synthesizeClues(long bookId, int startChapter, int endChapter,
+                                 StructuredGraphExtractor.ModelConfig modelConfig, IntConsumer windowCompleted) {
         List<KnowledgeChunk> clueChunks = chunkMapper.selectList(Wrappers.<KnowledgeChunk>lambdaQuery()
                 .eq(KnowledgeChunk::getCanonicalBookId, bookId).between(KnowledgeChunk::getChapterIndex, startChapter, endChapter)
                 .orderByAsc(KnowledgeChunk::getChapterIndex));
+        int completedWindows = 0;
         for (int windowStart = startChapter; windowStart <= endChapter; windowStart += 10) {
             int windowEnd = Math.min(endChapter, windowStart + 11);
             int selectedStart = windowStart, selectedEnd = windowEnd;
@@ -1367,6 +1447,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 if (clue != null) { clue.setSignal(excerpt(candidate.signal(), 60)); clueMapper.updateById(clue); }
                 if (node != null && clue != null) linkClueToKnownMentions(bookId, first.chapterIndex(), clue);
             }
+            windowCompleted.accept(++completedWindows);
             if (windowEnd == endChapter) break;
         }
     }
@@ -1374,6 +1455,11 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     /** Replays only later evidence, so a reader never sees a future clue development. */
     private void reconcileClueLifecycle(long bookId, int startChapter, int endChapter,
                                         StructuredGraphExtractor.ModelConfig modelConfig) {
+        reconcileClueLifecycle(bookId, startChapter, endChapter, modelConfig, ignored -> { });
+    }
+
+    private void reconcileClueLifecycle(long bookId, int startChapter, int endChapter,
+                                        StructuredGraphExtractor.ModelConfig modelConfig, IntConsumer clueCompleted) {
         List<KnowledgeClue> openClues = clueMapper.selectList(Wrappers.<KnowledgeClue>lambdaQuery()
                 .eq(KnowledgeClue::getCanonicalBookId, bookId)
                 .in(KnowledgeClue::getStatus, List.of("OPEN", "PARTIALLY_RESOLVED"))
@@ -1384,17 +1470,21 @@ public class KnowledgeServiceImpl implements KnowledgeService {
                 .eq(KnowledgeChunk::getCanonicalBookId, bookId)
                 .le(KnowledgeChunk::getChapterIndex, endChapter)
                 .orderByAsc(KnowledgeChunk::getChapterIndex));
+        int completedClues = 0;
         for (KnowledgeClue clue : openClues) {
             List<KnowledgeChunk> candidates = rankClueLifecycleCandidates(clue, laterChunks);
-            if (candidates.isEmpty()) continue;
-            StructuredGraphExtractor.ClueLifecycleExtraction assessment = structuredGraphExtractor.assessClueLifecycle(
-                    clueContext(clue), candidates.stream().map(chunk -> new StructuredGraphExtractor.ChapterFact(chunk.getId(),
-                            chunk.getChapterIndex(), excerpt(chunk.getContent(), 900))).toList(), modelConfig);
-            if (assessment == null || assessment.assessments().isEmpty()) continue;
-            for (StructuredGraphExtractor.ClueLifecycleAssessment milestone : assessment.assessments()) {
-                persistClueMilestone(bookId, clue, milestone, modelConfig.model());
-                if ("FINAL".equals(milestone.type())) break;
+            if (!candidates.isEmpty()) {
+                StructuredGraphExtractor.ClueLifecycleExtraction assessment = structuredGraphExtractor.assessClueLifecycle(
+                        clueContext(clue), candidates.stream().map(chunk -> new StructuredGraphExtractor.ChapterFact(chunk.getId(),
+                                chunk.getChapterIndex(), excerpt(chunk.getContent(), 900))).toList(), modelConfig);
+                if (assessment != null && !assessment.assessments().isEmpty()) {
+                    for (StructuredGraphExtractor.ClueLifecycleAssessment milestone : assessment.assessments()) {
+                        persistClueMilestone(bookId, clue, milestone, modelConfig.model());
+                        if ("FINAL".equals(milestone.type())) break;
+                    }
+                }
             }
+            clueCompleted.accept(++completedClues);
         }
     }
 
@@ -1545,13 +1635,21 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     @Override
     public void reprojectGraph(long canonicalBookId) {
+        reprojectGraphWithProgress(canonicalBookId, ignored -> { });
+    }
+
+    private void reprojectGraphWithProgress(long canonicalBookId, IntConsumer stepCompleted) {
         List<KnowledgeGraphNode> nodes = nodeMapper.selectList(Wrappers.<KnowledgeGraphNode>lambdaQuery()
                 .eq(KnowledgeGraphNode::getCanonicalBookId, canonicalBookId));
+        stepCompleted.accept(1);
         List<KnowledgeGraphEdge> edges = edgeMapper.selectList(Wrappers.<KnowledgeGraphEdge>lambdaQuery()
                 .eq(KnowledgeGraphEdge::getCanonicalBookId, canonicalBookId));
+        stepCompleted.accept(2);
         graphKnowledgeStore.deleteBook(canonicalBookId);
+        stepCompleted.accept(3);
         graphKnowledgeStore.upsertNodes(nodes);
         graphKnowledgeStore.replaceEdges(edges);
+        stepCompleted.accept(4);
         log.info("Reprojected LightRAG graph to Neo4j: book={}, nodes={}, edges={}", canonicalBookId, nodes.size(), edges.size());
     }
 

@@ -57,6 +57,8 @@ export const apiGetPlotCapsule = (bookId, chapter, spoilersConfirmed = false) =>
 export const apiGetSimilarBooks = (bookId, chapter, spoilersConfirmed = false) => http.get(`/agent/books/${bookId}/similar`, { params: insightParams(chapter, spoilersConfirmed) })
 export const apiGetAgentReaderLink = (bookId) => http.get(`/agent/books/${bookId}/reader-link`)
 export const apiPrepareBookKnowledgeBuild = (bookId, range = {}) => http.get(`/agent/books/${bookId}/knowledge-build:prepare`, { params: range })
+export const apiPrepareBookKnowledgeContent = (bookId, range) => http.post(`/agent/books/${bookId}/knowledge-build:prepare-content`, null, { params: range })
+export const apiGetBookKnowledgeContentTask = (taskId) => http.get(`/agent/knowledge-build/content-tasks/${taskId}`)
 export const apiStartBookKnowledgeBuild = (bookId, dto) => http.post(`/agent/books/${bookId}/knowledge-build`, dto)
 export const apiGetBookKnowledgeTasks = (limit = 30) => http.get('/agent/knowledge-build/tasks', { params: { limit } })
 export const apiDeleteBookKnowledgeTask = (taskId) => http.delete(`/agent/knowledge-build/tasks/${taskId}`)

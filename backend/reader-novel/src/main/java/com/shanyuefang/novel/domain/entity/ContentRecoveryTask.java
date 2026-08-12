@@ -11,6 +11,11 @@ import java.time.LocalDateTime;
 public class ContentRecoveryTask {
     private Long id;
     private Long canonicalBookId;
+    /** RECOVERY replays existing evidence; PREFETCH fetches previously unread source chapters. */
+    private String taskType;
+    private Long requesterUserId;
+    private Long sourceId;
+    private String sourceBookUrl;
     private Integer startChapter;
     private Integer endChapter;
     private String status;

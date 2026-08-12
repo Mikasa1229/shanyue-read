@@ -17,4 +17,15 @@ public interface ContentRecoveryFeignClient {
                                    @PathVariable long canonicalBookId,
                                    @RequestParam int startChapter,
                                    @RequestParam int endChapter);
+
+    @PostMapping("/prefetch/{canonicalBookId}")
+    R<Map<String, Object>> prefetch(@RequestHeader("X-Agent-Internal-Token") String token,
+                                    @PathVariable long canonicalBookId,
+                                    @RequestParam long userId,
+                                    @RequestParam int startChapter,
+                                    @RequestParam int endChapter);
+
+    @org.springframework.web.bind.annotation.GetMapping("/prefetch/tasks/{taskId}")
+    R<Map<String, Object>> prefetchTask(@RequestHeader("X-Agent-Internal-Token") String token,
+                                        @PathVariable long taskId, @RequestParam long userId);
 }

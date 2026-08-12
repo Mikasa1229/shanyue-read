@@ -30,7 +30,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -71,6 +73,20 @@ class BookKnowledgeBuildServiceImplTest {
     }
 
     @Test
+    void preparesAnEmptyKnowledgeBaseAsAFullMissingRangeForAutomaticContentFetch() {
+        KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
+        when(chunkMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        BookKnowledgeBuildServiceImpl service = service(chunkMapper, mock(UserModelConfigMapper.class), mock(BookKnowledgeBuildTaskMapper.class));
+
+        Map<String, Object> result = service.prepare(1L, 9L, 1, 5);
+
+        assertFalse((Boolean) result.get("canBuild"));
+        assertEquals(0, result.get("indexedChapterCount"));
+        assertEquals(5, result.get("missingChapterCount"));
+        assertEquals("第 1–5 章", result.get("missingChapterSummary"));
+    }
+
+    @Test
     void estimatesOnlyTheReaderSelectedInclusiveChapterRange() {
         KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
         when(chunkMapper.selectList(any(Wrapper.class))).thenReturn(
@@ -87,12 +103,33 @@ class BookKnowledgeBuildServiceImplTest {
     }
 
     @Test
-    void rejectsASelectedRangeOutsideIndexedChapters() {
+    void blocksARequestedRangeWhoseTrailingChaptersHaveNotBeenIndexed() {
         KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
         when(chunkMapper.selectList(any(Wrapper.class))).thenReturn(List.of(chunk(0, "chapter"), chunk(1, "chapter")));
         BookKnowledgeBuildServiceImpl service = service(chunkMapper, mock(UserModelConfigMapper.class), mock(BookKnowledgeBuildTaskMapper.class));
 
-        assertThrows(BusinessException.class, () -> service.prepare(1L, 9L, 1, 3));
+        Map<String, Object> result = service.prepare(1L, 9L, 1, 3);
+
+        assertFalse((Boolean) result.get("canBuild"));
+        assertEquals("第 3 章", result.get("missingChapterSummary"));
+    }
+
+    @Test
+    void blocksSparseIndexedEvidenceInsteadOfTreatingTheHighestChapterAsContinuous() {
+        KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
+        List<KnowledgeChunk> sparse = List.of(chunk(0, "第一章"), chunk(99, "第一百章"));
+        when(chunkMapper.selectList(any(Wrapper.class))).thenReturn(sparse);
+        BookKnowledgeBuildServiceImpl service = service(chunkMapper, mock(UserModelConfigMapper.class), mock(BookKnowledgeBuildTaskMapper.class));
+
+        Map<String, Object> result = service.prepare(1L, 9L, 1, 100);
+
+        assertFalse((Boolean) result.get("canBuild"));
+        assertEquals(2, result.get("indexedChapterCount"));
+        assertEquals(2, result.get("availableIndexedChapters"));
+        assertEquals(98, result.get("missingChapterCount"));
+        assertEquals("第 2–99 章", result.get("missingChapterSummary"));
+        assertEquals(0, result.get("estimatedCredits"));
+        assertTrue(((String) result.get("buildBlockedReason")).contains("第 2–99 章"));
     }
 
     @Test

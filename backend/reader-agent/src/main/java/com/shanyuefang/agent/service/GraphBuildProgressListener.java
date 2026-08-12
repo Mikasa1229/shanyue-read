@@ -10,6 +10,11 @@ public interface GraphBuildProgressListener {
 
     default void stageCompleted(Stage stage) { }
 
+    /** Completes a stage while preserving the real number of work units reported for it. */
+    default void stageCompleted(Stage stage, int totalUnits) {
+        stageCompleted(stage);
+    }
+
     default void stageProgress(Stage stage, int completedUnits, int totalUnits) { }
 
     enum Stage {

@@ -12,6 +12,7 @@ import com.shanyuefang.novel.service.ContentRecoveryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -53,5 +54,27 @@ public class InternalContentVersionController {
                                           @RequestParam int endChapter) {
         internalAccess.require(token);
         return R.ok(contentRecoveryService.enqueue(canonicalBookId, startChapter, endChapter));
+    }
+
+    /** Fetches chapters absent from the source-side ledger using the requester's current shelf source. */
+    @PostMapping("/prefetch/{canonicalBookId}")
+    public R<ContentRecoveryTask> prefetch(@RequestHeader("X-Agent-Internal-Token") String token,
+                                           @PathVariable long canonicalBookId,
+                                           @RequestParam long userId,
+                                           @RequestParam int startChapter,
+                                           @RequestParam int endChapter) {
+        internalAccess.require(token);
+        return R.ok(contentRecoveryService.enqueuePrefetch(userId, canonicalBookId, startChapter, endChapter));
+    }
+
+    @GetMapping("/prefetch/tasks/{taskId}")
+    public R<ContentRecoveryTask> prefetchTask(@RequestHeader("X-Agent-Internal-Token") String token,
+                                                @PathVariable long taskId, @RequestParam long userId) {
+        internalAccess.require(token);
+        ContentRecoveryTask task = contentRecoveryService.get(taskId);
+        if (task == null || !"PREFETCH".equals(task.getTaskType()) || !Long.valueOf(userId).equals(task.getRequesterUserId())) {
+            return R.fail(ResultCode.NOT_FOUND, "正文补齐任务不存在");
+        }
+        return R.ok(task);
     }
 }

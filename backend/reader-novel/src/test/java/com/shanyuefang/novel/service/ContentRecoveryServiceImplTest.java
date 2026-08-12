@@ -2,8 +2,11 @@ package com.shanyuefang.novel.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.shanyuefang.novel.domain.entity.BookContentVersion;
+import com.shanyuefang.novel.domain.entity.BookshelfBook;
 import com.shanyuefang.novel.domain.entity.ContentRecoveryTask;
+import com.shanyuefang.novel.domain.vo.BookChapterVO;
 import com.shanyuefang.novel.mapper.BookContentVersionMapper;
+import com.shanyuefang.novel.mapper.BookshelfBookMapper;
 import com.shanyuefang.novel.mapper.ContentRecoveryTaskMapper;
 import com.shanyuefang.novel.messaging.ContentRecoveryPublisher;
 import com.shanyuefang.novel.messaging.KnowledgeIndexPublisher;
@@ -30,6 +33,7 @@ import static org.mockito.Mockito.when;
 class ContentRecoveryServiceImplTest {
     @Mock private ContentRecoveryTaskMapper tasks;
     @Mock private BookContentVersionMapper versions;
+    @Mock private BookshelfBookMapper shelf;
     @Mock private BookSourceService sources;
     @Mock private KnowledgeIndexPublisher indexes;
     @Mock private ContentRecoveryPublisher recoveries;
@@ -74,8 +78,40 @@ class ContentRecoveryServiceImplTest {
         verify(indexes, never()).publish(anyLong(), org.mockito.ArgumentMatchers.anyInt(), anyString(), anyString());
     }
 
+    @Test
+    void prefetchUsesTheRequestersShelfSourceAndPublishesPreviouslyUnreadChapter() {
+        BookshelfBook book = new BookshelfBook();
+        book.setUserId(3L); book.setCanonicalBookId(9L); book.setSourceId(7L); book.setBookUrl("book-url");
+        when(shelf.selectOne(any(Wrapper.class))).thenReturn(book);
+
+        ContentRecoveryTask task = service().enqueuePrefetch(3L, 9L, 4, 4);
+
+        assertThat(task.getTaskType()).isEqualTo("PREFETCH");
+        assertThat(task.getSourceId()).isEqualTo(7L);
+        assertThat(task.getSourceBookUrl()).isEqualTo("book-url");
+        verify(recoveries).publish(task.getId());
+    }
+
+    @Test
+    void prefetchFetchesChapterContentAndHandsItToTheExistingIndexQueue() {
+        ContentRecoveryTask task = new ContentRecoveryTask();
+        task.setId(5L); task.setTaskType("PREFETCH"); task.setCanonicalBookId(9L); task.setSourceId(7L); task.setSourceBookUrl("book-url");
+        task.setStartChapter(4); task.setEndChapter(4); task.setTotalChapters(1);
+        BookChapterVO chapter = new BookChapterVO(); chapter.setIndex(4); chapter.setChapterUrl("chapter-4");
+        when(tasks.claim(5L)).thenReturn(1);
+        when(tasks.selectById(5L)).thenReturn(task);
+        when(sources.getChapters(7L, "book-url")).thenReturn(List.of(chapter));
+        when(sources.getContent(7L, "chapter-4")).thenReturn("新抓取的章节正文");
+
+        service().recover(5L);
+
+        verify(versions).insert(any(BookContentVersion.class));
+        verify(indexes).publish(eq(9L), eq(4), eq("新抓取的章节正文"), anyString());
+        assertThat(task.getStatus()).isEqualTo("COMPLETED");
+    }
+
     private ContentRecoveryServiceImpl service() {
-        return new ContentRecoveryServiceImpl(tasks, versions, sources, indexes, recoveries);
+        return new ContentRecoveryServiceImpl(tasks, versions, shelf, sources, indexes, recoveries, Runnable::run);
     }
 
     private BookContentVersion version(int chapter) {
