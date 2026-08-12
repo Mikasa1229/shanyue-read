@@ -7,12 +7,16 @@
       </transition>
     </router-view>
     <ToastManager />
+    <ConfirmDialog />
+    <AgentFloating />
   </div>
 </template>
 
 <script setup>
 import AppNav from '@/components/AppNav.vue'
 import ToastManager from '@/components/ToastManager.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import AgentFloating from '@/components/AgentFloating.vue'
 </script>
 
 <style scoped>

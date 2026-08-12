@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "1.0",
+  "round": "round-5-final",
+  "generatedAt": "2026-08-09T21:08:36.8168240+08:00",
+  "bookId": 358679512818388992,
+  "chapterRange": {
+    "end": 100,
+    "start": 1
+  },
+  "counts": {
+    "nodes": 94,
+    "clues": 19,
+    "edges": 31,
+    "aliases": 3
+  },
+  "nodeCountByType": {
+    "ORGANIZATION": 8,
+    "CLUE": 19,
+    "CHARACTER": 52,
+    "LOCATION": 14,
+    "EVENT": 1
+  },
+  "edgeCountByType": {
+    "INTERACTS_WITH": 6,
+    "TRAVELS_WITH": 4,
+    "MENTORS": 2,
+    "FAMILY_OF": 1,
+    "KNOWS": 5,
+    "OPPOSES": 2,
+    "MEMBER_OF": 1,
+    "LIVES_IN": 1,
+    "PARTICIPATES_IN": 3,
+    "VISITS": 6
+  },
+  "metrics": {
+    "isolatedNodeRate": 0.6915,
+    "characterConnectedRate": 0.3846,
+    "edgeNodeRatio": 0.3298,
+    "lowValueAtomicEventRate": 0.0,
+    "unsupportedEdgeEvidenceRate": 0.0,
+    "aliasFragmentGroupCount": 2,
+    "canonicalAliasPollutionCount": 0,
+    "requiredRelationRecall": 0.8,
+    "retrievalRecallAt5": 1.0,
+    "retrievalMrr": 0.6067,
+    "spoilerBoundaryViolationCount": 0
+  },
+  "failures": {
+    "lowValueEvents": [],
+    "aliasPollution": [],
+    "missingRequiredRelations": [
+      {
+        "source": "宋集薪",
+        "target": "泥瓶巷",
+        "hit": false
+      }
+    ],
+    "unsupportedEdges": [],
+    "aliasFragments": [
+      {
+        "canonical": "陈平安",
+        "fragments": [
+          "陈平安",
+          "草鞋少年"
+        ]
+      },
+      {
+        "canonical": "齐静春",
+        "fragments": [
+          "齐先生",
+          "齐静春"
+        ]
+      }
+    ],
+    "retrieval": [
+      {
+        "id": "early-home",
+        "hit": true,
+        "firstRank": 2,
+        "reciprocalRank": 0.5,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "liu-relationship",
+        "hit": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "ning-first-thread",
+        "hit": true,
+        "firstRank": 5,
+        "reciprocalRank": 0.2,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "qi-alias",
+        "hit": true,
+        "firstRank": 3,
+        "reciprocalRank": 0.3333333333333333,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "spoiler-boundary",
+        "hit": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      }
+    ]
+  }
+}

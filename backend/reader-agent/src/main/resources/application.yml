@@ -1,0 +1,147 @@
+server:
+  port: 8086
+
+spring:
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URL:http://localhost:9200}
+  application:
+    name: reader-agent
+  autoconfigure:
+    # Chat clients are instantiated per request so BYOK and the optional platform key
+    # never require a process-wide OpenAI-compatible credential at startup.
+    exclude: org.springframework.ai.autoconfigure.openai.OpenAiAutoConfiguration
+  profiles:
+    active: dev
+  config:
+    import: "optional:nacos:reader-agent.yaml"
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+      config:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        file-extension: yaml
+        group: reader
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/db_agent
+    username: ${PG_USER:postgres}
+    password: ${PG_PASSWORD:postgres}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 5
+  rabbitmq:
+    host: ${MQ_HOST:localhost}
+    port: ${MQ_PORT:5672}
+    username: ${MQ_USER:guest}
+    password: ${MQ_PASSWORD:guest}
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 1
+    validate-on-migrate: false
+
+mybatis-plus:
+  mapper-locations: classpath*:com/shanyuefang/**/mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: true
+      logic-not-delete-value: false
+      id-type: input
+
+app:
+  agent:
+    encryption-key: ${AGENT_ENCRYPTION_KEY:}
+    internal-token: ${AGENT_INTERNAL_TOKEN:}
+    gateway-token: ${AGENT_GATEWAY_TOKEN:}
+    native-tool-calling-enabled: ${AGENT_NATIVE_TOOL_CALLING_ENABLED:true}
+    platform-provider: deepseek
+    platform-model: ${AGENT_PLATFORM_MODEL:deepseek-chat}
+    platform-fast-model: ${AGENT_PLATFORM_FAST_MODEL:}
+    platform-strong-model: ${AGENT_PLATFORM_STRONG_MODEL:}
+    platform-api-key: ${DEEPSEEK_API_KEY:}
+    platform-base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    byok-allowed-hosts: ${AGENT_BYOK_ALLOWED_HOSTS:}
+    starter-credits: ${AGENT_STARTER_CREDITS:3}
+    max-input-chars: ${AGENT_MAX_INPUT_CHARS:4000}
+    max-output-tokens: ${AGENT_MAX_OUTPUT_TOKENS:1200}
+    max-context-tokens: ${AGENT_MAX_CONTEXT_TOKENS:3600}
+    embedding-model-version: ${AGENT_EMBEDDING_MODEL_VERSION:hash-embedding-v1}
+    embedding-provider: ${AGENT_EMBEDDING_PROVIDER:hash}
+    embedding-base-url: ${AGENT_EMBEDDING_BASE_URL:}
+    embedding-path: ${AGENT_EMBEDDING_PATH:/v1/embeddings}
+    embedding-api-key: ${AGENT_EMBEDDING_API_KEY:}
+    embedding-model: ${AGENT_EMBEDDING_MODEL:text-embedding-3-small}
+    embedding-dimensions: ${AGENT_EMBEDDING_DIMENSIONS:256}
+    embedding-operation-timeout-millis: ${AGENT_EMBEDDING_OPERATION_TIMEOUT_MILLIS:3000}
+    embedding-failure-cooldown-seconds: ${AGENT_EMBEDDING_FAILURE_COOLDOWN_SECONDS:30}
+    conversation-retention-days: ${AGENT_CONVERSATION_RETENTION_DAYS:90}
+    # The local Docker Compose stack provisions all three stores, so the
+    # default profile uses the full LightRAG evidence path. Set an explicit
+    # environment value to false only for a deliberately degraded run.
+    milvus-enabled: ${AGENT_MILVUS_ENABLED:true}
+    elasticsearch-enabled: ${AGENT_ELASTICSEARCH_ENABLED:true}
+    elasticsearch-index: ${AGENT_ELASTICSEARCH_INDEX:reader_agent_chunks}
+    milvus-host: ${MILVUS_HOST:localhost}
+    milvus-port: ${MILVUS_PORT:19530}
+    milvus-operation-timeout-millis: ${AGENT_MILVUS_OPERATION_TIMEOUT_MILLIS:1500}
+    milvus-failure-cooldown-seconds: ${AGENT_MILVUS_FAILURE_COOLDOWN_SECONDS:30}
+    milvus-collection: ${MILVUS_COLLECTION:reader_agent_chunks}
+    book-profile-collection: ${MILVUS_BOOK_PROFILE_COLLECTION:book_profile_vectors}
+    character-profile-collection: ${MILVUS_CHARACTER_COLLECTION:character_vectors}
+    event-profile-collection: ${MILVUS_EVENT_COLLECTION:event_vectors}
+    community-profile-collection: ${MILVUS_COMMUNITY_PROFILE_COLLECTION:lightrag_community_vectors}
+    user-preference-profile-collection: ${MILVUS_USER_PREFERENCE_COLLECTION:user_preference_vectors}
+    neo4j-enabled: ${AGENT_NEO4J_ENABLED:true}
+    neo4j-uri: ${NEO4J_URI:bolt://localhost:7687}
+    neo4j-username: ${NEO4J_USERNAME:neo4j}
+    neo4j-password: ${NEO4J_PASSWORD:}
+    neo4j-operation-timeout-millis: ${AGENT_NEO4J_OPERATION_TIMEOUT_MILLIS:1500}
+    neo4j-failure-cooldown-seconds: ${AGENT_NEO4J_FAILURE_COOLDOWN_SECONDS:30}
+    graph-llm-enabled: ${AGENT_GRAPH_LLM_ENABLED:false}
+    graph-llm-max-chars: ${AGENT_GRAPH_LLM_MAX_CHARS:8000}
+    graph-llm-operation-timeout-millis: ${AGENT_GRAPH_LLM_OPERATION_TIMEOUT_MILLIS:120000}
+    min-graph-confidence: ${AGENT_MIN_GRAPH_CONFIDENCE:0.60}
+    max-requests-per-minute: ${AGENT_MAX_REQUESTS_PER_MINUTE:20}
+    max-requests-per-ip-per-minute: ${AGENT_MAX_REQUESTS_PER_IP_PER_MINUTE:60}
+    max-concurrent-requests-per-session: ${AGENT_MAX_CONCURRENT_REQUESTS_PER_SESSION:1}
+    reranker-enabled: ${AGENT_RERANKER_ENABLED:false}
+    reranker-base-url: ${AGENT_RERANKER_BASE_URL:}
+    reranker-path: ${AGENT_RERANKER_PATH:/v1/rerank}
+    reranker-api-key: ${AGENT_RERANKER_API_KEY:}
+    reranker-model: ${AGENT_RERANKER_MODEL:rerank-v3.5}
+    reranker-operation-timeout-millis: ${AGENT_RERANKER_OPERATION_TIMEOUT_MILLIS:3000}
+    reranker-failure-cooldown-seconds: ${AGENT_RERANKER_FAILURE_COOLDOWN_SECONDS:30}
+    admin-user-ids: ${AGENT_ADMIN_USER_IDS:}
+    global-daily-platform-requests: ${AGENT_GLOBAL_DAILY_PLATFORM_REQUESTS:300}
+    global-daily-platform-tokens: ${AGENT_GLOBAL_DAILY_PLATFORM_TOKENS:200000}
+    platform-input-cost-micros-per-thousand: ${AGENT_PLATFORM_INPUT_COST_MICROS_PER_THOUSAND:0}
+    platform-output-cost-micros-per-thousand: ${AGENT_PLATFORM_OUTPUT_COST_MICROS_PER_THOUSAND:0}
+
+management:
+  health:
+    elasticsearch:
+      enabled: ${AGENT_ELASTICSEARCH_ENABLED:true}
+    neo4j:
+      enabled: ${AGENT_NEO4J_ENABLED:true}
+  tracing:
+    # Keep tracing opt-in for local runs without an OTLP collector.
+    sampling:
+      probability: ${AGENT_TRACE_SAMPLE_PROBABILITY:0.0}
+  otlp:
+    tracing:
+      endpoint: ${AGENT_OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn

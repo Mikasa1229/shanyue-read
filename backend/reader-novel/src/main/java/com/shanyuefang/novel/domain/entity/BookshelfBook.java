@@ -14,6 +14,7 @@ public class BookshelfBook {
 
     private Long userId;
     private Long sourceId;
+    private Long canonicalBookId;
     private String sourceName;
     private String bookName;
     private String author;

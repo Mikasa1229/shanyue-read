@@ -1,0 +1,159 @@
+{
+  "schemaVersion": "1.0",
+  "round": "round-6-final",
+  "generatedAt": "2026-08-09T23:34:31.8137687+08:00",
+  "bookId": 358679512818388992,
+  "chapterRange": {
+    "end": 100,
+    "start": 1
+  },
+  "counts": {
+    "aliases": 12,
+    "edges": 37,
+    "clues": 20,
+    "nodes": 82
+  },
+  "nodeCountByType": {
+    "LOCATION": 15,
+    "EVENT": 7,
+    "CLUE": 20,
+    "ORGANIZATION": 3,
+    "CHARACTER": 37
+  },
+  "edgeCountByType": {
+    "MENTORS": 1,
+    "FAMILY_OF": 1,
+    "LIVES_IN": 1,
+    "INTERACTS_WITH": 2,
+    "VISITS": 5,
+    "TRAVELS_WITH": 1,
+    "SUPPORTS": 1,
+    "SERVES": 1,
+    "PARTICIPATES_IN": 21,
+    "OPPOSES": 3
+  },
+  "metrics": {
+    "isolatedNodeRate": 0.622,
+    "characterConnectedRate": 0.4595,
+    "edgeNodeRatio": 0.4512,
+    "lowValueAtomicEventRate": 0.0,
+    "unsupportedEdgeEvidenceRate": 0.2162,
+    "aliasFragmentGroupCount": 0,
+    "canonicalAliasPollutionCount": 0,
+    "requiredRelationRecall": 0.2,
+    "genericCharacterRelationRate": 0.2222,
+    "identityResolutionRecall": 1.0,
+    "forbiddenRelationCount": 0,
+    "retrievalRecallAt5": 1.0,
+    "retrievalMrr": 0.9,
+    "spoilerBoundaryViolationCount": 0
+  },
+  "failures": {
+    "aliasFragments": [],
+    "unsupportedEdges": [
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 45,
+        "evidence": "【主线·已完成】第46章：“是我宁姚对不起你陈平安和刘羡阳”；第55章：“宁姚来到陈平安身边”；第55章：“陈平安收起宁姚借给自己的压衣刀”"
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 48,
+        "evidence": "【主线·已完成】第49章：“一堆破碎瓦砾当中，老猿耳朵微动，听到细微动静，咧咧嘴，弯腰拿起一块破瓦，掂量一番后，起身后迅猛砸出，瓦片如刀切豆腐一般，轻而易举穿透墙壁和屋顶，带着风雷之声破空而去，瓦片去..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 56,
+        "evidence": "【支线·已完成】第57章：“刘灞桥沉声道：“陈对，我没有眼瞎的话，看得出陈松风现在是给你帮忙，你就算不领情，也别说话这么难听！””；第60章：“衙署牌坊下。陈对聊了天南地北许多奇人趣闻轶事，正阳山小女..."
+      }
+    ],
+    "forbiddenRelations": [],
+    "lowValueEvents": [],
+    "missingIdentityResolutions": [],
+    "aliasPollution": [],
+    "retrieval": [
+      {
+        "id": "early-home",
+        "hit": true,
+        "firstRank": 2,
+        "reciprocalRank": 0.5,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "liu-relationship",
+        "hit": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "ning-first-thread",
+        "hit": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "qi-alias",
+        "hit": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "spoiler-boundary",
+        "hit": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      }
+    ],
+    "missingRequiredRelations": [
+      {
+        "source": "陈平安",
+        "target": "刘羡阳",
+        "hit": false
+      },
+      {
+        "source": "陈平安",
+        "target": "宋集薪",
+        "hit": false
+      },
+      {
+        "source": "陈平安",
+        "target": "泥瓶巷",
+        "hit": false
+      },
+      {
+        "source": "宋集薪",
+        "target": "泥瓶巷",
+        "hit": false
+      }
+    ]
+  }
+}

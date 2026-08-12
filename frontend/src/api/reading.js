@@ -1,7 +1,8 @@
 import http from './http'
 
-/** 记录本次阅读时长（秒） */
-export const apiRecordReading = (seconds) => http.post('/reading/record', { seconds })
+/** 服务端验证阅读会话：排行与积分只采纳可见页面心跳。 */
+export const apiStartReadingSession = (bookUrl) => http.post('/reading/sessions', { bookUrl })
+export const apiReadingHeartbeat = (sessionToken, pageVisible) => http.post('/reading/sessions/heartbeat', { sessionToken, pageVisible })
 
 /** 获取阅读时长排行榜 */
 export const apiGetRanking = (top = 50) => http.get('/reading/ranking', { params: { top } })

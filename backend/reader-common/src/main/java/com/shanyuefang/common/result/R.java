@@ -1,6 +1,8 @@
 package com.shanyuefang.common.result;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 
 import java.io.Serializable;
@@ -19,11 +21,19 @@ public class R<T> implements Serializable {
     private final T data;
     private final long timestamp;
 
-    private R(int code, String message, T data) {
+    @JsonCreator
+    private R(@JsonProperty("code") int code,
+              @JsonProperty("message") String message,
+              @JsonProperty("data") T data,
+              @JsonProperty("timestamp") long timestamp) {
         this.code = code;
         this.message = message;
         this.data = data;
-        this.timestamp = System.currentTimeMillis();
+        this.timestamp = timestamp > 0 ? timestamp : System.currentTimeMillis();
+    }
+
+    private R(int code, String message, T data) {
+        this(code, message, data, System.currentTimeMillis());
     }
 
     public static <T> R<T> ok() {

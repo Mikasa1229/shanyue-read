@@ -7,7 +7,7 @@
           <div class="user-card">
             <div class="user-avatar-wrap">
               <div class="user-avatar">
-                <img v-if="userInfo?.avatar" :src="userInfo.avatar" :alt="userInfo.nickname" />
+                <img v-if="userInfo?.avatar && !avatarLoadFailed" :src="userInfo.avatar" :alt="userInfo.nickname" @error="avatarLoadFailed = true" />
                 <span v-else class="avatar-text">{{ userInfo?.nickname?.charAt(0) ?? '读' }}</span>
               </div>
               <button class="avatar-edit-btn" title="更换头像" :disabled="avatarUploading" @click="$refs.avatarInput.click()">
@@ -33,7 +33,7 @@
                 <div v-for="task in levelInfo.dailyTasks || []" :key="task.taskId" class="task-row">
                   <span class="task-name">{{ task.title }}</span>
                   <span class="task-progress" :class="{ done: task.completed }">
-                    {{ task.completed ? '已完成' : `${task.progress}/${task.target}` }}
+                    {{ task.completed ? `已完成 · +${task.rewardCredits || 0} 积分` : `${task.progress}/${task.target} · +${task.rewardCredits || 0} 积分` }}
                   </span>
                 </div>
               </div>
@@ -195,6 +195,7 @@ import { apiUpdatePassword, apiUploadAvatar, apiGetMyLevel } from '@/api/user'
 import { apiGetMyNovels, apiDeleteNovel } from '@/api/novel'
 import { apiGetMyFavorites, apiRemoveFavorite } from '@/api/favorite'
 import { useToast } from '@/composables/useToast'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import CheckinCalendar from '@/components/CheckinCalendar.vue'
 import NovelCard from '@/components/NovelCard.vue'
 import PublishNovelModal from '@/components/PublishNovelModal.vue'
@@ -202,10 +203,12 @@ import PublishNovelModal from '@/components/PublishNovelModal.vue'
 const userStore = useUserStore()
 const router = useRouter()
 const { show } = useToast()
+const { confirm } = useConfirmDialog()
 
 const userInfo = computed(() => userStore.userInfo)
 const levelInfo = ref(null)
 const avatarUploading = ref(false)
+const avatarLoadFailed = ref(false)
 
 async function handleAvatarChange(e) {
   const file = e.target.files?.[0]
@@ -217,6 +220,7 @@ async function handleAvatarChange(e) {
     fd.append('file', file)
     await apiUploadAvatar(fd)
     await userStore.fetchProfile()
+    avatarLoadFailed.value = false
     show('头像已更新')
   } catch (err) {
     show(err.message)
@@ -298,7 +302,12 @@ async function loadMyNovels(page = 1) {
 }
 
 async function handleDeleteNovel(id) {
-  if (!confirm('确认删除该小说？')) return
+  if (!await confirm({
+    title: '删除小说',
+    message: '确定删除这部已发布的小说吗？小说详情、内容及互动记录将无法恢复。',
+    confirmText: '删除小说',
+    tone: 'danger'
+  })) return
   try {
     await apiDeleteNovel(id)
     show('已删除')
@@ -345,7 +354,7 @@ function goReadFav(book) {
 
 async function removeFav(book) {
   try {
-    await apiRemoveFavorite(book.bookUrl)
+    await apiRemoveFavorite(book)
     favorites.value = favorites.value.filter(b => b.id !== book.id)
     show('已取消收藏')
   } catch (e) {
@@ -578,6 +587,13 @@ onMounted(async () => {
   font-size: 1.125rem;
   color: var(--ink-0);
   margin-bottom: var(--space-6);
+}
+
+@media (min-width: 769px) {
+  .profile-main { min-height:0; }
+  .profile-main > .content-card:has(.checkin-calendar) { height:auto; box-sizing:border-box; overflow:visible; }
+  .profile-main > .content-card:has(.checkin-calendar) .content-title { margin-bottom: 14px; }
+  .profile-main > .content-card:has(.checkin-calendar) .checkin-calendar { max-height:none; box-sizing:border-box; overflow:visible; }
 }
 
 .auth-error {

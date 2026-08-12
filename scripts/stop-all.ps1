@@ -14,16 +14,16 @@ function Kill-Port($port) {
     }
     foreach ($line in $lines) {
         $parts = ($line.ToString().Trim() -split '\s+')
-        $pid = $parts[-1]
-        if ($pid -ne "0") {
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-            Write-Host "  [已终止] 端口 $port  - PID $pid" -ForegroundColor Green
+        $processId = $parts[-1]
+        if ($processId -ne "0") {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+            Write-Host "  [已终止] 端口 $port  - PID $processId" -ForegroundColor Green
         }
     }
 }
 
-Write-Host "[1/3] 停止后端服务（端口 8080-8085）..." -ForegroundColor Yellow
-foreach ($port in 8080, 8081, 8082, 8083, 8084, 8085) {
+Write-Host "[1/3] 停止后端服务（端口 8080-8086）..." -ForegroundColor Yellow
+foreach ($port in 8080, 8081, 8082, 8083, 8084, 8085, 8086) {
     Kill-Port $port
 }
 

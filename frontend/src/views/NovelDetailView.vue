@@ -147,6 +147,7 @@ import { apiCheckin } from '@/api/checkin'
 import { apiRecordLevelAction } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import InteractionBar from '@/components/InteractionBar.vue'
 import CommentSection from '@/components/CommentSection.vue'
 import CheckinCalendar from '@/components/CheckinCalendar.vue'
@@ -155,6 +156,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const { show } = useToast()
+const { confirm } = useConfirmDialog()
 
 const novel = ref(null)
 const loading = ref(true)
@@ -226,7 +228,12 @@ async function saveEdit() {
 }
 
 async function confirmDelete() {
-  if (!confirm(`确认删除《${novel.value.title}》？此操作不可撤销。`)) return
+  if (!await confirm({
+    title: '删除小说',
+    message: `确定删除《${novel.value.title}》吗？小说详情、内容及互动记录将无法恢复。`,
+    confirmText: '删除小说',
+    tone: 'danger'
+  })) return
   try {
     await apiDeleteNovel(novel.value.id)
     show('已删除')

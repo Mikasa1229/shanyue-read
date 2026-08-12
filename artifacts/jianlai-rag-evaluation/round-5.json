@@ -1,0 +1,82 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "round":  "round-5",
+    "generatedAt":  "2026-08-09T20:40:12.3290143+08:00",
+    "bookId":  358679512818388992,
+    "chapterRange":  {
+                         "start":  1,
+                         "end":  100
+                     },
+    "counts":  {
+                   "aliases":  3,
+                   "edges":  28,
+                   "clues":  30,
+                   "nodes":  104
+               },
+    "nodeCountByType":  {
+                            "CLUE":  30,
+                            "CHARACTER":  52,
+                            "LOCATION":  14,
+                            "ORGANIZATION":  8
+                        },
+    "edgeCountByType":  {
+                            "LIVES_IN":  1,
+                            "MENTORS":  2,
+                            "OPPOSES":  2,
+                            "VISITS":  6,
+                            "FAMILY_OF":  1,
+                            "TRAVELS_WITH":  4,
+                            "INTERACTS_WITH":  6,
+                            "KNOWS":  5,
+                            "MEMBER_OF":  1
+                        },
+    "metrics":  {
+                    "isolatedNodeRate":  0.7308,
+                    "characterConnectedRate":  0.3846,
+                    "edgeNodeRatio":  0.2692,
+                    "lowValueAtomicEventRate":  0,
+                    "unsupportedEdgeEvidenceRate":  0,
+                    "aliasFragmentGroupCount":  2,
+                    "canonicalAliasPollutionCount":  1,
+                    "requiredRelationRecall":  0.8
+                },
+    "failures":  {
+                     "lowValueEvents":  [
+
+                                        ],
+                     "missingRequiredRelations":  [
+                                                      {
+                                                          "source":  "宋集薪",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      }
+                                                  ],
+                     "aliasPollution":  [
+                                            {
+                                                "alias":  "宁姚",
+                                                "nodeId":  361878774007992320,
+                                                "type":  "CHARACTER",
+                                                "chapter":  23
+                                            }
+                                        ],
+                     "aliasFragments":  [
+                                            {
+                                                "canonical":  "陈平安",
+                                                "fragments":  [
+                                                                  "陈平安",
+                                                                  "草鞋少年"
+                                                              ]
+                                            },
+                                            {
+                                                "canonical":  "齐静春",
+                                                "fragments":  [
+                                                                  "齐先生",
+                                                                  "齐静春"
+                                                              ]
+                                            }
+                                        ],
+                     "unsupportedEdges":  [
+
+                                          ]
+                 }
+}

@@ -16,6 +16,10 @@
           <p class="book-author">{{ book.author || '未知作者' }}</p>
           <p class="book-intro">{{ book.intro || '暂无简介' }}</p>
           <p v-if="book.lastChapter" class="book-last">最新章节：{{ book.lastChapter }}</p>
+          <section v-if="sources.length" class="source-switcher" aria-label="可切换书源">
+            <div><b>阅读书源</b><small>切换书源不会创建新的作品、书架或知识图谱记录。</small></div>
+            <div class="source-options"><button v-for="source in sources" :key="`${source.sourceId}-${source.bookUrl}`" type="button" :class="{ active: String(source.sourceId) === String(book.sourceId) && source.bookUrl === book.bookUrl }" @click="selectSource(source)"><span>{{ source.sourceName || '未命名书源' }}</span><small>{{ source.availability === 'AVAILABLE' ? '可用' : '待验证' }}<template v-if="source.lastChapter"> · {{ source.lastChapter }}</template></small></button></div>
+          </section>
 
           <div class="action-row">
             <button class="btn btn-primary" :disabled="addingShelf || onShelf" @click="addToShelf">
@@ -62,7 +66,7 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { apiGetBookDetail, apiGetChaptersPage } from '@/api/bookSource'
+import { apiGetBookDetail, apiGetCanonicalSources, apiGetChaptersPage } from '@/api/bookSource'
 import { apiAddFavorite, apiCheckFavorited } from '@/api/favorite'
 import { apiAddToShelf, apiCheckOnShelf } from '@/api/bookshelf'
 import { useToast } from '@/composables/useToast'
@@ -82,7 +86,8 @@ const book = reactive({
   intro: route.query.intro || '',
   kind: route.query.kind || '',
   lastChapter: route.query.lastChapter || '',
-  bookUrl: route.query.bookUrl || ''
+  bookUrl: route.query.bookUrl || '',
+  canonicalBookId: route.query.canonicalBookId || ''
 })
 
 const loadingChapters = ref(false)
@@ -97,6 +102,7 @@ const favorited = ref(false)
 const onShelf = ref(false)
 const addingFav = ref(false)
 const addingShelf = ref(false)
+const sources = ref([])
 
 async function hydrateDetail() {
   if (!book.sourceId || !book.bookUrl) return
@@ -111,11 +117,34 @@ async function hydrateDetail() {
     book.intro = res.intro || book.intro || ''
     book.kind = res.kind || book.kind || ''
     book.lastChapter = res.lastChapter || book.lastChapter || ''
+    book.canonicalBookId = res.canonicalBookId || book.canonicalBookId || ''
   } catch (_) {
     // 兜底失败不阻断页面
   } finally {
     loadingDetail.value = false
   }
+}
+
+async function loadSources() {
+  if (!book.canonicalBookId) return
+  try {
+    const aggregate = await apiGetCanonicalSources(book.canonicalBookId)
+    sources.value = aggregate?.sources ?? []
+  } catch (_) {
+    // A source detail page remains readable even if the optional source list cannot be loaded.
+  }
+}
+
+async function selectSource(source) {
+  if (!source?.sourceId || !source.bookUrl || (String(source.sourceId) === String(book.sourceId) && source.bookUrl === book.bookUrl)) return
+  book.sourceId = source.sourceId
+  book.sourceName = source.sourceName || ''
+  book.bookUrl = source.bookUrl
+  book.lastChapter = source.lastChapter || ''
+  chapters.value = []
+  chapterPage.value = 1
+  await router.replace({ query: { ...route.query, sourceId: source.sourceId, sourceName: source.sourceName, bookUrl: source.bookUrl } })
+  await hydrateDetail()
 }
 
 async function openCatalog() {
@@ -179,6 +208,7 @@ function openChapter(chapter, idx) {
       author: book.author,
       coverUrl: book.coverUrl,
       intro: book.intro,
+      canonicalBookId: book.canonicalBookId,
       chapterUrl: chapter.chapterUrl,
       chapterIndex: idx ?? 0
     }
@@ -199,7 +229,8 @@ async function addToShelf() {
       bookName: book.name,
       author: book.author,
       coverUrl: book.coverUrl,
-      bookUrl: book.bookUrl
+      bookUrl: book.bookUrl,
+      canonicalBookId: book.canonicalBookId || undefined
     })
     onShelf.value = true
     show('已加入书架')
@@ -224,7 +255,8 @@ async function addFavorite() {
       bookName: book.name,
       author: book.author,
       coverUrl: book.coverUrl,
-      bookUrl: book.bookUrl
+      bookUrl: book.bookUrl,
+      canonicalBookId: book.canonicalBookId || undefined
     })
     favorited.value = true
     show('已加入收藏')
@@ -239,8 +271,8 @@ async function loadActionStatus() {
   if (!userStore.isLoggedIn || !book.bookUrl) return
   try {
     const [fav, shelf] = await Promise.all([
-      apiCheckFavorited(book.bookUrl),
-      apiCheckOnShelf(book.bookUrl)
+      apiCheckFavorited(book.bookUrl, book.canonicalBookId),
+      apiCheckOnShelf(book.bookUrl, book.canonicalBookId)
     ])
     favorited.value = !!fav?.favorited
     onShelf.value = !!shelf?.onShelf
@@ -255,6 +287,7 @@ function goHome() {
 
 onMounted(() => {
   hydrateDetail()
+  loadSources()
   loadActionStatus()
 })
 </script>
@@ -297,6 +330,7 @@ onMounted(() => {
 }
 .book-last { color: var(--ink-3); font-size: 0.875rem; margin-bottom: var(--space-6); }
 .action-row { display: flex; gap: var(--space-3); }
+.source-switcher { margin:var(--space-5) 0; border-top:1px solid var(--paper-3); border-bottom:1px solid var(--paper-3); padding:var(--space-4) 0; }.source-switcher > div:first-child { display:flex; align-items:baseline; gap:10px; }.source-switcher b { color:var(--ink-1); font-size:.86rem; }.source-switcher small { color:var(--ink-4); font-size:.72rem; }.source-options { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }.source-options button { display:grid; gap:3px; min-width:125px; border:1px solid var(--paper-3); border-radius:10px; padding:8px 10px; color:var(--ink-2); background:var(--paper-1); text-align:left; cursor:pointer; font:inherit; }.source-options button.active { border-color:#5c8767; color:#24563b; background:#e9f2df; }.source-options button:hover { border-color:#8cab72; }.source-options button span { font-size:.76rem; font-weight:800; }.source-options button small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .btn-shelf-on {
   background: var(--paper-2);
   color: var(--ink-3);

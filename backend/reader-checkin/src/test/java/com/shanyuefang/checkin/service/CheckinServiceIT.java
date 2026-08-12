@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -42,6 +44,13 @@ class CheckinServiceIT {
     @MockBean(name = "redisTemplate")
     @SuppressWarnings("rawtypes")
     private RedisTemplate redisTemplate;
+
+    /** 集成测试只验证打卡落库，隔离 Rabbit 生产端依赖。 */
+    @MockBean
+    private ConnectionFactory rabbitConnectionFactory;
+
+    @MockBean
+    private RabbitTemplate checkinRabbitTemplate;
 
     @Autowired
     private CheckinService checkinService;

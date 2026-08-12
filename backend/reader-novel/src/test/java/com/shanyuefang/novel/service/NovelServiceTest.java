@@ -8,6 +8,7 @@ import com.shanyuefang.novel.domain.vo.NovelSimpleVO;
 import com.shanyuefang.novel.domain.vo.NovelVO;
 import com.shanyuefang.novel.mapper.NovelMapper;
 import com.shanyuefang.novel.service.impl.NovelServiceImpl;
+import com.shanyuefang.novel.util.CoverSnapshotUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,15 +34,17 @@ class NovelServiceTest {
     @Mock NovelMapper novelMapper;
     @Mock RedisTemplate<String, Object> redisTemplate;
     @Mock ValueOperations<String, Object> valueOps;
+    @Mock CoverSnapshotUtil coverSnapshotUtil;
 
     NovelServiceImpl novelService;
 
     @BeforeEach
     void setUp() {
-        novelService = new NovelServiceImpl(redisTemplate);
+        novelService = new NovelServiceImpl(redisTemplate, coverSnapshotUtil);
         ReflectionTestUtils.setField(novelService, "baseMapper", novelMapper);
         ReflectionTestUtils.setField(novelService, "entityClass", Novel.class);
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        lenient().when(coverSnapshotUtil.snapshot(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     // ── create ────────────────────────────────────────────────

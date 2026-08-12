@@ -1,0 +1,25 @@
+services:
+  jmeter:
+    build:
+      context: .
+      args:
+        JMETER_VERSION: "5.6.3"
+    image: reader-jmeter:5.6.3
+    container_name: reader-jmeter
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    working_dir: /tests
+    volumes:
+      - ./:/tests:ro
+      - ../../logs/jmeter:/tests/output
+    command:
+      - -n
+      - -t
+      - /tests/reader-api-step-load.jmx
+      - -JBASE_HOST=host.docker.internal
+      - -JBASE_PORT=8080
+      - -l
+      - /tests/output/reader-api.jtl
+      - -e
+      - -o
+      - /tests/output/report

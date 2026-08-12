@@ -2,7 +2,8 @@ import axios from 'axios'
 
 // 将 JSON 中大整数 ID 字段转为字符串，防止 JS Number 精度丢失
 function safeParseBigIds(text) {
-  return text.replace(/"(id|sourceId)"\s*:\s*(\d{16,})/g, '"$1":"$2"')
+  // Graph edge endpoints are Snowflake IDs too. Preserve them before JSON parsing.
+  return text.replace(/"(id|source|target|sourceId|targetId|sourceNodeId|targetNodeId|canonicalBookId)"\s*:\s*(\d{16,})/g, '"$1":"$2"')
 }
 
 const http = axios.create({
@@ -39,7 +40,21 @@ http.interceptors.response.use(
     return Promise.reject(new Error(data.message || '请求失败'))
   },
   (err) => {
-    const msg = err.response?.data?.message || err.message || '网络异常'
+    const requestUrl = err.config?.url || ''
+    const status = err.response?.status
+    const responseBody = err.response?.data
+    // The Agent security filter deliberately emits this exact opaque response when
+    // a request bypasses the trusted gateway. Other 404s are ordinary missing
+    // resources and must not be misreported as a gateway configuration failure.
+    const gatewayRejected = requestUrl.includes('/agent') && status === 404 &&
+      responseBody?.code === 404 && responseBody?.message === 'Not found'
+    const timeoutMessage = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT'
+      ? '搜索服务响应超时，请稍后重试或检查已启用书源'
+      : null
+    const msg = timeoutMessage
+      || (gatewayRejected
+        ? 'Agent 服务未通过网关连接，请确认网关与 Agent 使用同一份 AGENT_GATEWAY_TOKEN 配置并重启服务'
+        : responseBody?.message || err.message || '网络异常')
     return Promise.reject(new Error(msg))
   }
 )

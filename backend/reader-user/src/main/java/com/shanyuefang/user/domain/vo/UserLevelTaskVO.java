@@ -11,5 +11,6 @@ public class UserLevelTaskVO {
     private int target;
     private int progress;
     private int rewardExp;
+    private int rewardCredits;
     private boolean completed;
 }

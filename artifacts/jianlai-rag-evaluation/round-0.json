@@ -1,0 +1,114 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "round":  "round-0",
+    "generatedAt":  "2026-08-09T19:03:42.3784145+08:00",
+    "bookId":  358679512818388992,
+    "chapterRange":  {
+                         "start":  1,
+                         "end":  100
+                     },
+    "counts":  {
+                   "aliases":  42,
+                   "edges":  29,
+                   "clues":  0,
+                   "nodes":  41
+               },
+    "nodeCountByType":  {
+                            "ORGANIZATION":  1,
+                            "LOCATION":  2,
+                            "EVENT":  11,
+                            "CHARACTER":  27
+                        },
+    "edgeCountByType":  {
+                            "OPPOSES":  2,
+                            "INTERACTS_WITH":  3,
+                            "PARTICIPATES_IN":  21,
+                            "KNOWS":  3
+                        },
+    "metrics":  {
+                    "isolatedNodeRate":  0.561,
+                    "characterConnectedRate":  0.2593,
+                    "edgeNodeRatio":  0.7073,
+                    "lowValueAtomicEventRate":  0,
+                    "unsupportedEdgeEvidenceRate":  0.1379,
+                    "aliasFragmentGroupCount":  3,
+                    "requiredRelationRecall":  0
+                },
+    "failures":  {
+                     "lowValueEvents":  [
+
+                                        ],
+                     "missingRequiredRelations":  [
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "刘羡阳",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "宋集薪",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "宁姚",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "宋集薪",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      }
+                                                  ],
+                     "aliasFragments":  [
+                                            {
+                                                "canonical":  "陈平安",
+                                                "fragments":  [
+                                                                  "陈平安",
+                                                                  "草鞋少年"
+                                                              ]
+                                            },
+                                            {
+                                                "canonical":  "宁姚",
+                                                "fragments":  [
+                                                                  "宁姚",
+                                                                  "黑衣少女"
+                                                              ]
+                                            },
+                                            {
+                                                "canonical":  "齐静春",
+                                                "fragments":  [
+                                                                  "齐先生",
+                                                                  "齐静春"
+                                                              ]
+                                            }
+                                        ],
+                     "unsupportedEdges":  [
+                                              {
+                                                  "type":  "OPPOSES",
+                                                  "chapter":  19,
+                                                  "evidence":  "少年左手握住的利器，完完全全没入蔡金简的喉咙"
+                                              },
+                                              {
+                                                  "type":  "PARTICIPATES_IN",
+                                                  "chapter":  19,
+                                                  "evidence":  "少年左手握住的利器，完完全全没入蔡金简的喉咙"
+                                              },
+                                              {
+                                                  "type":  "OPPOSES",
+                                                  "chapter":  19,
+                                                  "evidence":  "蔡金简一提起那个草鞋少年，就满心厌恶"
+                                              },
+                                              {
+                                                  "type":  "PARTICIPATES_IN",
+                                                  "chapter":  19,
+                                                  "evidence":  "蔡金简一提起那个草鞋少年，就满心厌恶"
+                                              }
+                                          ]
+                 }
+}

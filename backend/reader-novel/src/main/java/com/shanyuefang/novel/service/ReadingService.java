@@ -4,6 +4,10 @@ import com.shanyuefang.novel.domain.vo.RankingVO;
 
 import java.util.List;
 
+import com.shanyuefang.novel.domain.dto.ReadingHeartbeatDTO;
+import com.shanyuefang.novel.domain.dto.StartReadingSessionDTO;
+import com.shanyuefang.novel.domain.vo.ReadingSessionVO;
+
 public interface ReadingService {
 
     /**
@@ -12,8 +16,6 @@ public interface ReadingService {
      * @param userId  用户 ID
      * @param seconds 本次阅读秒数
      */
-    void record(long userId, int seconds);
-
     /**
      * 获取阅读时长排行榜 Top N
      *
@@ -21,4 +23,8 @@ public interface ReadingService {
      * @return 排行列表（含用户信息）
      */
     List<RankingVO> getRanking(int top);
+
+    ReadingSessionVO startSession(long userId, StartReadingSessionDTO dto);
+
+    ReadingSessionVO heartbeat(long userId, ReadingHeartbeatDTO dto);
 }

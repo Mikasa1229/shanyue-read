@@ -14,6 +14,7 @@
         <router-link to="/book-sources" class="nav-link">书源</router-link>
         <router-link to="/ranking" class="nav-link">排行</router-link>
         <router-link v-if="userStore.isLoggedIn" to="/bookshelf" class="nav-link">书架</router-link>
+        <router-link to="/agent?tab=overview" :class="{ 'nav-link-agent-current': ['Agent', 'KnowledgeGraphManage'].includes(route.name) }" class="nav-link nav-agent-link">助手</router-link>
       </nav>
 
       <!-- Right Actions -->
@@ -21,9 +22,10 @@
         <template v-if="userStore.isLoggedIn">
           <router-link to="/profile" class="nav-avatar" :title="userStore.userInfo?.nickname">
             <img
-              v-if="userStore.userInfo?.avatar"
+              v-if="userStore.userInfo?.avatar && !avatarLoadFailed"
               :src="userStore.userInfo.avatar"
               :alt="userStore.userInfo.nickname"
+              @error="avatarLoadFailed = true"
             />
             <span v-else class="avatar-placeholder">
               {{ userStore.userInfo?.nickname?.charAt(0) ?? '读' }}
@@ -42,12 +44,14 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
 const router = useRouter()
+const route = useRoute()
 const isScrolled = ref(false)
+const avatarLoadFailed = ref(false)
 
 function onScroll() {
   isScrolled.value = window.scrollY > 20
@@ -145,7 +149,15 @@ async function handleLogout() {
   color: var(--ink-0);
 }
 
-.nav-link.router-link-active::after {
+.nav-link.router-link-active:not(.nav-agent-link)::after {
+  width: 100%;
+}
+
+.nav-link-agent-current {
+  color: var(--ink-0);
+}
+
+.nav-link-agent-current::after {
   width: 100%;
 }
 

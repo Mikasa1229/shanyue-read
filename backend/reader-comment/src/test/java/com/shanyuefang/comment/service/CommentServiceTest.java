@@ -45,6 +45,7 @@ class CommentServiceTest {
         CreateCommentDTO dto = new CreateCommentDTO();
         dto.setNovelId(100L);
         dto.setContent("这本书很好看");
+        dto.setScore(5);
 
         when(commentMapper.insert(any(Comment.class))).thenReturn(1);
         when(userFeignClient.batchGetUsers(any())).thenReturn(null);
@@ -55,6 +56,24 @@ class CommentServiceTest {
         assertThat(vo.getNovelId()).isEqualTo(100L);
         verify(commentMapper).insert(argThat((Comment c) -> c.getRootId() == null && c.getParentId() == null));
         verify(eventProducer).sendCommentCreated(eq(100L), anyLong());
+    }
+
+    @Test
+    @DisplayName("知识图谱动态 - 不作为评分计数，保留结构化活动类型")
+    void createComment_knowledgeGraphActivityDoesNotCreateRatingEvent() {
+        CreateCommentDTO dto = new CreateCommentDTO();
+        dto.setNovelId(100L);
+        dto.setBookTitle("剑来");
+        dto.setActivityType("KNOWLEDGE_GRAPH_BUILD");
+        dto.setContent("我构建了《剑来》第 1 章到第 10 章的知识图谱。");
+        when(commentMapper.insert(any(Comment.class))).thenReturn(1);
+        when(userFeignClient.batchGetUsers(any())).thenReturn(null);
+
+        CommentVO result = commentService.createComment(1L, dto);
+
+        assertThat(result.getActivityType()).isEqualTo("KNOWLEDGE_GRAPH_BUILD");
+        assertThat(result.getScore()).isNull();
+        verify(eventProducer, never()).sendCommentCreated(any(), any());
     }
 
     @Test

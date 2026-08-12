@@ -9,10 +9,11 @@
         <div class="topbar-chapter">{{ currentChapterName }}</div>
       </div>
       <div class="topbar-actions">
-        <button v-if="userStore.isLoggedIn" class="topbar-btn topbar-collect" :class="{ 'collected': isFavorited }" @click="addToShelf">
+        <button v-if="userStore.isLoggedIn" class="topbar-btn topbar-collect" :class="{ 'collected': isFavorited }" @click="addFavorite">
           {{ isFavorited ? '♥' : '♡' }}
         </button>
         <button class="topbar-btn" title="写书评" @click="shareOpen = true">书评</button>
+        <button v-if="canonicalBookId" class="topbar-btn" title="换源" @click="openSourceSwitch">换源</button>
         <button class="topbar-btn" :class="{ 'topbar-bookmarked': isCurrentBookmarked }" title="书签" @click="toggleBookmark">🔖</button>
         <button class="topbar-btn" title="目录" @click="tocOpen = true">☰</button>
         <button class="topbar-btn" title="设置" @click="settingsOpen = true">⚙</button>
@@ -186,6 +187,16 @@
         </div>
       </div>
     </Teleport>
+    <Teleport to="body">
+      <div v-if="sourceSwitchOpen" class="toc-overlay" @click.self="sourceSwitchOpen = false">
+        <div class="toc-panel source-switch-panel">
+          <div class="toc-header"><span>切换书源</span><button class="toc-close" @click="sourceSwitchOpen = false">✕</button></div>
+          <p class="source-switch-tip">将按当前章节标题定位；无法确认时不会自动跳转。</p>
+          <button v-for="source in readableSources" :key="`${source.sourceId}-${source.bookUrl}`" class="source-reader-option" :class="{ active: String(source.sourceId) === String(sourceId) && source.bookUrl === bookUrl }" :disabled="sourceSwitching" @click="switchSource(source)"><b>{{ source.sourceName || '未命名书源' }}</b><small>{{ source.lastChapter || '可用来源' }}</small></button>
+          <p v-if="sourceSwitchMessage" class="source-switch-tip">{{ sourceSwitchMessage }}</p>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -193,12 +204,11 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { apiGetChapters, apiGetContent } from '@/api/bookSource'
+import { apiGetCanonicalSources, apiGetChapters, apiGetContent } from '@/api/bookSource'
 import { apiUpdateReadingProgress } from '@/api/bookshelf'
-import { apiRecordReading } from '@/api/reading'
+import { apiReadingHeartbeat, apiStartReadingSession } from '@/api/reading'
 import { apiAddFavorite, apiCheckFavorited } from '@/api/favorite'
 import { apiCreateComment } from '@/api/comment'
-import { apiRecordLevelAction } from '@/api/user'
 import { useToast } from '@/composables/useToast'
 
 const route  = useRoute()
@@ -216,6 +226,7 @@ const bookCoverUrl = computed(() => route.query.coverUrl || '')
 const bookIntro   = computed(() => route.query.intro || '')
 const initChapterUrl   = computed(() => route.query.chapterUrl)
 const initChapterIndex = computed(() => parseInt(route.query.chapterIndex) || 0)
+const canonicalBookId = computed(() => route.query.canonicalBookId || '')
 
 // ─── 章节数据 ─────────────────────────────────────────────────
 const chapters     = ref([])
@@ -226,6 +237,9 @@ const loadingNext  = ref(false)
 const noMoreChapters = ref(false)
 const isFavorited = ref(false)
 let readerOpenTime = 0
+let readingSessionToken = ''
+let readingHeartbeatTimer = 0
+let lastReportedChapter = -1
 
 const currentChapterName = computed(() => chapters.value[currentIndex.value]?.chapterName ?? '')
 
@@ -290,9 +304,13 @@ const atTop     = ref(true)
 const settingsOpen = ref(false)
 const tocOpen      = ref(false)
 const bookmarkOpen = ref(false)
+const sourceSwitchOpen = ref(false)
+const sourceSwitching = ref(false)
+const sourceSwitchMessage = ref('')
+const readableSources = ref([])
 
 // ─── 书签 ─────────────────────────────────────────────────────
-const bookmarkKey = computed(() => bookUrl.value ? `reader_bookmarks_${bookUrl.value}` : null)
+const bookmarkKey = computed(() => canonicalBookId.value ? `reader_bookmarks_${canonicalBookId.value}` : (bookUrl.value ? `reader_bookmarks_${bookUrl.value}` : null))
 
 const bookmarks = ref([])
 
@@ -340,6 +358,55 @@ function formatBmTime(ts) {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 }
 
+function normalizedChapterTitle(value) {
+  return String(value || '').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
+}
+
+async function openSourceSwitch() {
+  sourceSwitchMessage.value = ''
+  sourceSwitchOpen.value = true
+  try {
+    const aggregate = await apiGetCanonicalSources(canonicalBookId.value)
+    readableSources.value = (aggregate?.sources ?? []).filter(source => source.sourceId && source.bookUrl)
+  } catch (error) {
+    sourceSwitchMessage.value = error.message || '暂时无法读取可用书源。'
+  }
+}
+
+async function switchSource(source) {
+  if (!source?.sourceId || !source.bookUrl || sourceSwitching.value) return
+  const current = chapters.value[currentIndex.value]
+  if (!current) return
+  sourceSwitching.value = true
+  sourceSwitchMessage.value = ''
+  try {
+    const candidateChapters = await apiGetChapters(source.sourceId, source.bookUrl)
+    const exactIndex = candidateChapters.findIndex(chapter => normalizedChapterTitle(chapter.chapterName) === normalizedChapterTitle(current.chapterName))
+    if (exactIndex < 0) {
+      const nearby = candidateChapters.findIndex(chapter => Math.abs(Number(chapter.index) - currentIndex.value) <= 3
+        && normalizedChapterTitle(chapter.chapterName).includes(normalizedChapterTitle(current.chapterName)))
+      sourceSwitchMessage.value = nearby >= 0
+        ? `找到相近章节“${candidateChapters[nearby].chapterName}”，为避免跳错章节，请先在目录中确认。`
+        : '新书源无法确认当前章节位置，未切换。'
+      return
+    }
+    const target = candidateChapters[exactIndex]
+    await router.replace({ query: { ...route.query, sourceId: String(source.sourceId), sourceName: source.sourceName || '', bookUrl: source.bookUrl, chapterUrl: target.chapterUrl, chapterIndex: String(exactIndex) } })
+    chapters.value = candidateChapters
+    loadedChunks.value = []
+    noMoreChapters.value = false
+    currentIndex.value = exactIndex
+    lastReportedChapter = -1
+    await loadChapterContent(exactIndex)
+    sourceSwitchOpen.value = false
+    show(`已切换至${source.sourceName || '新书源'}并定位到当前章节`)
+  } catch (error) {
+    sourceSwitchMessage.value = error.message || '切换书源失败，请稍后重试。'
+  } finally {
+    sourceSwitching.value = false
+  }
+}
+
 // ─── DOM refs ─────────────────────────────────────────────────
 const bottomTrigger = ref(null)
 const topTrigger    = ref(null)
@@ -359,7 +426,7 @@ function setChapterChunkRef(el, chapterUrl) {
 }
 
 // ─── 收藏 ────────────────────────────────────────────────────
-async function addToShelf() {
+async function addFavorite() {
   if (isFavorited.value) return
   try {
     await apiAddFavorite({
@@ -369,6 +436,7 @@ async function addToShelf() {
       author: bookAuthor.value,
       coverUrl: bookCoverUrl.value,
       bookUrl: bookUrl.value,
+      canonicalBookId: canonicalBookId.value || undefined,
     })
     isFavorited.value = true
   } catch (e) {
@@ -396,8 +464,6 @@ async function submitShare() {
       score: shareScore.value,
       content: shareContent.value.trim()
     })
-    apiRecordLevelAction('COMMENT').catch(() => {})
-    apiRecordLevelAction('RATE').catch(() => {})
     shareOpen.value = false
     shareContent.value = ''
     shareScore.value = 4
@@ -409,13 +475,21 @@ async function submitShare() {
 }
 
 function reportReadDuration() {
-  if (readerOpenTime <= 0 || !userStore.isLoggedIn) return
-  const seconds = Math.floor((Date.now() - readerOpenTime) / 1000)
-  if (seconds >= 5) {
-    apiRecordReading(seconds).catch(() => {})
-    apiRecordLevelAction('READ_SECONDS', seconds).catch(() => {})
-  }
   readerOpenTime = 0
+}
+
+async function beginVerifiedReadingSession() {
+  if (!userStore.isLoggedIn || !bookUrl.value) return
+  try {
+    const session = await apiStartReadingSession(bookUrl.value)
+    readingSessionToken = session.sessionToken
+    readingHeartbeatTimer = window.setInterval(() => {
+      if (!readingSessionToken) return
+      apiReadingHeartbeat(readingSessionToken, document.visibilityState === 'visible').catch(() => {})
+    }, 45_000)
+  } catch (_) {
+    // Legacy duration tracking remains available if the session service is temporarily unavailable.
+  }
 }
 
 // ─── 段落格式化 ───────────────────────────────────────────────
@@ -440,22 +514,14 @@ async function loadChapterContent(idx, isPreload = false) {
   loadedChunks.value.push(chunk)
 
   try {
-    const res = await apiGetContent(sourceId.value, ch.chapterUrl)
+    const res = await apiGetContent(sourceId.value, ch.chapterUrl, bookUrl.value, idx, canonicalBookId.value || undefined)
     const raw = res?.content ?? ''
     chunk.html = formatContent(raw) || '<p>（正文内容为空）</p>'
     chunk.loading = false
     if (!isPreload) {
       currentIndex.value = idx
       // 上报阅读进度（仅主动加载才上报）
-      if (userStore.isLoggedIn) {
-        apiUpdateReadingProgress({
-          bookUrl: bookUrl.value,
-          chapterName: ch.chapterName,
-          chapterUrl: ch.chapterUrl,
-          chapterIndex: idx,
-          totalChapters: chapters.value.length
-        }).catch(() => {})
-      }
+      reportChapterProgress(idx)
     }
     if (!isPreload) {
       ensurePreloadWindow(idx)
@@ -463,6 +529,26 @@ async function loadChapterContent(idx, isPreload = false) {
   } catch (e) {
     chunk.loading = false
     chunk.error = e.message
+  }
+}
+
+function reportChapterProgress(idx) {
+  const chapter = chapters.value[idx]
+  if (!userStore.isLoggedIn || !chapter || idx === lastReportedChapter) return
+  lastReportedChapter = idx
+  apiUpdateReadingProgress({
+    bookUrl: bookUrl.value,
+    canonicalBookId: canonicalBookId.value || undefined,
+    sourceId: sourceId.value || undefined,
+    sourceName: sourceName.value || undefined,
+    chapterName: chapter.chapterName,
+    chapterUrl: chapter.chapterUrl,
+    chapterIndex: idx,
+    totalChapters: chapters.value.length
+  }).catch(() => { lastReportedChapter = -1 })
+  // Keep every Agent entry point bound to the chapter actually on screen.
+  if (String(route.query.chapterIndex ?? '') !== String(idx)) {
+    router.replace({ query: { ...route.query, chapterIndex: String(idx) } })
   }
 }
 
@@ -490,11 +576,12 @@ async function loadPrevChapter() {
   loadedChunks.value.unshift(chunk)
 
   try {
-    const res = await apiGetContent(sourceId.value, prevCh.chapterUrl)
+    const res = await apiGetContent(sourceId.value, prevCh.chapterUrl, bookUrl.value, prevIdx, canonicalBookId.value || undefined)
     const raw = res?.content ?? ''
     chunk.html = formatContent(raw) || '<p>（正文内容为空）</p>'
     chunk.loading = false
     currentIndex.value = prevIdx
+    reportChapterProgress(prevIdx)
     ensurePreloadWindow(prevIdx)
   } catch (e) {
     chunk.error = e.message
@@ -563,6 +650,7 @@ function syncCurrentChapterFromView(force = false) {
   }
   if (force || activeIdx !== currentIndex.value) {
     currentIndex.value = activeIdx
+    reportChapterProgress(activeIdx)
     ensurePreloadWindow(activeIdx)
   }
 }
@@ -591,11 +679,12 @@ function goBack() {
 onMounted(async () => {
   readerOpenTime = Date.now()
   window.addEventListener('scroll', onScroll)
+  beginVerifiedReadingSession()
   loadBookmarks()
 
   // 检查是否已收藏
   if (userStore.isLoggedIn && bookUrl.value) {
-    apiCheckFavorited(bookUrl.value).then(res => {
+    apiCheckFavorited(bookUrl.value, canonicalBookId.value || undefined).then(res => {
       isFavorited.value = res?.favorited ?? false
     }).catch(() => {})
   }
@@ -638,6 +727,8 @@ onUnmounted(() => {
   observer?.disconnect()
   topObserver?.disconnect()
   if (chapterSyncRaf) window.cancelAnimationFrame(chapterSyncRaf)
+  if (readingHeartbeatTimer) window.clearInterval(readingHeartbeatTimer)
+  if (readingSessionToken) apiReadingHeartbeat(readingSessionToken, document.visibilityState === 'visible').catch(() => {})
   window.removeEventListener('scroll', onScroll)
   reportReadDuration()
 })
@@ -654,6 +745,7 @@ onUnmounted(() => {
 .bg-rice  { --reader-bg: #f5f0e8; --reader-ink: #3a3228; background: var(--reader-bg); color: var(--reader-ink); }
 .bg-green { --reader-bg: #e8f0e8; --reader-ink: #2a3a2a; background: var(--reader-bg); color: var(--reader-ink); }
 .bg-dark  { --reader-bg: #1a1a1a; --reader-ink: #f5f5f5; background: var(--reader-bg); color: var(--reader-ink); }
+.source-switch-panel { max-width:420px; }.source-switch-tip { margin:12px 16px; color:var(--ink-3); font-size:.8rem; line-height:1.5; }.source-reader-option { display:grid; width:calc(100% - 24px); gap:4px; margin:0 12px 8px; border:1px solid var(--paper-3); border-radius:10px; padding:10px 12px; color:var(--ink-2); background:var(--paper-1); text-align:left; cursor:pointer; font:inherit; }.source-reader-option.active { border-color:#739665; background:#e8f0dd; }.source-reader-option:disabled { cursor:wait; opacity:.65; }.source-reader-option b { font-size:.86rem; }.source-reader-option small { overflow:hidden; color:var(--ink-4); font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }
 
 /* ── 顶部栏 ── */
 .reader-topbar {

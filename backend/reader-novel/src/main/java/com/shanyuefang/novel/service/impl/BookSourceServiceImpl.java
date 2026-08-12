@@ -2,25 +2,38 @@ package com.shanyuefang.novel.service.impl;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shanyuefang.common.exception.BusinessException;
 import com.shanyuefang.common.result.ResultCode;
 import com.shanyuefang.common.util.SnowflakeIdUtil;
 import com.shanyuefang.novel.domain.entity.BookSource;
+import com.shanyuefang.novel.domain.entity.BookSourceMapping;
 import com.shanyuefang.novel.domain.vo.BookChapterVO;
 import com.shanyuefang.novel.domain.vo.BookSourceVO;
 import com.shanyuefang.novel.domain.vo.SearchBookVO;
+import com.shanyuefang.novel.domain.vo.AggregatedBookVO;
+import com.shanyuefang.novel.domain.vo.BookSourceSummaryVO;
 import com.shanyuefang.novel.engine.BookSourceModel;
 import com.shanyuefang.novel.engine.HttpFetcher;
 import com.shanyuefang.novel.engine.LegadoRuleEngine;
 import com.shanyuefang.novel.mapper.BookSourceMapper;
+import com.shanyuefang.novel.mapper.BookSourceMappingMapper;
 import com.shanyuefang.novel.service.BookSourceService;
+import com.shanyuefang.novel.service.CanonicalBookService;
+import com.shanyuefang.novel.util.CoverSnapshotUtil;
+import com.shanyuefang.novel.domain.dto.ResolveCanonicalBookDTO;
+import com.shanyuefang.novel.messaging.KnowledgeIndexPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.net.URI;
@@ -28,11 +41,17 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
@@ -46,6 +65,14 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     private static final ObjectMapper OM = new ObjectMapper();
     private static final long CHAPTER_CACHE_TTL_MS = 5 * 60 * 1000L;
     private static final ConcurrentHashMap<String, CachedChapters> CHAPTER_CACHE = new ConcurrentHashMap<>();
+    private static final Cache<String, List<SearchBookVO>> AGGREGATE_SOURCE_RESULTS_CACHE = Caffeine.newBuilder()
+            .maximumSize(200).expireAfterWrite(Duration.ofSeconds(45)).build();
+    private final CanonicalBookService canonicalBookService;
+    private final CoverSnapshotUtil coverSnapshotUtil;
+    private final KnowledgeIndexPublisher knowledgeIndexPublisher;
+    private final BookSourceMappingMapper mappingMapper;
+    @Qualifier("bookSourceSearchExecutor")
+    private final Executor bookSourceSearchExecutor;
 
     private record CachedChapters(long cacheAt, List<BookChapterVO> chapters) {}
 
@@ -115,6 +142,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                 log.warn("书源导入跳过（解析失败）: {}", e.getMessage());
             }
         }
+        AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
         log.info("书源导入完成，共保存 {} 条", saved);
         return saved;
     }
@@ -138,6 +166,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         if (bs == null) throw new BusinessException(ResultCode.NOT_FOUND, "书源不存在");
         bs.setEnabled(!Boolean.TRUE.equals(bs.getEnabled()));
         updateById(bs);
+        AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
     }
 
     @Override
@@ -146,6 +175,11 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         BookSource bs = getById(id);
         if (bs == null) throw new BusinessException(ResultCode.NOT_FOUND, "书源不存在");
         removeById(id);
+        AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
+        List<Long> orphanedWorks = canonicalBookService.detachSource(id);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() { orphanedWorks.forEach(knowledgeIndexPublisher::publishDelete); }
+        });
     }
 
     // ─── 搜索 ─────────────────────────────────────────────────
@@ -153,6 +187,14 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     @Override
     public List<SearchBookVO> search(Long sourceId, String keyword, int page) {
         BookSource bs = getEnabledSource(sourceId);
+        return searchSource(bs, keyword, page, true);
+    }
+
+    /**
+     * Aggregation must not synchronously download every remote cover or create records for every hit.
+     * Those costly enrichments still happen when a user opens a specific source result.
+     */
+    private List<SearchBookVO> searchSource(BookSource bs, String keyword, int page, boolean enrichResult) {
         BookSourceModel model = parseModel(bs);
 
         String rawSearchUrl = model.getSearchUrl();
@@ -186,15 +228,17 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         List<SearchBookVO> results = new ArrayList<>();
         for (String item : items) {
             SearchBookVO vo = new SearchBookVO();
-            vo.setSourceId(sourceId);
+            vo.setSourceId(bs.getId());
             vo.setSourceName(bs.getSourceName());
             vo.setName(extractField(model.effectiveSearchName(), item));
-            vo.setAuthor(extractField(model.effectiveSearchAuthor(), item));
-            vo.setCoverUrl(extractField(model.effectiveSearchCover(), item));
+            vo.setAuthor(displayAuthor(extractField(model.effectiveSearchAuthor(), item)));
+            String coverUrl = resolveUrl(extractField(model.effectiveSearchCover(), item), model.getBookSourceUrl());
+            vo.setCoverUrl(enrichResult ? snapshotCover(coverUrl) : coverUrl);
             vo.setIntro(extractField(model.effectiveSearchIntro(), item));
             vo.setKind(extractField(model.effectiveSearchKind(), item));
             vo.setLastChapter(extractField(model.effectiveSearchLastChapter(), item));
             vo.setBookUrl(resolveUrl(extractField(model.effectiveSearchBookUrl(), item), model.getBookSourceUrl()));
+            if (enrichResult) resolveCanonical(vo);
             results.add(vo);
         }
         return results;
@@ -220,8 +264,8 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         BookSourceModel.BookInfoRule info = model.getRuleBookInfo();
         if (info != null) {
             vo.setName(extractField(info.getName(), body));
-            vo.setAuthor(extractField(info.getAuthor(), body));
-            vo.setCoverUrl(resolveUrl(extractField(info.getCoverUrl(), body), model.getBookSourceUrl()));
+            vo.setAuthor(displayAuthor(extractField(info.getAuthor(), body)));
+            vo.setCoverUrl(snapshotCover(resolveUrl(extractField(info.getCoverUrl(), body), model.getBookSourceUrl())));
             vo.setIntro(extractField(info.getIntro(), body));
             vo.setKind(extractField(info.getKind(), body));
             vo.setLastChapter(extractField(info.getLastChapter(), body));
@@ -231,7 +275,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         // 兼容没有 ruleBookInfo 的书源，尽量用搜索规则做兜底
         vo.setName(firstNonBlank(vo.getName(), extractField(model.effectiveSearchName(), body), extractTitle(body)));
         vo.setAuthor(firstNonBlank(vo.getAuthor(), extractField(model.effectiveSearchAuthor(), body)));
-        vo.setCoverUrl(firstNonBlank(vo.getCoverUrl(), resolveUrl(extractField(model.effectiveSearchCover(), body), model.getBookSourceUrl())));
+        vo.setCoverUrl(snapshotCover(firstNonBlank(vo.getCoverUrl(), resolveUrl(extractField(model.effectiveSearchCover(), body), model.getBookSourceUrl()))));
         vo.setIntro(firstNonBlank(vo.getIntro(), extractField(model.effectiveSearchIntro(), body), extractMetaDescription(body)));
         vo.setKind(firstNonBlank(vo.getKind(), extractField(model.effectiveSearchKind(), body)));
         vo.setLastChapter(firstNonBlank(vo.getLastChapter(), extractField(model.effectiveSearchLastChapter(), body)));
@@ -246,7 +290,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                         .orElse(candidates.stream().findFirst().orElse(null));
                 if (matched != null) {
                     vo.setIntro(firstNonBlank(vo.getIntro(), matched.getIntro()));
-                    vo.setCoverUrl(firstNonBlank(vo.getCoverUrl(), matched.getCoverUrl()));
+                    vo.setCoverUrl(snapshotCover(firstNonBlank(vo.getCoverUrl(), matched.getCoverUrl())));
                     vo.setAuthor(firstNonBlank(vo.getAuthor(), matched.getAuthor()));
                     vo.setKind(firstNonBlank(vo.getKind(), matched.getKind()));
                     vo.setLastChapter(firstNonBlank(vo.getLastChapter(), matched.getLastChapter()));
@@ -257,6 +301,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         }
 
         vo.setIntro(firstNonBlank(vo.getIntro(), extractMetaDescription(body)));
+        resolveCanonical(vo);
 
         return vo;
     }
@@ -547,6 +592,26 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         return null;
     }
 
+    private void resolveCanonical(SearchBookVO book) {
+        if (!StringUtils.hasText(book.getName()) || !StringUtils.hasText(book.getBookUrl()) || book.getSourceId() == null) return;
+        ResolveCanonicalBookDTO dto = new ResolveCanonicalBookDTO();
+        dto.setSourceId(book.getSourceId());
+        dto.setBookUrl(book.getBookUrl());
+        dto.setTitle(book.getName());
+        dto.setAuthor(book.getAuthor());
+        dto.setCoverUrl(book.getCoverUrl());
+        dto.setSummary(book.getIntro());
+        try {
+            book.setCanonicalBookId(canonicalBookService.resolve(dto).getCanonicalBookId());
+        } catch (Exception e) {
+            log.warn("Canonical book resolution failed: sourceId={}, bookUrl={}", book.getSourceId(), book.getBookUrl(), e);
+        }
+    }
+
+    private String snapshotCover(String coverUrl) {
+        return coverSnapshotUtil.snapshot(coverUrl);
+    }
+
     private String extractTitle(String html) {
         if (!StringUtils.hasText(html)) return null;
         Matcher matcher = Pattern.compile("<title>(.*?)</title>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(html);
@@ -571,6 +636,90 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
     @Override
     public List<SearchBookVO> aggregateSearch(String keyword, int page) {
+        return deduplicateAggregateResults(aggregateSourceResults(keyword, page)).stream()
+                .sorted(Comparator.<SearchBookVO>comparingInt(book -> searchRelevance(keyword, book.getName(), book.getAuthor()))
+                        .thenComparing(Comparator.comparingInt(this::resultQuality).reversed())
+                        .thenComparing(SearchBookVO::getName, Comparator.nullsLast(String::compareTo)))
+                .toList();
+    }
+
+    @Override
+    public List<AggregatedBookVO> aggregateCanonicalSearch(String keyword, int page) {
+        List<SearchBookVO> sourceResults = aggregateSourceResults(keyword, page);
+        Map<String, List<SearchBookVO>> grouped = sourceResults.stream()
+                .filter(book -> book.getCanonicalBookId() != null)
+                .collect(java.util.stream.Collectors.groupingBy(this::canonicalSearchIdentity,
+                        LinkedHashMap::new, java.util.stream.Collectors.toList()));
+        return grouped.values().stream().map(books -> aggregateBook(preferredCanonicalBookId(books), books))
+                .sorted(Comparator.<AggregatedBookVO>comparingInt(book -> searchRelevance(keyword, book.getName(), book.getAuthor()))
+                        .thenComparing(Comparator.comparingInt(AggregatedBookVO::getSourceCount).reversed())
+                        .thenComparing(AggregatedBookVO::getName, Comparator.nullsLast(String::compareTo)))
+                .toList();
+    }
+
+    @Override
+    public List<AggregatedBookVO> canonicalBookSources(Long canonicalBookId) {
+        if (canonicalBookId == null) return List.of();
+        List<Long> equivalentIds = canonicalBookService.equivalentCanonicalBookIds(canonicalBookId);
+        if (equivalentIds.isEmpty()) return List.of();
+        List<BookSourceMapping> mappings = mappingMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BookSourceMapping>()
+                .in(BookSourceMapping::getCanonicalBookId, equivalentIds));
+        if (mappings.isEmpty()) return List.of();
+        Map<Long, BookSource> sources = listByIds(mappings.stream().map(BookSourceMapping::getSourceId).distinct().toList())
+                .stream().collect(java.util.stream.Collectors.toMap(BookSource::getId, source -> source));
+        List<SearchBookVO> books = mappings.stream().map(mapping -> {
+            SearchBookVO book = new SearchBookVO();
+            book.setCanonicalBookId(canonicalBookId);
+            book.setSourceId(mapping.getSourceId());
+            book.setBookUrl(mapping.getSourceBookUrl());
+            book.setName(mapping.getSourceTitle());
+            book.setAuthor(displayAuthor(mapping.getSourceAuthor()));
+            BookSource source = sources.get(mapping.getSourceId());
+            book.setSourceName(source == null ? "已移除书源" : source.getSourceName());
+            return book;
+        }).toList();
+        return List.of(aggregateBook(canonicalBookId, books));
+    }
+
+    private AggregatedBookVO aggregateBook(Long canonicalBookId, List<SearchBookVO> books) {
+        SearchBookVO preferred = books.stream().max(Comparator.comparingInt(this::resultQuality)).orElseThrow();
+        AggregatedBookVO result = new AggregatedBookVO();
+        result.setCanonicalBookId(canonicalBookId);
+        result.setName(firstPresent(books, SearchBookVO::getName, preferred.getName()));
+        result.setAuthor(firstPresent(books, SearchBookVO::getAuthor, preferred.getAuthor()));
+        result.setCoverUrl(firstPresent(books, SearchBookVO::getCoverUrl, preferred.getCoverUrl()));
+        result.setIntro(firstPresent(books, SearchBookVO::getIntro, preferred.getIntro()));
+        result.setKind(firstPresent(books, SearchBookVO::getKind, preferred.getKind()));
+        result.setLastChapter(firstPresent(books, SearchBookVO::getLastChapter, preferred.getLastChapter()));
+        List<BookSourceSummaryVO> sources = books.stream()
+                .filter(book -> book.getSourceId() != null && StringUtils.hasText(book.getBookUrl()))
+                .collect(java.util.stream.Collectors.toMap(book -> book.getSourceId() + "|" + book.getBookUrl(), book -> book,
+                        (left, right) -> resultQuality(left) >= resultQuality(right) ? left : right, LinkedHashMap::new))
+                .values().stream().sorted(Comparator.comparingInt(this::resultQuality).reversed())
+                .map(this::sourceSummary).toList();
+        result.setSources(sources);
+        result.setSourceCount(sources.size());
+        result.setPreferredSource(sources.isEmpty() ? null : sources.get(0));
+        return result;
+    }
+
+    private BookSourceSummaryVO sourceSummary(SearchBookVO book) {
+        BookSourceSummaryVO source = new BookSourceSummaryVO();
+        source.setSourceId(book.getSourceId()); source.setSourceName(book.getSourceName()); source.setBookUrl(book.getBookUrl());
+        source.setLastChapter(book.getLastChapter()); source.setAvailability("AVAILABLE");
+        return source;
+    }
+
+    private String firstPresent(List<SearchBookVO> books, java.util.function.Function<SearchBookVO, String> getter, String fallback) {
+        return books.stream().map(getter).filter(StringUtils::hasText).max(Comparator.comparingInt(String::length)).orElse(fallback);
+    }
+
+    private List<SearchBookVO> aggregateSourceResults(String keyword, int page) {
+        String cacheKey = keyword == null ? "" : keyword.trim().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
+        cacheKey += "|" + Math.max(1, page);
+        List<SearchBookVO> cached = AGGREGATE_SOURCE_RESULTS_CACHE.getIfPresent(cacheKey);
+        if (cached != null) return cached;
+
         // 查所有启用的书源
         List<BookSource> sources = lambdaQuery()
                 .eq(BookSource::getEnabled, true)
@@ -578,33 +727,162 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
         if (sources.isEmpty()) return List.of();
 
-        // 并发调用每个书源搜索，单个书源超时 8 秒
+        long startedAt = System.nanoTime();
+        // Use the dedicated I/O pool instead of the CPU-sized common pool. A slow source is capped
+        // independently, so it cannot turn one aggregation into a multi-batch wait.
         List<CompletableFuture<List<SearchBookVO>>> futures = sources.stream()
-                .map(bs -> CompletableFuture.supplyAsync(() -> {
-                    try {
-                        return search(bs.getId(), keyword, page);
-                    } catch (Exception e) {
-                        log.warn("聚合搜索：书源 [{}] 搜索失败，跳过: {}", bs.getSourceName(), e.getMessage());
-                        return List.<SearchBookVO>of();
-                    }
-                }))
+                .map(bs -> searchSourceAsync(bs, keyword, page))
                 .toList();
 
-        // 等待所有并发任务完成（最多 15 秒）
+        // The response budget is deliberately below the front-end timeout. Timed-out sources may
+        // finish in the background, but their late results never keep this request open.
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                    .get(15, TimeUnit.SECONDS);
+                    .get(8, TimeUnit.SECONDS);
         } catch (Exception e) {
-            log.warn("聚合搜索等待超时，已有结果正常返回");
+            log.warn("聚合搜索达到响应预算，返回已完成书源的结果");
         }
 
-        // 收集所有结果
-        return futures.stream()
+        List<SearchBookVO> results = futures.stream()
                 .filter(f -> f.isDone() && !f.isCompletedExceptionally())
                 .flatMap(f -> {
-                    try { return f.get().stream(); } catch (Exception ex) { return java.util.stream.Stream.of(); }
+                    try {
+                    return f.get().stream();
+                } catch (Exception ex) {
+                    return java.util.stream.Stream.of();
+                }
                 })
                 .collect(java.util.stream.Collectors.toList());
+        resolveCanonicalIds(results);
+        AGGREGATE_SOURCE_RESULTS_CACHE.put(cacheKey, results);
+        log.info("聚合搜索完成: keyword={}, sources={}, results={}, elapsedMs={}", keyword, sources.size(), results.size(),
+                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt));
+        return results;
+    }
+
+    private List<SearchBookVO> deduplicateAggregateResults(List<SearchBookVO> books) {
+        Map<String, SearchBookVO> unique = new java.util.LinkedHashMap<>();
+        Map<String, String> coverIdentities = new HashMap<>();
+        for (SearchBookVO book : books) {
+            if (book == null) continue;
+            String key = aggregateIdentity(book);
+            String coverIdentity = coverIdentity(book);
+            if (!coverIdentity.isBlank()) key = coverIdentities.getOrDefault(coverIdentity, key);
+            SearchBookVO existing = unique.get(key);
+            if (existing == null || resultQuality(book) > resultQuality(existing)) unique.put(key, book);
+            if (!coverIdentity.isBlank()) coverIdentities.put(coverIdentity, key);
+        }
+        return new ArrayList<>(unique.values());
+    }
+
+    private String aggregateIdentity(SearchBookVO book) {
+        String title = normalizedBookField(book.getName());
+        String author = normalizedAuthorField(book.getAuthor());
+        if (!title.isBlank() && !"未知书名".equals(title)) return "title|" + title + "|" + author;
+        String cover = normalizedBookField(book.getCoverUrl());
+        String intro = normalizedBookField(book.getIntro());
+        if (!cover.isBlank()) return "cover|" + cover + "|" + author;
+        if (book.getSourceId() != null && StringUtils.hasText(book.getBookUrl())) return "source|" + book.getSourceId() + "|" + book.getBookUrl();
+        return "fallback|" + author + "|" + intro + "|" + System.identityHashCode(book);
+    }
+
+    private String coverIdentity(SearchBookVO book) {
+        String cover = normalizedBookField(book.getCoverUrl());
+        if (cover.isBlank()) return "";
+        return cover + "|" + normalizedAuthorField(book.getAuthor());
+    }
+
+    private int resultQuality(SearchBookVO book) {
+        int score = 0;
+        if (StringUtils.hasText(book.getName()) && !"未知书名".equals(book.getName().trim())) score += 8;
+        if (StringUtils.hasText(book.getAuthor())) score += 2;
+        if (StringUtils.hasText(book.getIntro())) score += 2;
+        if (StringUtils.hasText(book.getCoverUrl())) score += 1;
+        if (StringUtils.hasText(book.getBookUrl())) score += 1;
+        return score;
+    }
+
+    /**
+     * Sort search results by what the reader typed before using metadata completeness or source count.
+     * This is deliberately based on fields returned by every source instead of source-specific rules.
+     */
+    static int searchRelevance(String keyword, String title, String author) {
+        String query = normalizedSearchText(keyword);
+        if (query.isEmpty()) return 0;
+        String normalizedTitle = normalizedSearchText(title);
+        if (normalizedTitle.equals(query)) return 0;
+        if (normalizedTitle.startsWith(query)) return 100 + normalizedTitle.length() - query.length();
+        int titleMatchIndex = normalizedTitle.indexOf(query);
+        if (titleMatchIndex >= 0) return 200 + titleMatchIndex;
+
+        String normalizedAuthor = normalizedSearchText(author);
+        if (normalizedAuthor.equals(query)) return 300;
+        if (normalizedAuthor.startsWith(query)) return 400 + normalizedAuthor.length() - query.length();
+        int authorMatchIndex = normalizedAuthor.indexOf(query);
+        if (authorMatchIndex >= 0) return 500 + authorMatchIndex;
+        return 1_000;
+    }
+
+    private static String normalizedSearchText(String value) {
+        if (value == null) return "";
+        // Ignore display punctuation such as 《》 and spaces so the visible title matches reader intent.
+        return value.replaceAll("[\\s\\p{P}\\p{S}]+", "").toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private String normalizedBookField(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", "").trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private String canonicalSearchIdentity(SearchBookVO book) {
+        return normalizedSearchText(book.getName()) + "|" + normalizedAuthorField(book.getAuthor());
+    }
+
+    private Long preferredCanonicalBookId(List<SearchBookVO> books) {
+        return books.stream().map(SearchBookVO::getCanonicalBookId).filter(java.util.Objects::nonNull)
+                .min(Long::compareTo).orElseThrow();
+    }
+
+    private static String displayAuthor(String value) {
+        if (value == null) return null;
+        return value.replaceFirst("^\\s*(?:作者|作\\s*者)\\s*[:：]?\\s*", "").trim();
+    }
+
+    static String normalizedAuthorField(String value) {
+        return normalizedSearchText(displayAuthor(value));
+    }
+
+    private CompletableFuture<List<SearchBookVO>> searchSourceAsync(BookSource source, String keyword, int page) {
+        try {
+            return CompletableFuture.supplyAsync(() -> {
+                try {
+                    return searchSource(source, keyword, page, false);
+                } catch (Exception e) {
+                    log.debug("聚合搜索跳过书源 [{}]: {}", source.getSourceName(), e.getMessage());
+                    return List.<SearchBookVO>of();
+                }
+            }, bookSourceSearchExecutor).completeOnTimeout(List.<SearchBookVO>of(), 7, TimeUnit.SECONDS);
+        } catch (RejectedExecutionException e) {
+            log.warn("聚合搜索线程池繁忙，暂跳过书源 [{}]", source.getSourceName());
+            return CompletableFuture.completedFuture(List.<SearchBookVO>of());
+        }
+    }
+
+    private void resolveCanonicalIds(List<SearchBookVO> books) {
+        if (books.isEmpty()) return;
+        HashSet<Long> sourceIds = new HashSet<>();
+        for (SearchBookVO book : books) if (book.getSourceId() != null) sourceIds.add(book.getSourceId());
+        if (sourceIds.isEmpty()) return;
+        Map<String, Long> knownIds = new HashMap<>();
+        mappingMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BookSourceMapping>()
+                        .in(BookSourceMapping::getSourceId, sourceIds))
+                .forEach(mapping -> knownIds.put(mapping.getSourceId() + "|" + mapping.getSourceBookUrl(), mapping.getCanonicalBookId()));
+        for (SearchBookVO book : books) {
+            Long canonicalBookId = knownIds.get(book.getSourceId() + "|" + book.getBookUrl());
+            if (canonicalBookId != null) book.setCanonicalBookId(canonicalBookId);
+        }
+        // Preserve the aggregate API contract for new works as well. The mapping batch above avoids
+        // a per-hit lookup for known books; only genuinely new source entries need to be persisted.
+        books.stream().filter(book -> book.getCanonicalBookId() == null).forEach(this::resolveCanonical);
     }
 
     private BookSourceVO toVO(BookSource bs) {

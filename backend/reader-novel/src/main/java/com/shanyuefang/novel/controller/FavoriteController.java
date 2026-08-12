@@ -31,8 +31,9 @@ public class FavoriteController {
     /** 取消收藏 */
     @DeleteMapping
     public R<Void> remove(@RequestHeader("X-User-Id") Long userId,
-                          @RequestParam String bookUrl) {
-        favoriteService.removeFavorite(userId, bookUrl);
+                          @RequestParam(required = false) Long canonicalBookId,
+                          @RequestParam(required = false) String bookUrl) {
+        favoriteService.removeFavorite(userId, canonicalBookId, bookUrl);
         return R.ok();
     }
 
@@ -47,8 +48,9 @@ public class FavoriteController {
     /** 检查某本书是否已收藏 */
     @GetMapping("/check")
     public R<Map<String, Boolean>> check(@RequestHeader("X-User-Id") Long userId,
-                                         @RequestParam String bookUrl) {
-        boolean favorited = favoriteService.isFavorited(userId, bookUrl);
+                                         @RequestParam(required = false) Long canonicalBookId,
+                                         @RequestParam(required = false) String bookUrl) {
+        boolean favorited = favoriteService.isFavorited(userId, canonicalBookId, bookUrl);
         return R.ok(Map.of("favorited", favorited));
     }
 }

@@ -32,8 +32,9 @@ public class BookshelfController {
     /** 移出书架 */
     @DeleteMapping
     public R<Void> remove(@RequestHeader("X-User-Id") Long userId,
-                          @RequestParam String bookUrl) {
-        bookshelfService.removeBook(userId, bookUrl);
+                          @RequestParam(required = false) Long canonicalBookId,
+                          @RequestParam(required = false) String bookUrl) {
+        bookshelfService.removeBook(userId, canonicalBookId, bookUrl);
         return R.ok();
     }
 
@@ -48,8 +49,9 @@ public class BookshelfController {
     /** 检查某本书是否已在书架 */
     @GetMapping("/check")
     public R<Map<String, Boolean>> check(@RequestHeader("X-User-Id") Long userId,
-                                         @RequestParam String bookUrl) {
-        boolean onShelf = bookshelfService.isOnShelf(userId, bookUrl);
+                                         @RequestParam(required = false) Long canonicalBookId,
+                                         @RequestParam(required = false) String bookUrl) {
+        boolean onShelf = bookshelfService.isOnShelf(userId, canonicalBookId, bookUrl);
         return R.ok(Map.of("onShelf", onShelf));
     }
 

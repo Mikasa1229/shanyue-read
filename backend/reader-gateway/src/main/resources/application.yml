@@ -22,6 +22,10 @@ spring:
           enabled: true          # 自动从 Nacos 发现服务
           lower-case-service-id: true
       routes:
+        - id: reader-user-uploads
+          uri: lb://reader-user
+          predicates:
+            - Path=/uploads/**
         - id: reader-user
           uri: lb://reader-user
           predicates:
@@ -29,7 +33,7 @@ spring:
         - id: reader-novel
           uri: lb://reader-novel
           predicates:
-            - Path=/api/novels/**,/api/book-sources/**,/api/reading/**,/api/bookshelf/**,/api/favorites/**
+            - Path=/api/novels/**,/api/book-sources/**,/api/reading/**,/api/bookshelf/**,/api/favorites/**,/api/covers/**
         - id: reader-comment
           uri: lb://reader-comment
           predicates:
@@ -42,6 +46,10 @@ spring:
           uri: lb://reader-checkin
           predicates:
             - Path=/api/checkins/**
+        - id: reader-agent
+          uri: lb://reader-agent
+          predicates:
+            - Path=/api/agent/**
 
   # Redis（Sa-Token 共享会话）
   data:
@@ -64,3 +72,8 @@ sa-token:
 logging:
   level:
     com.shanyuefang: debug
+
+app:
+  gateway:
+    # Shared only with reader-agent; it stops direct service-port callers from forging X-User-Id.
+    agent-forward-token: ${AGENT_GATEWAY_TOKEN:}

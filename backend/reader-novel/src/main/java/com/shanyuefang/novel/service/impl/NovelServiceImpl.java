@@ -14,6 +14,7 @@ import com.shanyuefang.novel.domain.vo.NovelSimpleVO;
 import com.shanyuefang.novel.domain.vo.NovelVO;
 import com.shanyuefang.novel.mapper.NovelMapper;
 import com.shanyuefang.novel.service.NovelService;
+import com.shanyuefang.novel.util.CoverSnapshotUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -33,6 +34,7 @@ import java.util.stream.Collectors;
 public class NovelServiceImpl extends ServiceImpl<NovelMapper, Novel> implements NovelService {
 
     private final RedisTemplate<String, Object> redisTemplate;
+    private final CoverSnapshotUtil coverSnapshotUtil;
 
     /** 小说详情缓存 key: novel:detail:{id} */
     private static final String DETAIL_KEY = "novel:detail:%d";
@@ -50,7 +52,7 @@ public class NovelServiceImpl extends ServiceImpl<NovelMapper, Novel> implements
         novel.setTitle(dto.getTitle());
         novel.setAuthorName(dto.getAuthorName());
         novel.setCategory(dto.getCategory());
-        novel.setCoverUrl(dto.getCoverUrl());
+        novel.setCoverUrl(coverSnapshotUtil.snapshot(dto.getCoverUrl()));
         novel.setSummary(dto.getSummary());
         novel.setStatus(dto.getStatus());
         novel.setWordCount(0L);
@@ -69,7 +71,7 @@ public class NovelServiceImpl extends ServiceImpl<NovelMapper, Novel> implements
         if (StringUtils.hasText(dto.getTitle()))      novel.setTitle(dto.getTitle());
         if (StringUtils.hasText(dto.getAuthorName())) novel.setAuthorName(dto.getAuthorName());
         if (StringUtils.hasText(dto.getCategory()))   novel.setCategory(dto.getCategory());
-        if (dto.getCoverUrl() != null)                novel.setCoverUrl(dto.getCoverUrl());
+        if (dto.getCoverUrl() != null)                novel.setCoverUrl(coverSnapshotUtil.snapshot(dto.getCoverUrl()));
         if (dto.getSummary()  != null)                novel.setSummary(dto.getSummary());
         if (dto.getStatus()   != null)                novel.setStatus(dto.getStatus());
         updateById(novel);

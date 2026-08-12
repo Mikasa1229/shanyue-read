@@ -92,9 +92,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useToast } from '@/composables/useToast'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { apiListSources, apiToggleSource, apiDeleteSource, apiImportByUrl, apiImportByJson, apiTestSource } from '@/api/bookSource'
 
 const { show } = useToast()
+const { confirm } = useConfirmDialog()
 
 const sources = ref([])
 const sourcesLoading = ref(false)
@@ -142,7 +144,12 @@ async function doTestSource(s) {
 }
 
 async function deleteSource(s) {
-  if (!confirm(`确认删除书源「${s.sourceName}」？`)) return
+  if (!await confirm({
+    title: '删除书源',
+    message: `确定删除书源「${s.sourceName}」吗？该书源下的作品将无法继续检索。`,
+    confirmText: '删除书源',
+    tone: 'danger'
+  })) return
   try {
     await apiDeleteSource(s.id)
     await loadSources(sourcePage.value)

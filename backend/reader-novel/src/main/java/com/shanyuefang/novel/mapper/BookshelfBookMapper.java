@@ -14,6 +14,9 @@ public interface BookshelfBookMapper extends BaseMapper<BookshelfBook> {
     /** 根据 bookUrl 列表获取各书的代表性元数据 */
     List<BookshelfBook> selectMetaByUrls(@Param("urls") List<String> urls);
 
+    /** 根据规范作品 ID 列表获取各作品的代表性元数据。 */
+    List<BookshelfBook> selectMetaByCanonicalIds(@Param("ids") List<Long> ids);
+
     /** 热门书籍：按加入书架用户数排序（DB 兜底） */
     List<HotBookVO> selectHotBooks(@Param("limit") int limit);
 }

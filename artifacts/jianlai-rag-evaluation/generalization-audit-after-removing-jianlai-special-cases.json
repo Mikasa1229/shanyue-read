@@ -1,0 +1,440 @@
+{
+  "schemaVersion": "2.0",
+  "round": "generalization-audit-after-removing-jianlai-special-cases",
+  "generatedAt": "2026-08-11T02:32:43.3508004+08:00",
+  "bookId": 358679512818388992,
+  "chapterRange": {
+    "end": 100,
+    "start": 1
+  },
+  "counts": {
+    "nodes": 81,
+    "aliases": 15,
+    "edges": 41,
+    "clues": 20
+  },
+  "nodeCountByType": {
+    "LOCATION": 15,
+    "CHARACTER": 36,
+    "EVENT": 7,
+    "ORGANIZATION": 3,
+    "CLUE": 20
+  },
+  "edgeCountByType": {
+    "HELPS": 3,
+    "TEACHER_OF": 1,
+    "PARENT_OF": 1,
+    "SERVES": 1,
+    "PARTICIPATES_IN": 21,
+    "LIVES_IN": 1,
+    "FRIEND_OF": 1,
+    "PROTECTS": 1,
+    "VISITS": 5,
+    "NEIGHBOR_OF": 2,
+    "MASTER_OF": 1,
+    "KNOWS": 3
+  },
+  "metrics": {
+    "isolatedNodeRate": 0.5926,
+    "characterConnectedRate": 0.5278,
+    "edgeNodeRatio": 0.5062,
+    "lowValueAtomicEventRate": 0.0,
+    "unsupportedEdgeEvidenceRate": 0.2195,
+    "aliasFragmentGroupCount": 0,
+    "canonicalAliasPollutionCount": 0,
+    "requiredRelationRecall": 0.375,
+    "semanticCharacterRelationRecall": 0.4286,
+    "supportedCharacterRelationEvidenceRate": 0.9231,
+    "distinctCharacterRelationTypes": 8,
+    "genericCharacterRelationRate": 0.2308,
+    "identityResolutionRecall": 1.0,
+    "forbiddenRelationCount": 0,
+    "retrievalRecallAt5": 0.8889,
+    "retrievalMrr": 0.6667,
+    "spoilerBoundaryViolationCount": 0
+  },
+  "failures": {
+    "missingRequiredRelations": [
+      {
+        "id": "liu-chen-helps",
+        "source": "刘羡阳",
+        "target": "陈平安",
+        "kind": "NARRATIVE",
+        "acceptedTypes": [
+          "HELPS",
+          "GUIDES"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          3,
+          18
+        ]
+      },
+      {
+        "id": "qi-chen-guides",
+        "source": "齐静春",
+        "target": "陈平安",
+        "kind": "NARRATIVE",
+        "acceptedTypes": [
+          "GUIDES"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          21,
+          22,
+          23
+        ]
+      },
+      {
+        "id": "chen-ning-protects",
+        "source": "陈平安",
+        "target": "宁姚",
+        "kind": "NARRATIVE",
+        "acceptedTypes": [
+          "PROTECTS",
+          "HELPS",
+          "TRAVELS_WITH"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          14,
+          45,
+          54
+        ]
+      },
+      {
+        "id": "ruan-zhu-parent",
+        "source": "阮邛",
+        "target": "阮秀",
+        "kind": "SOCIAL",
+        "acceptedTypes": [
+          "PARENT_OF"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          45
+        ]
+      },
+      {
+        "id": "chen-mud-bottle-home",
+        "source": "陈平安",
+        "target": "泥瓶巷",
+        "kind": "PLACE",
+        "acceptedTypes": [
+          "LIVES_IN",
+          "VISITS"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          0,
+          1
+        ]
+      }
+    ],
+    "retrieval": [
+      {
+        "id": "early-home",
+        "hit": true,
+        "relationAvailable": true,
+        "firstRank": 3,
+        "reciprocalRank": 0.3333333333333333,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "chen-song-neighbors",
+        "hit": true,
+        "relationAvailable": true,
+        "firstRank": 3,
+        "reciprocalRank": 0.3333333333333333,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "liu-helps-chen",
+        "hit": true,
+        "relationAvailable": false,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "qi-guides-chen",
+        "hit": false,
+        "relationAvailable": false,
+        "firstRank": 0,
+        "reciprocalRank": 0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "ning-alias",
+        "hit": true,
+        "relationAvailable": true,
+        "firstRank": 3,
+        "reciprocalRank": 0.3333333333333333,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "ruan-work",
+        "hit": true,
+        "relationAvailable": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "ceramic-apprentices",
+        "hit": true,
+        "relationAvailable": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "gu-chen",
+        "hit": true,
+        "relationAvailable": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      },
+      {
+        "id": "spoiler-boundary",
+        "hit": true,
+        "relationAvailable": true,
+        "firstRank": 1,
+        "reciprocalRank": 1.0,
+        "forbiddenTerms": []
+      }
+    ],
+    "aliasFragments": [],
+    "unsupportedCharacterRelations": [
+      {
+        "type": "KNOWS",
+        "chapter": 59,
+        "evidence": "宋集薪问道：“那个正阳山的小女孩提到过一个人，叫马苦玄，是杏花巷的，跟我差不多岁数，好像他开价一袋子供养钱，把陈平安和那少女的藏身之地卖给了正阳山。你知不知道这家伙到底是什么来历？以前我只听说是个傻子..."
+      }
+    ],
+    "lowValueEvents": [],
+    "forbiddenRelations": [],
+    "unsupportedEdges": [
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 45,
+        "evidence": "【主线·已完成】第46章：“是我宁姚对不起你陈平安和刘羡阳”；第55章：“宁姚来到陈平安身边”；第55章：“陈平安收起宁姚借给自己的压衣刀”"
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 48,
+        "evidence": "【主线·已完成】第49章：“一堆破碎瓦砾当中，老猿耳朵微动，听到细微动静，咧咧嘴，弯腰拿起一块破瓦，掂量一番后，起身后迅猛砸出，瓦片如刀切豆腐一般，轻而易举穿透墙壁和屋顶，带着风雷之声破空而去，瓦片去..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 54,
+        "evidence": "【主线·已完成】第55章：“陈平安左右脚尖先后不易察觉地拧了拧地面，似乎还在适应变轻了的双腿。他留意到马苦玄总共捡了五颗石子，四颗握在左手，一颗在右手。马苦玄神色自若，望向刀鞘剑鞘皆空的外乡少女，笑道..."
+      },
+      {
+        "type": "PARTICIPATES_IN",
+        "chapter": 56,
+        "evidence": "【支线·已完成】第57章：“刘灞桥沉声道：“陈对，我没有眼瞎的话，看得出陈松风现在是给你帮忙，你就算不领情，也别说话这么难听！””；第60章：“衙署牌坊下。陈对聊了天南地北许多奇人趣闻轶事，正阳山小女..."
+      },
+      {
+        "type": "KNOWS",
+        "chapter": 59,
+        "evidence": "宋集薪问道：“那个正阳山的小女孩提到过一个人，叫马苦玄，是杏花巷的，跟我差不多岁数，好像他开价一袋子供养钱，把陈平安和那少女的藏身之地卖给了正阳山。你知不知道这家伙到底是什么来历？以前我只听说是个傻子..."
+      }
+    ],
+    "missingIdentityResolutions": [],
+    "aliasPollution": [],
+    "relationResults": [
+      {
+        "id": "chen-song-neighbors",
+        "source": "陈平安",
+        "target": "宋集薪",
+        "kind": "NARRATIVE",
+        "acceptedTypes": [
+          "NEIGHBOR_OF"
+        ],
+        "direction": "EITHER",
+        "hit": true,
+        "candidateTypes": [
+          "NEIGHBOR_OF"
+        ],
+        "evidenceChapters": [
+          0
+        ]
+      },
+      {
+        "id": "chen-liu-knows",
+        "source": "陈平安",
+        "target": "刘羡阳",
+        "kind": "SOCIAL",
+        "acceptedTypes": [
+          "KNOWS",
+          "COMPANION_OF",
+          "FRIEND_OF"
+        ],
+        "direction": "EITHER",
+        "hit": true,
+        "candidateTypes": [
+          "FRIEND_OF"
+        ],
+        "evidenceChapters": [
+          0,
+          3,
+          7
+        ]
+      },
+      {
+        "id": "liu-chen-helps",
+        "source": "刘羡阳",
+        "target": "陈平安",
+        "kind": "NARRATIVE",
+        "acceptedTypes": [
+          "HELPS",
+          "GUIDES"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          3,
+          18
+        ]
+      },
+      {
+        "id": "qi-chen-guides",
+        "source": "齐静春",
+        "target": "陈平安",
+        "kind": "NARRATIVE",
+        "acceptedTypes": [
+          "GUIDES"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          21,
+          22,
+          23
+        ]
+      },
+      {
+        "id": "chen-ning-protects",
+        "source": "陈平安",
+        "target": "宁姚",
+        "kind": "NARRATIVE",
+        "acceptedTypes": [
+          "PROTECTS",
+          "HELPS",
+          "TRAVELS_WITH"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          14,
+          45,
+          54
+        ]
+      },
+      {
+        "id": "ruan-zhu-parent",
+        "source": "阮邛",
+        "target": "阮秀",
+        "kind": "SOCIAL",
+        "acceptedTypes": [
+          "PARENT_OF"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          45
+        ]
+      },
+      {
+        "id": "zhu-zhu-parent",
+        "source": "朱河",
+        "target": "朱鹿",
+        "kind": "SOCIAL",
+        "acceptedTypes": [
+          "PARENT_OF"
+        ],
+        "direction": "FORWARD",
+        "hit": true,
+        "candidateTypes": [
+          "PARENT_OF"
+        ],
+        "evidenceChapters": [
+          90
+        ]
+      },
+      {
+        "id": "chen-mud-bottle-home",
+        "source": "陈平安",
+        "target": "泥瓶巷",
+        "kind": "PLACE",
+        "acceptedTypes": [
+          "LIVES_IN",
+          "VISITS"
+        ],
+        "direction": "FORWARD",
+        "hit": false,
+        "candidateTypes": [
+          null
+        ],
+        "evidenceChapters": [
+          0,
+          1
+        ]
+      }
+    ]
+  }
+}

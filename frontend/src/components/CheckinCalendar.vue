@@ -181,7 +181,7 @@ onMounted(load)
   background: var(--paper-0);
   border: 1px solid var(--paper-3);
   border-radius: var(--radius-lg);
-  padding: var(--space-6);
+  padding: 18px 22px;
 }
 
 /* Streak row */
@@ -189,9 +189,9 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-6);
-  margin-bottom: var(--space-6);
-  padding-bottom: var(--space-5);
+  gap: 28px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--paper-2);
 }
 
@@ -226,7 +226,7 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-4);
+  margin-bottom: 8px;
 }
 
 .cal-title {
@@ -272,18 +272,19 @@ onMounted(load)
   text-align: center;
   font-size: 0.75rem;
   color: var(--ink-4);
-  padding: var(--space-2) 0;
+  padding: 5px 0;
 }
 
 /* Grid */
 .cal-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
+  gap: 3px;
 }
 
 .cal-cell {
-  aspect-ratio: 1;
+  aspect-ratio: auto;
+  min-height: 54px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -338,7 +339,7 @@ onMounted(load)
 
 /* Checkin button */
 .checkin-action {
-  margin-top: var(--space-5);
+  margin-top: 12px;
   display: flex;
   justify-content: center;
 }

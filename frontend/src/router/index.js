@@ -57,6 +57,24 @@ const routes = [
     component: () => import('@/views/ReaderView.vue')
   },
   {
+    path: '/agent',
+    name: 'Agent',
+    component: () => import('@/views/AgentView.vue'),
+    meta: { auth: true }
+  },
+  {
+    path: '/agent/knowledge-graphs',
+    name: 'KnowledgeGraphManage',
+    component: () => import('@/views/KnowledgeGraphManageView.vue'),
+    meta: { auth: true }
+  },
+  {
+    path: '/admin/agent',
+    name: 'AgentAdmin',
+    component: () => import('@/views/AgentAdminView.vue'),
+    meta: { auth: true }
+  },
+  {
     path: '/source-book-detail',
     name: 'SourceBookDetail',
     component: () => import('@/views/SourceBookDetailView.vue')

@@ -1,0 +1,78 @@
+﻿{
+    "schemaVersion":  "1.0",
+    "round":  "round-4",
+    "generatedAt":  "2026-08-09T20:08:11.9713157+08:00",
+    "bookId":  358679512818388992,
+    "chapterRange":  {
+                         "start":  1,
+                         "end":  100
+                     },
+    "counts":  {
+                   "aliases":  148,
+                   "edges":  41,
+                   "clues":  0,
+                   "nodes":  55
+               },
+    "nodeCountByType":  {
+                            "CHARACTER":  41,
+                            "LOCATION":  11,
+                            "ORGANIZATION":  3
+                        },
+    "edgeCountByType":  {
+                            "SUPPORTS":  4,
+                            "OPPOSES":  3,
+                            "VISITS":  5,
+                            "SERVES":  3,
+                            "TRAVELS_WITH":  6,
+                            "INTERACTS_WITH":  11,
+                            "KNOWS":  7,
+                            "MENTORS":  2
+                        },
+    "metrics":  {
+                    "isolatedNodeRate":  0.4364,
+                    "characterConnectedRate":  0.6098,
+                    "edgeNodeRatio":  0.7455,
+                    "lowValueAtomicEventRate":  0,
+                    "unsupportedEdgeEvidenceRate":  0,
+                    "aliasFragmentGroupCount":  0,
+                    "requiredRelationRecall":  0
+                },
+    "failures":  {
+                     "lowValueEvents":  [
+
+                                        ],
+                     "missingRequiredRelations":  [
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "刘羡阳",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "宋集薪",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "宁姚",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "陈平安",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      },
+                                                      {
+                                                          "source":  "宋集薪",
+                                                          "target":  "泥瓶巷",
+                                                          "hit":  false
+                                                      }
+                                                  ],
+                     "aliasFragments":  [
+
+                                        ],
+                     "unsupportedEdges":  [
+
+                                          ]
+                 }
+}

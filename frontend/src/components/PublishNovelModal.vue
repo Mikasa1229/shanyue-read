@@ -20,8 +20,9 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">封面图片URL</label>
-            <input v-model="form.coverUrl" class="form-input" placeholder="https://..." />
+            <label class="form-label">封面图片</label>
+            <input type="file" class="form-input" accept="image/*" @change="handleCoverChange" />
+            <input v-model="form.coverUrl" class="form-input cover-url-fallback" placeholder="也可以填写图片 URL" />
           </div>
           <div class="form-group">
             <label class="form-label">简介</label>
@@ -57,7 +58,7 @@
 
 <script setup>
 import { ref, reactive } from 'vue'
-import { apiCreateNovel } from '@/api/novel'
+import { apiCreateNovel, apiUploadNovelCover } from '@/api/novel'
 import { useToast } from '@/composables/useToast'
 
 const emit = defineEmits(['close', 'published'])
@@ -76,11 +77,17 @@ const form = reactive({
 
 const loading = ref(false)
 const error = ref('')
+const coverFile = ref(null)
+
+function handleCoverChange(event) {
+  coverFile.value = event.target.files?.[0] || null
+}
 
 async function handleSubmit() {
   error.value = ''
   loading.value = true
   try {
+    if (coverFile.value) form.coverUrl = await apiUploadNovelCover(coverFile.value)
     const novel = await apiCreateNovel(form)
     show('发布成功！')
     emit('published', novel)

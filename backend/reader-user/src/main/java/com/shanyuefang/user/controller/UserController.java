@@ -9,6 +9,8 @@ import com.shanyuefang.user.domain.vo.LevelActionResultVO;
 import com.shanyuefang.user.domain.vo.UserLevelVO;
 import com.shanyuefang.user.domain.vo.UserVO;
 import com.shanyuefang.user.service.UserService;
+import com.shanyuefang.user.service.CreditService;
+import com.shanyuefang.user.domain.vo.UserCreditVO;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.swagger.v3.oas.annotations.Operation;
@@ -28,6 +30,7 @@ import java.util.UUID;
 public class UserController {
 
     private final UserService userService;
+    private final CreditService creditService;
     private final MinioClient minioClient;
     private final MinioProperties minioProperties;
 
@@ -52,8 +55,12 @@ public class UserController {
     @PostMapping("/me/avatar")
     public R<Map<String, String>> uploadAvatar(@RequestHeader("X-User-Id") Long userId,
                                                @RequestParam("file") MultipartFile file) throws Exception {
+        if (file == null || file.isEmpty() || file.getSize() > 5 * 1024 * 1024
+                || file.getContentType() == null || !file.getContentType().startsWith("image/")) {
+            throw new IllegalArgumentException("头像必须是 5MB 以内的图片");
+        }
         String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "avatar";
-        String ext = originalName.contains(".") ? originalName.substring(originalName.lastIndexOf('.')) : ".jpg";
+        String ext = extension(originalName);
         // 对象路径：avatars/<uuid><ext>
         String objectName = "avatars/" + UUID.randomUUID().toString().replace("-", "") + ext;
 
@@ -78,6 +85,15 @@ public class UserController {
         return R.ok(Map.of("url", url));
     }
 
+    private String extension(String name) {
+        String lower = name.toLowerCase();
+        if (lower.endsWith(".png")) return ".png";
+        if (lower.endsWith(".webp")) return ".webp";
+        if (lower.endsWith(".gif")) return ".gif";
+        if (lower.endsWith(".jpeg")) return ".jpeg";
+        return ".jpg";
+    }
+
     @Operation(summary = "修改密码")
     @PutMapping("/me/password")
     public R<Void> updatePassword(@RequestHeader("X-User-Id") Long userId,
@@ -96,6 +112,13 @@ public class UserController {
     @PostMapping("/me/level/action")
     public R<LevelActionResultVO> recordLevelAction(@RequestHeader("X-User-Id") Long userId,
                                                      @Valid @RequestBody LevelActionDTO dto) {
+        if (!"CHECKIN".equalsIgnoreCase(dto.getActionType())) {
+            return R.fail(com.shanyuefang.common.result.ResultCode.FORBIDDEN, "该任务只能由平台服务确认");
+        }
         return R.ok(userService.recordLevelAction(userId, dto));
+    }
+    @GetMapping("/me/credits")
+    public R<UserCreditVO> getCredits(@RequestHeader("X-User-Id") Long userId) {
+        return R.ok(creditService.getCredits(userId));
     }
 }

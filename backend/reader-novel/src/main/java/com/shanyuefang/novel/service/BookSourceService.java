@@ -6,6 +6,7 @@ import com.shanyuefang.novel.domain.entity.BookSource;
 import com.shanyuefang.novel.domain.vo.BookChapterVO;
 import com.shanyuefang.novel.domain.vo.BookSourceVO;
 import com.shanyuefang.novel.domain.vo.SearchBookVO;
+import com.shanyuefang.novel.domain.vo.AggregatedBookVO;
 
 import java.util.List;
 import java.util.Map;
@@ -35,6 +36,12 @@ public interface BookSourceService extends IService<BookSource> {
 
     /** 聚合搜索：并发调用所有启用书源，合并结果 */
     List<SearchBookVO> aggregateSearch(String keyword, int page);
+
+    /** One canonical work per result, retaining every discovered readable source mirror. */
+    List<AggregatedBookVO> aggregateCanonicalSearch(String keyword, int page);
+
+    /** All known source mirrors for a canonical work, ordered by current preference. */
+    List<AggregatedBookVO> canonicalBookSources(Long canonicalBookId);
 
     /** 获取书籍目录（章节列表） */
     List<BookChapterVO> getChapters(Long sourceId, String bookUrl);

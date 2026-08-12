@@ -6,7 +6,14 @@ import com.shanyuefang.common.result.ResultCode;
 import com.shanyuefang.novel.domain.vo.BookChapterVO;
 import com.shanyuefang.novel.domain.vo.BookSourceVO;
 import com.shanyuefang.novel.domain.vo.SearchBookVO;
+import com.shanyuefang.novel.domain.vo.AggregatedBookVO;
 import com.shanyuefang.novel.service.BookSourceService;
+import com.shanyuefang.novel.messaging.KnowledgeIndexPublisher;
+import com.shanyuefang.novel.domain.entity.BookContentVersion;
+import com.shanyuefang.novel.mapper.BookContentVersionMapper;
+import com.shanyuefang.common.util.SnowflakeIdUtil;
+import com.shanyuefang.common.util.NovelContentNormalizer;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -15,6 +22,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Tag(name = "书源管理", description = "legado 兼容书源的导入 / 搜索 / 章节 / 内容")
 @RestController
@@ -23,6 +33,8 @@ import java.util.Map;
 public class BookSourceController {
 
     private final BookSourceService bookSourceService;
+    private final KnowledgeIndexPublisher knowledgeIndexPublisher;
+    private final BookContentVersionMapper contentVersionMapper;
 
     // ─── 导入 ─────────────────────────────────────────────────
 
@@ -82,6 +94,20 @@ public class BookSourceController {
         return R.ok(bookSourceService.aggregateSearch(keyword, page));
     }
 
+    @Operation(summary = "规范作品聚合搜索：一部作品保留所有可切换书源")
+    @GetMapping("/aggregate-search")
+    public R<List<AggregatedBookVO>> aggregateCanonicalSearch(
+            @RequestParam(name = "keyword") String keyword,
+            @RequestParam(name = "page", defaultValue = "1") int page) {
+        return R.ok(bookSourceService.aggregateCanonicalSearch(keyword, page));
+    }
+
+    @Operation(summary = "查看规范作品的全部书源")
+    @GetMapping("/canonical/{canonicalBookId}/sources")
+    public R<AggregatedBookVO> canonicalSources(@PathVariable Long canonicalBookId) {
+        return R.ok(bookSourceService.canonicalBookSources(canonicalBookId).stream().findFirst().orElse(null));
+    }
+
     @Operation(summary = "使用指定书源搜索书籍")
     @GetMapping("/{id}/search")
     public R<List<SearchBookVO>> search(
@@ -123,13 +149,83 @@ public class BookSourceController {
 
     @Operation(summary = "获取章节正文内容",
                description = "chapterUrl 为目录接口返回的章节 URL")
+    public R<Map<String, String>> content(Long id, String chapterUrl, String bookUrl, Integer chapterIndex) {
+        return content(id, chapterUrl, bookUrl, chapterIndex, null);
+    }
+
     @GetMapping("/{id}/content")
     public R<Map<String, String>> content(
             @PathVariable("id") Long id,
             @RequestParam(name = "chapterUrl")
-            @Parameter(description = "章节 URL") String chapterUrl) {
+            @Parameter(description = "章节 URL") String chapterUrl,
+            @RequestParam(required = false) String bookUrl,
+            @RequestParam(required = false) Integer chapterIndex,
+            @RequestParam(required = false) Long canonicalBookId) {
         String text = bookSourceService.getContent(id, chapterUrl);
+        if (bookUrl != null && chapterIndex != null && chapterIndex >= 0) {
+            try {
+                Long resolvedCanonicalBookId = canonicalBookId;
+                if (resolvedCanonicalBookId == null) {
+                    SearchBookVO detail = bookSourceService.getBookDetail(id, bookUrl);
+                    resolvedCanonicalBookId = detail.getCanonicalBookId();
+                }
+                if (resolvedCanonicalBookId != null) {
+                    NovelContentNormalizer.Result analysis = NovelContentNormalizer.analyze(text);
+                    // Keep contentHash backward-compatible as the raw audit hash; normalizedContentHash
+                    // is the canonical RAG reuse key.
+                    String hash = analysis.rawHash();
+                    BookContentVersion version = contentVersionMapper.selectOne(Wrappers.<BookContentVersion>lambdaQuery()
+                            .eq(BookContentVersion::getCanonicalBookId, resolvedCanonicalBookId)
+                            .eq(BookContentVersion::getChapterIndex, chapterIndex).eq(BookContentVersion::getContentHash, hash));
+                    if (version == null) {
+                        version = contentVersionMapper.selectList(Wrappers.<BookContentVersion>lambdaQuery()
+                                        .eq(BookContentVersion::getCanonicalBookId, resolvedCanonicalBookId)
+                                        .eq(BookContentVersion::getChapterIndex, chapterIndex))
+                                .stream()
+                            .filter(candidate -> analysis.normalizedHash().equals(candidate.getNormalizedContentHash()))
+                                .findFirst().orElse(null);
+                    }
+                    if (version == null) {
+                        version = contentVersionMapper.selectList(Wrappers.<BookContentVersion>lambdaQuery()
+                                        .eq(BookContentVersion::getCanonicalBookId, resolvedCanonicalBookId)
+                                        .eq(BookContentVersion::getChapterIndex, chapterIndex)
+                                        .eq(BookContentVersion::getIndexStatus, "READY"))
+                                .stream()
+                                .filter(candidate -> candidate.getSemanticFingerprint() != null
+                                        && NovelContentNormalizer.similarity(candidate.getSemanticFingerprint(), analysis.semanticFingerprint()) >= 0.93D
+                                        && candidate.getQualityScore() != null
+                                        && analysis.qualityScore() >= candidate.getQualityScore() - 0.10D)
+                                .findFirst().orElse(null);
+                        if (version != null) version.setReuseDecision("FUZZY_REUSED");
+                    }
+                    if (version == null) {
+                        version = new BookContentVersion(); version.setId(SnowflakeIdUtil.next()); version.setCanonicalBookId(resolvedCanonicalBookId);
+                        version.setSourceId(id); version.setChapterIndex(chapterIndex); version.setChapterUrl(chapterUrl); version.setContentHash(hash);
+                        version.setRawContentHash(analysis.rawHash()); version.setNormalizedContentHash(analysis.normalizedHash());
+                        version.setSemanticFingerprint(analysis.semanticFingerprint()); version.setQualityScore(analysis.qualityScore());
+                        version.setNormalizationVersion(NovelContentNormalizer.VERSION); version.setReuseDecision("NEW");
+                        version.setFetchedAt(LocalDateTime.now()); version.setIndexStatus("PENDING"); contentVersionMapper.insert(version);
+                        knowledgeIndexPublisher.publish(resolvedCanonicalBookId, chapterIndex, analysis.normalizedContent(), hash);
+                    } else if (!"READY".equals(version.getIndexStatus())) {
+                        // Re-publish pending/failed versions so a broker or Agent restart is resumable.
+                        version.setIndexStatus("PENDING"); version.setFetchedAt(LocalDateTime.now()); contentVersionMapper.updateById(version);
+                        knowledgeIndexPublisher.publish(resolvedCanonicalBookId, chapterIndex, analysis.normalizedContent(), hash);
+                    }
+                }
+            } catch (Exception ignored) {
+                // Indexing is additive; source reading must remain available on an index failure.
+            }
+        }
         return R.ok(Map.of("content", text));
+    }
+
+    private String sha256(String content) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hash = new StringBuilder();
+            for (byte value : digest) hash.append(String.format("%02x", value));
+            return hash.toString();
+        } catch (Exception exception) { throw new IllegalStateException("SHA-256 unavailable", exception); }
     }
 
     @Operation(summary = "测试书源是否可访问")

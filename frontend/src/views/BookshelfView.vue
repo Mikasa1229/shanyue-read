@@ -14,8 +14,11 @@
         <router-link to="/book-sources" class="btn btn-gold btn-sm mt-4">去书源搜索好书</router-link>
       </div>
 
-      <div v-else class="shelf-grid">
-        <div v-for="book in books" :key="book.id" class="shelf-card">
+      <div v-else class="shelf-directories">
+        <section v-for="directory in groupedBooks" :key="directory.name" class="shelf-directory">
+          <header><div><h2>{{ directory.name }}</h2></div><small>{{ directory.books.length }} 本</small></header>
+          <div class="shelf-grid">
+        <div v-for="book in directory.books" :key="book.id" class="shelf-card">
           <div class="cover-wrap" @click="goRead(book)">
             <img v-if="book.coverUrl" :src="book.coverUrl" class="cover-img" :alt="book.bookName"
                  @error="e => e.target.style.display='none'" />
@@ -25,7 +28,7 @@
             <div v-if="book.lastChapterName" class="reading-badge">续读</div>
           </div>
           <div class="card-meta">
-            <div class="book-name" :title="book.bookName">{{ book.bookName }}</div>
+            <div class="shelf-name-row"><div class="book-name" :title="book.bookName">{{ book.bookName }}</div><span v-if="book.knowledgeStatus === 'READY'" class="knowledge-badge">AI 知识库</span></div>
             <div class="book-author">{{ book.author || '未知作者' }}</div>
             <div v-if="book.lastChapterName" class="last-chapter" :title="book.lastChapterName">
               {{ book.lastChapterName }}
@@ -50,6 +53,8 @@
             </div>
           </div>
         </div>
+          </div>
+        </section>
       </div>
 
       <div v-if="totalPages > 1" class="pagination mt-6">
@@ -61,19 +66,32 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { apiGetMyShelf, apiRemoveFromShelf } from '@/api/bookshelf'
+import { apiGetAgentShelfGroups, apiGetBookKnowledgeStatuses } from '@/api/agent'
 
 const router = useRouter()
 const { show } = useToast()
+const { confirm } = useConfirmDialog()
 
 const books = ref([])
 const loading = ref(false)
 const currentPage = ref(1)
 const total = ref(0)
 const totalPages = ref(1)
+const directoryAssignments = ref([])
+const groupedBooks = computed(() => {
+  const directoryById = new Map(directoryAssignments.value.map(item => [String(item.canonicalBookId), item.groupName || '未分类作品']))
+  const groups = books.value.reduce((result, book) => {
+    const name = String(directoryById.get(String(book.canonicalBookId)) || '未分类作品').replace(/^子目录\s*[一二三四五六七八九十0-9]+\s*[：:]\s*/u, '').trim() || '未分类作品'
+    ;(result[name] ||= []).push(book)
+    return result
+  }, {})
+  return Object.entries(groups).map(([name, values]) => ({ name, books: values }))
+})
 
 async function loadPage(page = 1) {
   loading.value = true
@@ -81,6 +99,14 @@ async function loadPage(page = 1) {
   try {
     const res = await apiGetMyShelf(page, 20)
     books.value  = res?.records ?? []
+    try { directoryAssignments.value = await apiGetAgentShelfGroups() } catch (_) { directoryAssignments.value = [] }
+    const ids = [...new Set(books.value.map(book => book.canonicalBookId).filter(Boolean))]
+    if (ids.length) {
+      try {
+        const statuses = await apiGetBookKnowledgeStatuses(ids)
+        books.value = books.value.map(book => ({ ...book, knowledgeStatus: statuses?.[book.canonicalBookId]?.status }))
+      } catch (_) { /* Agent badges are optional and never block the bookshelf. */ }
+    }
     total.value  = res?.total   ?? 0
     totalPages.value = res?.pages ?? 1
   } catch (e) {
@@ -98,7 +124,8 @@ function goRead(book) {
       bookUrl:     book.bookUrl,
       bookName:    book.bookName,
       chapterUrl:  book.lastChapterUrl || undefined,
-      chapterIndex: 0
+      canonicalBookId: book.canonicalBookId || undefined,
+      chapterIndex: Number.isInteger(book.lastChapterIndex) ? book.lastChapterIndex : 0
     }
   })
 }
@@ -111,9 +138,14 @@ function goChapters(book) {
 }
 
 async function removeBook(book) {
-  if (!confirm(`确认将「${book.bookName}」移出书架？`)) return
+  if (!await confirm({
+    title: '移出书架',
+    message: `确定将「${book.bookName}」移出书架吗？你仍可在书源中重新添加这部作品。`,
+    confirmText: '移出书架',
+    tone: 'danger'
+  })) return
   try {
-    await apiRemoveFromShelf(book.bookUrl)
+    await apiRemoveFromShelf(book)
     show('已移出书架')
     await loadPage(currentPage.value)
   } catch (e) {
@@ -131,15 +163,23 @@ onMounted(() => loadPage(1))
 
 .shelf-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--space-5);
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 14px;
 }
+.shelf-directories { display:grid; gap:24px; }
+.shelf-directory { display:grid; gap:12px; }
+.shelf-directory > header { display:flex; align-items:end; justify-content:space-between; border-bottom:1px solid var(--paper-3); padding-bottom:10px; }
+.shelf-directory > header h2 { margin:0; color:var(--ink-0); font-family:var(--font-serif); font-size:1.15rem; }
+.shelf-directory > header small { color:var(--ink-4); }
 
 .shelf-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 6px;
 }
+.shelf-name-row { display:flex; align-items:center; gap:6px; min-width:0; }
+.shelf-name-row .book-name { min-width:0; }
+.knowledge-badge { flex:0 0 auto; padding:2px 6px; border:1px solid #8bb894; border-radius:999px; background:#edf8ef; color:#39734a; font-size:.62rem; font-weight:700; white-space:nowrap; }
 
 .cover-wrap {
   position: relative;
@@ -166,7 +206,7 @@ onMounted(() => loadPage(1))
 }
 
 .card-meta { display: flex; flex-direction: column; gap: 3px; }
-.book-name  { font-weight: 600; font-size: 0.875rem; color: var(--ink-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.book-name  { font-weight: 600; font-size: 0.8rem; color: var(--ink-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .book-author { font-size: 0.75rem; color: var(--ink-3); }
 .last-chapter { font-size: 0.7rem; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -175,7 +215,8 @@ onMounted(() => loadPage(1))
 .progress-fill { height: 100%; background: var(--gold-1); border-radius: 99px; transition: width 0.3s; min-width: 4px; }
 .progress-text { font-size: 0.65rem; color: var(--ink-4); white-space: nowrap; flex-shrink: 0; }
 
-.card-actions { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }
+.card-actions { display: flex; align-items: center; gap: 5px; margin-top: 5px; flex-wrap: wrap; }
+.card-actions .btn { padding: 5px 7px; font-size: .66rem; }
 
 .spinner-wrap { display: flex; justify-content: center; padding: var(--space-16) 0; }
 .spinner {

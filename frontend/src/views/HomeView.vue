@@ -87,7 +87,7 @@
 
             <!-- 书籍网格 -->
             <div class="book-grid">
-              <div v-for="(book, idx) in pagedResults" :key="idx" class="book-card">
+              <div v-for="book in pagedResults" :key="bookResultKey(book)" class="book-card">
                 <div class="book-cover-wrap" @click="goToDetail(book)">
                   <img
                     v-if="book.coverUrl"
@@ -101,8 +101,9 @@
                   </div>
                 </div>
                 <div class="book-meta">
-                  <div class="book-name">{{ book.name || '未知书名' }}</div>
+                  <div class="book-name-row"><div class="book-name">{{ book.name || '未知书名' }}</div><span v-if="isKnowledgeReady(book)" class="knowledge-badge">AI 知识库</span></div>
                   <div class="book-author">{{ book.author || '未知作者' }}</div>
+                  <div v-if="book.sourceCount > 1" class="source-count">{{ book.sourceCount }} 个可用书源</div>
                   <div v-if="book.intro" class="book-intro">{{ book.intro }}</div>
                   <div class="book-actions mt-4">
                     <button class="btn btn-sm btn-ghost" @click="goToDetail(book)">查看详情</button>
@@ -142,7 +143,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { apiAggregateSearch, apiGetChapters } from '@/api/bookSource'
+import { apiAggregateCanonicalSearch, apiGetChapters } from '@/api/bookSource'
+import { apiGetBookKnowledgeStatuses } from '@/api/agent'
 import { useToast } from '@/composables/useToast'
 
 const userStore = useUserStore()
@@ -167,6 +169,14 @@ const pagedResults = computed(() => {
   const start = (currentPage.value - 1) * pageSize
   return results.value.slice(start, start + pageSize)
 })
+
+function normalizeBookField(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase()
+}
+
+function bookResultKey(book) {
+  return String(book.canonicalBookId || `${normalizeBookField(book.name)}|${normalizeBookField(book.author)}`)
+}
 
 // 生成显示页码（带省略号）
 const pageNums = computed(() => {
@@ -208,9 +218,28 @@ async function doSearch() {
   lastKeyword.value = q
   startProgress()
   try {
-    const res = await apiAggregateSearch(q)
-    results.value = res ?? []
+    const res = await apiAggregateCanonicalSearch(q)
+    const searchResults = (res ?? []).map(book => ({
+      ...book,
+      sourceId: book.preferredSource?.sourceId,
+      sourceName: book.preferredSource?.sourceName,
+      bookUrl: book.preferredSource?.bookUrl,
+      lastChapter: book.lastChapter || book.preferredSource?.lastChapter
+    }))
+    results.value = searchResults
+    // Book-source results are already usable. Knowledge status is optional metadata from
+    // another service, so it must never hold the visible search response hostage.
     searched.value = true
+    const ids = [...new Set(searchResults.map(book => book.canonicalBookId).filter(Boolean))]
+    if (ids.length) {
+      void apiGetBookKnowledgeStatuses(ids)
+        .then(statuses => {
+          // Ignore an older asynchronous response after the user starts another search.
+          if (lastKeyword.value !== q) return
+          results.value = searchResults.map(book => ({ ...book, knowledgeStatus: statuses?.[book.canonicalBookId]?.status }))
+        })
+        .catch(() => { /* Search remains available if the optional Agent service is offline. */ })
+    }
   } catch (e) {
     show(e.message)
     results.value = []
@@ -221,8 +250,10 @@ async function doSearch() {
   }
 }
 
+function isKnowledgeReady (book) { return book.knowledgeStatus === 'READY' }
+
 // ─── 章节列表 ──────────────────────────────────────────────────
-const chapterBook = ref({ title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', list: [], loading: false })
+const chapterBook = ref({ title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', canonicalBookId: '', list: [], loading: false })
 
 function goToDetail(book) {
   if (!book?.bookUrl || !book?.sourceId) {
@@ -240,7 +271,8 @@ function goToDetail(book) {
       intro: book.intro,
       kind: book.kind,
       lastChapter: book.lastChapter,
-      bookUrl: book.bookUrl
+      bookUrl: book.bookUrl,
+      canonicalBookId: book.canonicalBookId
     }
   })
 }
@@ -256,6 +288,7 @@ async function goToChapters(book) {
     author: book.author,
     coverUrl: book.coverUrl,
     intro: book.intro,
+    canonicalBookId: book.canonicalBookId,
     list: [],
     loading: true
   }
@@ -271,7 +304,7 @@ async function goToChapters(book) {
 }
 
 function clearChapters() {
-  chapterBook.value = { title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', list: [], loading: false }
+  chapterBook.value = { title: '', bookUrl: '', sourceId: '', sourceName: '', author: '', coverUrl: '', intro: '', canonicalBookId: '', list: [], loading: false }
 }
 
 function openChapter(ch) {
@@ -286,6 +319,7 @@ function openChapter(ch) {
       author:       chapterBook.value.author,
       coverUrl:     chapterBook.value.coverUrl,
       intro:        chapterBook.value.intro,
+      canonicalBookId: chapterBook.value.canonicalBookId,
       chapterUrl:   ch.chapterUrl,
       chapterIndex: ch.index ?? 0
     }
@@ -558,10 +592,13 @@ onMounted(() => {
   color: var(--ink-0);
   line-height: 1.3;
 }
+.book-name-row { display:flex; align-items:center; gap:7px; min-width:0; }
+.knowledge-badge { flex:0 0 auto; padding:2px 6px; border:1px solid #8bb894; border-radius:999px; background:#edf8ef; color:#39734a; font-size:.62rem; font-weight:700; letter-spacing:.04em; }
 .book-author {
   font-size: 0.8125rem;
   color: var(--ink-3);
 }
+.source-count { display:inline-flex; width:max-content; margin-top:5px; border-radius:999px; padding:3px 7px; color:#456c57; background:#e8f0dd; font-size:.68rem; font-weight:800; }
 .book-intro {
   font-size: 0.8rem;
   color: var(--ink-4);

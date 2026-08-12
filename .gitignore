@@ -28,6 +28,7 @@ logs/
 application-prod.yml
 application-local.yml
 *.env
+apikey
 
 
 
@@ -36,9 +37,21 @@ node_modules/
 dist/
 .pnpm-store/
 package-lock.json
+!frontend/package-lock.json
 
 # 书源测试临时目录（含 legado 子仓库，不提交）
 book_source/
 
 #上传的文件
 backend/uploads/
+
+# Local load-test downloads and Python bytecode
+.tools/
+__pycache__/
+*.py[cod]
+
+# Local recovery snapshot created while repairing an editor encoding failure.
+*.mojibake-backup
+
+# Personal resume and interview preparation materials.
+docs/resume/
