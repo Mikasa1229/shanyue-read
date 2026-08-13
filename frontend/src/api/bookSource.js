@@ -1,11 +1,16 @@
-import http from './http'
+import http, { getAuthHeaders } from './http'
 
 // ─── 导入 ───────────────────────────────────────────────────────
 export const apiImportByUrl  = (url)  => http.post('/book-sources/import/url',  { url })
 export const apiImportByJson = (json) => http.post('/book-sources/import/json', { json })
 
 // ─── 管理 ───────────────────────────────────────────────────────
-export const apiListSources    = (page = 1, size = 20) => http.get('/book-sources', { params: { page, size } })
+// The source catalog reads per-user enablement preferences, so keep its
+// authentication explicit even if a future request client bypasses interceptors.
+export const apiListSources = (page = 1, size = 20) => http.get('/book-sources', {
+  params: { page, size },
+  headers: getAuthHeaders()
+})
 export const apiToggleSource   = (id) => http.put(`/book-sources/${id}/status`)
 export const apiDeleteSource   = (id) => http.delete(`/book-sources/${id}`)
 

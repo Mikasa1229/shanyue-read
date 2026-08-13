@@ -33,7 +33,8 @@ const routes = [
   {
     path: '/book-sources',
     name: 'BookSource',
-    component: () => import('@/views/BookSourceView.vue')
+    component: () => import('@/views/BookSourceView.vue'),
+    meta: { auth: true }
   },
   {
     path: '/square',

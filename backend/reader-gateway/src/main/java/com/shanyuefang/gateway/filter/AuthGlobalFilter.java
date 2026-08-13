@@ -105,8 +105,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     /** 即便是 GET，这些路径也需要登录（会读取用户身份信息） */
     private static final List<String> AUTH_REQUIRED_GET = List.of(
             "/api/novels/my",
-            // Book-source state is per reader (enabled/disabled), so the service needs the
-            // trusted user header even though the request itself is read-only.
+            // Book-source state is per reader, so the downstream service needs a trusted user ID.
             "/api/book-sources"
     );
 

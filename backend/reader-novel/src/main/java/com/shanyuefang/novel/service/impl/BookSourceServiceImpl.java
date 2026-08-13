@@ -65,6 +65,15 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         implements BookSourceService {
 
     private static final ObjectMapper OM = new ObjectMapper();
+    private static final java.util.Set<String> CURATED_DEFAULT_SOURCE_URLS = java.util.Set.of(
+            "https://www.360tingshu.cc", "http://www.66story.com", "http://m.qudushu.com",
+            "http://www.xbotaodz.com", "http://www.booksky.cc", "https://wap.xyushuwu11.com",
+            "http://wap.wangshuge.la", "http://www.mxjtedu.com/", "https://www.489d.com",
+            "https://www.dcrbk.com", "https://www.conglianhao.com", "https://www.biquge7.top/",
+            "https://www.biquge7.top", "http://www.bbiquge8.net", "https://www.biquge99.cc/",
+            "https://www.biquge7.xyz", "https://wap.jhssd.com", "https://www.jhssd.com",
+            "http://wap.wangshuge.info", "http://m.xhytd.com"
+    );
     private static final long CHAPTER_CACHE_TTL_MS = 5 * 60 * 1000L;
     private static final ConcurrentHashMap<String, CachedChapters> CHAPTER_CACHE = new ConcurrentHashMap<>();
     private static final Cache<String, List<SearchBookVO>> AGGREGATE_SOURCE_RESULTS_CACHE = Caffeine.newBuilder()
@@ -127,7 +136,6 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                 bs.setSourceUrl(model.getBookSourceUrl());
                 bs.setSourceType(type != null ? type : 0);
                 bs.setSourceGroup(model.getBookSourceGroup());
-                bs.setEnabled(Boolean.TRUE.equals(model.getEnabled()) || model.getEnabled() == null);
                 bs.setSourceJson(OM.writeValueAsString(node));
 
                 // 按 sourceUrl 去重（存在则更新）
@@ -136,8 +144,13 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                         .one();
                 if (existing != null) {
                     bs.setId(existing.getId());
+                    // Rule imports must not overwrite the platform-curated default.
+                    bs.setEnabled(existing.getEnabled());
                     updateById(bs);
                 } else {
+                    // New sources remain available in the catalog but require an explicit
+                    // platform selection or a personal user override before aggregation.
+                    bs.setEnabled(CURATED_DEFAULT_SOURCE_URLS.contains(bs.getSourceUrl()));
                     save(bs);
                 }
                 // Rules can change independently of a book URL. Do not serve a directory parsed
@@ -165,10 +178,10 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     public Page<BookSourceVO> listSources(long userId, int page, int size) {
         Page<BookSource> rawPage = baseMapper.selectPageForUser(new Page<>(page, size), userId);
         Page<BookSourceVO> result = new Page<>(rawPage.getCurrent(), rawPage.getSize(), rawPage.getTotal());
-        java.util.Set<Long> disabledIds = disabledSourceIds(userId);
+        Map<Long, UserBookSourcePreference> preferences = sourcePreferences(userId);
         result.setRecords(rawPage.getRecords().stream().map(source -> {
             BookSourceVO vo = toVO(source);
-            vo.setEnabled(Boolean.TRUE.equals(source.getEnabled()) && !disabledIds.contains(source.getId()));
+            vo.setEnabled(effectiveEnabled(source, preferences.get(source.getId())));
             return vo;
         }).toList());
         return result;
@@ -187,13 +200,14 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
             preference = new UserBookSourcePreference();
             preference.setUserId(userId);
             preference.setSourceId(id);
-            preference.setDisabled(true);
+            preference.setDisabled(Boolean.TRUE.equals(bs.getEnabled()));
             preferenceMapper.insert(preference);
         } else {
             preferenceMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserBookSourcePreference>()
                     .eq(UserBookSourcePreference::getUserId, userId)
                     .eq(UserBookSourcePreference::getSourceId, id));
         }
+        AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
     }
 
     @Override
@@ -592,9 +606,6 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     private BookSource getEnabledSource(Long id) {
         BookSource bs = getById(id);
         if (bs == null) throw new BusinessException(ResultCode.NOT_FOUND, "书源不存在");
-        if (!Boolean.TRUE.equals(bs.getEnabled())) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "书源已禁用");
-        }
         return bs;
     }
 
@@ -696,7 +707,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
     @Override
     public List<SearchBookVO> aggregateSearch(long userId, String keyword, int page) {
-        return deduplicateAggregateResults(filterDisabledSources(aggregateSourceResults(keyword, page), userId)).stream()
+        return deduplicateAggregateResults(aggregateSourceResults(userId, keyword, page)).stream()
                 .sorted(Comparator.<SearchBookVO>comparingInt(book -> searchRelevance(keyword, book.getName(), book.getAuthor()))
                         .thenComparing(Comparator.comparingInt(this::resultQuality).reversed())
                         .thenComparing(SearchBookVO::getName, Comparator.nullsLast(String::compareTo)))
@@ -705,7 +716,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
 
     @Override
     public List<AggregatedBookVO> aggregateCanonicalSearch(long userId, String keyword, int page) {
-        List<SearchBookVO> sourceResults = filterDisabledSources(aggregateSourceResults(keyword, page), userId);
+        List<SearchBookVO> sourceResults = aggregateSourceResults(userId, keyword, page);
         Map<String, List<SearchBookVO>> grouped = sourceResults.stream()
                 .filter(book -> book.getCanonicalBookId() != null)
                 .collect(java.util.stream.Collectors.groupingBy(this::canonicalSearchIdentity,
@@ -727,10 +738,10 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         if (mappings.isEmpty()) return List.of();
         Map<Long, BookSource> sources = listByIds(mappings.stream().map(BookSourceMapping::getSourceId).distinct().toList())
                 .stream().collect(java.util.stream.Collectors.toMap(BookSource::getId, source -> source));
-        java.util.Set<Long> disabledIds = disabledSourceIds(userId);
+        Map<Long, UserBookSourcePreference> preferences = sourcePreferences(userId);
         List<SearchBookVO> books = mappings.stream().filter(mapping -> {
             BookSource source = sources.get(mapping.getSourceId());
-            return source != null && Boolean.TRUE.equals(source.getEnabled()) && !disabledIds.contains(mapping.getSourceId());
+            return source != null && effectiveEnabled(source, preferences.get(mapping.getSourceId()));
         }).map(mapping -> {
             SearchBookVO book = new SearchBookVO();
             book.setCanonicalBookId(canonicalBookId);
@@ -746,18 +757,15 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         return List.of(aggregateBook(canonicalBookId, books));
     }
 
-    private List<SearchBookVO> filterDisabledSources(List<SearchBookVO> books, long userId) {
-        java.util.Set<Long> disabledIds = disabledSourceIds(userId);
-        if (disabledIds.isEmpty()) return books;
-        return books.stream().filter(book -> book.getSourceId() == null || !disabledIds.contains(book.getSourceId())).toList();
+    private Map<Long, UserBookSourcePreference> sourcePreferences(long userId) {
+        if (userId <= 0) return Map.of();
+        return preferenceMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserBookSourcePreference>()
+                        .eq(UserBookSourcePreference::getUserId, userId))
+                .stream().collect(java.util.stream.Collectors.toMap(UserBookSourcePreference::getSourceId, value -> value));
     }
 
-    private java.util.Set<Long> disabledSourceIds(long userId) {
-        if (userId <= 0) return java.util.Set.of();
-        return preferenceMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserBookSourcePreference>()
-                        .eq(UserBookSourcePreference::getUserId, userId)
-                        .eq(UserBookSourcePreference::getDisabled, true))
-                .stream().map(UserBookSourcePreference::getSourceId).collect(java.util.stream.Collectors.toSet());
+    static boolean effectiveEnabled(BookSource source, UserBookSourcePreference preference) {
+        return preference == null ? Boolean.TRUE.equals(source.getEnabled()) : !Boolean.TRUE.equals(preference.getDisabled());
     }
 
     private AggregatedBookVO aggregateBook(Long canonicalBookId, List<SearchBookVO> books) {
@@ -793,16 +801,16 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         return books.stream().map(getter).filter(StringUtils::hasText).max(Comparator.comparingInt(String::length)).orElse(fallback);
     }
 
-    private List<SearchBookVO> aggregateSourceResults(String keyword, int page) {
-        String cacheKey = keyword == null ? "" : keyword.trim().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
+    private List<SearchBookVO> aggregateSourceResults(long userId, String keyword, int page) {
+        String cacheKey = userId + "|" + (keyword == null ? "" : keyword.trim().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT));
         cacheKey += "|" + Math.max(1, page);
         List<SearchBookVO> cached = AGGREGATE_SOURCE_RESULTS_CACHE.getIfPresent(cacheKey);
         if (cached != null) return cached;
 
-        // 查所有启用的书源
-        List<BookSource> sources = lambdaQuery()
-                .eq(BookSource::getEnabled, true)
-                .list();
+        Map<Long, UserBookSourcePreference> preferences = sourcePreferences(userId);
+        List<BookSource> sources = list().stream()
+                .filter(source -> effectiveEnabled(source, preferences.get(source.getId())))
+                .toList();
 
         if (sources.isEmpty()) return List.of();
 

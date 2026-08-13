@@ -1,7 +1,7 @@
 import http from './http'
 
-export const apiRegister = (dto) => http.post('/auth/register', dto)
-export const apiLogin = (dto) => http.post('/auth/login', dto)
+export const apiRegister = (dto) => http.post('/auth/register', dto, { skipAuth: true })
+export const apiLogin = (dto) => http.post('/auth/login', dto, { skipAuth: true })
 export const apiLogout = () => http.post('/auth/logout')
 
 export const apiGetProfile = () => http.get('/users/me')

@@ -20,8 +20,7 @@ public interface BookSourceMapper extends BaseMapper<BookSource> {
             LEFT JOIN t_user_book_source_preference p
               ON p.source_id = s.id
              AND p.user_id = #{userId}
-             AND p.disabled = TRUE
-            ORDER BY CASE WHEN s.enabled = TRUE AND p.source_id IS NULL THEN 0 ELSE 1 END,
+            ORDER BY CASE WHEN COALESCE(NOT p.disabled, s.enabled) THEN 0 ELSE 1 END,
                      s.created_at DESC
             """)
     Page<BookSource> selectPageForUser(Page<BookSource> page, @Param("userId") long userId);
