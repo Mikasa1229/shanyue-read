@@ -76,7 +76,7 @@ public class InternalCanonicalBookController {
     private List<Map<String, Object>> sourceDiscoveryResults(String query, List<String> exclusions, int limit) {
         String keyword = discoveryKeyword(query);
         if (keyword.isBlank()) return List.of();
-        return bookSourceService.aggregateSearch(keyword, 1).stream()
+        return bookSourceService.aggregateSearch(0L, keyword, 1).stream()
                 .filter(book -> book.getCanonicalBookId() != null && book.getSourceId() != null
                         && book.getBookUrl() != null && !book.getBookUrl().isBlank())
                 .filter(book -> !isExcluded(book.getName(), book.getAuthor(), exclusions))

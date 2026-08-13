@@ -22,6 +22,9 @@
           </section>
 
           <div class="action-row">
+            <button class="btn btn-gold read-now-btn" :disabled="openingReader" @click="openFirstChapter">
+              {{ openingReader ? '正在打开…' : '立即阅读' }}
+            </button>
             <button class="btn btn-primary" :disabled="addingShelf || onShelf" @click="addToShelf">
               {{ onShelf ? '已在书架' : (addingShelf ? '加入中…' : '加入书架') }}
             </button>
@@ -103,6 +106,7 @@ const onShelf = ref(false)
 const addingFav = ref(false)
 const addingShelf = ref(false)
 const sources = ref([])
+const openingReader = ref(false)
 
 async function hydrateDetail() {
   if (!book.sourceId || !book.bookUrl) return
@@ -213,6 +217,27 @@ function openChapter(chapter, idx) {
       chapterIndex: idx ?? 0
     }
   })
+}
+
+async function openFirstChapter() {
+  if (!book.sourceId || !book.bookUrl) {
+    show('缺少书源信息，暂时无法开始阅读')
+    return
+  }
+  openingReader.value = true
+  try {
+    const page = await apiGetChaptersPage(book.sourceId, book.bookUrl, 0, 1)
+    const firstChapter = page?.records?.[0]
+    if (!firstChapter?.chapterUrl) {
+      show('当前书源暂无可读章节，请切换书源后重试')
+      return
+    }
+    openChapter(firstChapter, 0)
+  } catch (e) {
+    show(e.message || '无法加载首章，请切换书源后重试')
+  } finally {
+    openingReader.value = false
+  }
 }
 
 async function addToShelf() {
@@ -329,7 +354,8 @@ onMounted(() => {
   margin-bottom: var(--space-4);
 }
 .book-last { color: var(--ink-3); font-size: 0.875rem; margin-bottom: var(--space-6); }
-.action-row { display: flex; gap: var(--space-3); }
+.action-row { display: flex; gap: var(--space-3); flex-wrap:wrap; }
+.read-now-btn { min-width:96px; }
 .source-switcher { margin:var(--space-5) 0; border-top:1px solid var(--paper-3); border-bottom:1px solid var(--paper-3); padding:var(--space-4) 0; }.source-switcher > div:first-child { display:flex; align-items:baseline; gap:10px; }.source-switcher b { color:var(--ink-1); font-size:.86rem; }.source-switcher small { color:var(--ink-4); font-size:.72rem; }.source-options { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }.source-options button { display:grid; gap:3px; min-width:125px; border:1px solid var(--paper-3); border-radius:10px; padding:8px 10px; color:var(--ink-2); background:var(--paper-1); text-align:left; cursor:pointer; font:inherit; }.source-options button.active { border-color:#5c8767; color:#24563b; background:#e9f2df; }.source-options button:hover { border-color:#8cab72; }.source-options button span { font-size:.76rem; font-weight:800; }.source-options button small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .btn-shelf-on {
   background: var(--paper-2);

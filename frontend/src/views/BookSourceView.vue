@@ -5,7 +5,7 @@
       <!-- 页面标题 -->
       <div class="page-header">
         <h1 class="page-title">书源管理</h1>
-        <p class="page-desc">管理 legado 格式书源，书籍搜索请前往「发现」页面</p>
+        <p class="page-desc">管理 legado 格式书源；禁用仅影响你的搜索和换源候选</p>
       </div>
 
       <div class="toolbar-row">
@@ -30,12 +30,12 @@
           </div>
           <div class="source-actions">
             <span class="status-dot" :class="s.enabled ? 'on' : 'off'">
-              {{ s.enabled ? '启用' : '禁用' }}
+              {{ s.enabled ? '对我启用' : '对我禁用' }}
             </span>
             <button class="icon-btn" :title="testingId === s.id ? '测试中…' : '测试可访问性'" @click="doTestSource(s)" :disabled="testingId === s.id">
               {{ testingId === s.id ? '⏳' : '🔍' }}
             </button>
-            <button class="icon-btn" :title="s.enabled ? '禁用' : '启用'" @click="toggleSource(s)">
+            <button class="icon-btn" :title="s.enabled ? '仅对我禁用' : '重新对我启用'" @click="toggleSource(s)">
               {{ s.enabled ? '🔕' : '🔔' }}
             </button>
             <button class="icon-btn danger" title="删除" @click="deleteSource(s)">🗑</button>
@@ -44,13 +44,16 @@
       </div>
 
       <div v-if="sourceTotalPages > 1" class="pagination mt-6">
+        <button class="page-btn page-nav" :disabled="sourcePage === 1" @click="loadSources(sourcePage - 1)">上一页</button>
         <button
-          v-for="p in sourceTotalPages"
+          v-for="p in sourcePageItems"
           :key="p"
           class="page-btn"
-          :class="{ active: p === sourcePage }"
-          @click="loadSources(p)"
+          :class="{ active: p === sourcePage, ellipsis: p === '…' }"
+          :disabled="p === '…'"
+          @click="p !== '…' && loadSources(p)"
         >{{ p }}</button>
+        <button class="page-btn page-nav" :disabled="sourcePage === sourceTotalPages" @click="loadSources(sourcePage + 1)">下一页</button>
       </div>
 
     </div>
@@ -90,7 +93,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { apiListSources, apiToggleSource, apiDeleteSource, apiImportByUrl, apiImportByJson, apiTestSource } from '@/api/bookSource'
@@ -103,6 +106,18 @@ const sourcesLoading = ref(false)
 const sourcePage = ref(1)
 const sourceTotal = ref(0)
 const sourceTotalPages = ref(1)
+const sourcePageItems = computed(() => {
+  const total = sourceTotalPages.value
+  const current = sourcePage.value
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
+
+  const pages = [1]
+  if (current > 4) pages.push('…')
+  for (let page = Math.max(2, current - 1); page <= Math.min(total - 1, current + 1); page++) pages.push(page)
+  if (current < total - 3) pages.push('…')
+  pages.push(total)
+  return pages
+})
 
 async function loadSources(page = 1) {
   sourcesLoading.value = true
@@ -233,10 +248,13 @@ onMounted(() => loadSources(1))
 .empty-state { text-align: center; padding: var(--space-16) 0; color: var(--ink-4); }
 .empty-icon  { font-size: 3rem; margin-bottom: var(--space-4); }
 
-.pagination { display: flex; justify-content: center; gap: var(--space-2); }
+.pagination { display: flex; justify-content: center; align-items:center; gap: var(--space-2); flex-wrap:wrap; }
 .mt-6 { margin-top: var(--space-6); }
 .page-btn { width: 36px; height: 36px; border: 1.5px solid var(--paper-3); border-radius: var(--radius-md); background: transparent; font-size: 0.875rem; color: var(--ink-3); cursor: pointer; transition: all var(--transition-fast); }
-.page-btn:hover { background: var(--paper-2); }
+.page-btn:hover:not(:disabled) { background: var(--paper-2); }
+.page-btn:disabled { cursor: default; opacity: .45; }
+.page-btn.page-nav { width:auto; padding:0 var(--space-3); font-size:.8125rem; }
+.page-btn.ellipsis { border-color:transparent; background:transparent; color:var(--ink-4); }
 .page-btn.active { background: var(--ink-0); border-color: var(--ink-0); color: var(--paper-0); }
 
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 300; display: flex; align-items: center; justify-content: center; padding: var(--space-4); }

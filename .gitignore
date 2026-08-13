@@ -44,6 +44,7 @@ book_source/*
 !book_source/validated_sources.json
 !book_source/validated_biquge7.json
 !book_source/validated_biquge7_mirror.json
+!book_source/legado-passing-source-rules.json
 
 #上传的文件
 backend/uploads/

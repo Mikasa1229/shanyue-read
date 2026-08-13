@@ -73,6 +73,7 @@ def main():
     parser.add_argument("--api", default="http://localhost:8082/api/book-sources")
     parser.add_argument("--normalized", default="artifacts/legado-normalized-sources.json")
     parser.add_argument("--report", default="docs/legado书源全量校验报告-2026-08-14.md")
+    parser.add_argument("--passing-source-output", default="book_source/legado-passing-source-rules.json", help="export importable rules for sources passing at least one book")
     parser.add_argument("--import-candidates", action="store_true", help="import normalized sources before probing")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--min-content", type=int, default=200)
@@ -148,7 +149,19 @@ def main():
     report = Path(args.report)
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"report={report} passing={len(passing)}", flush=True)
+    normalized_by_url = {
+        str(item.get("bookSourceUrl", "")).rstrip("/"): item
+        for item in json.loads(Path(args.normalized).read_text(encoding="utf-8"))
+    }
+    passing_rules = [
+        normalized_by_url[value["url"].rstrip("/")]
+        for value in passing
+        if value["url"].rstrip("/") in normalized_by_url
+    ]
+    rule_output = Path(args.passing_source_output)
+    rule_output.parent.mkdir(parents=True, exist_ok=True)
+    rule_output.write_text(json.dumps(passing_rules, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"report={report} passing={len(passing)} rules={rule_output}", flush=True)
 
 
 if __name__ == "__main__":

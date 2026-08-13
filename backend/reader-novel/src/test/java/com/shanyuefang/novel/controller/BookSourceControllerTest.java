@@ -86,12 +86,12 @@ class BookSourceControllerTest {
         AggregatedBookVO work = new AggregatedBookVO();
         work.setCanonicalBookId(88L);
         work.setSourceCount(2);
-        when(bookSourceService.aggregateCanonicalSearch("剑来", 1)).thenReturn(List.of(work));
+        when(bookSourceService.aggregateCanonicalSearch(9L, "剑来", 1)).thenReturn(List.of(work));
 
-        List<AggregatedBookVO> response = controller().aggregateCanonicalSearch("剑来", 1).getData();
+        List<AggregatedBookVO> response = controller().aggregateCanonicalSearch(9L, "剑来", 1).getData();
 
         assertThat(response).singleElement().extracting(AggregatedBookVO::getSourceCount).isEqualTo(2);
-        verify(bookSourceService).aggregateCanonicalSearch("剑来", 1);
+        verify(bookSourceService).aggregateCanonicalSearch(9L, "剑来", 1);
     }
 
     private BookSourceController controller() {

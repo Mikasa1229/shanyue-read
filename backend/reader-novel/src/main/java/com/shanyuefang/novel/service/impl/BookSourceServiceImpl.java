@@ -11,6 +11,7 @@ import com.shanyuefang.common.result.ResultCode;
 import com.shanyuefang.common.util.SnowflakeIdUtil;
 import com.shanyuefang.novel.domain.entity.BookSource;
 import com.shanyuefang.novel.domain.entity.BookSourceMapping;
+import com.shanyuefang.novel.domain.entity.UserBookSourcePreference;
 import com.shanyuefang.novel.domain.vo.BookChapterVO;
 import com.shanyuefang.novel.domain.vo.BookSourceVO;
 import com.shanyuefang.novel.domain.vo.SearchBookVO;
@@ -21,6 +22,7 @@ import com.shanyuefang.novel.engine.HttpFetcher;
 import com.shanyuefang.novel.engine.LegadoRuleEngine;
 import com.shanyuefang.novel.mapper.BookSourceMapper;
 import com.shanyuefang.novel.mapper.BookSourceMappingMapper;
+import com.shanyuefang.novel.mapper.UserBookSourcePreferenceMapper;
 import com.shanyuefang.novel.service.BookSourceService;
 import com.shanyuefang.novel.service.CanonicalBookService;
 import com.shanyuefang.novel.util.CoverSnapshotUtil;
@@ -71,6 +73,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     private final CoverSnapshotUtil coverSnapshotUtil;
     private final KnowledgeIndexPublisher knowledgeIndexPublisher;
     private final BookSourceMappingMapper mappingMapper;
+    private final UserBookSourcePreferenceMapper preferenceMapper;
     @Qualifier("bookSourceSearchExecutor")
     private final Executor bookSourceSearchExecutor;
 
@@ -159,24 +162,38 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     // ─── 管理 ─────────────────────────────────────────────────
 
     @Override
-    public Page<BookSourceVO> listSources(int page, int size) {
-        Page<BookSource> rawPage = lambdaQuery()
-                .orderByDesc(BookSource::getCreatedAt)
-                .page(new Page<>(page, size));
+    public Page<BookSourceVO> listSources(long userId, int page, int size) {
+        Page<BookSource> rawPage = baseMapper.selectPageForUser(new Page<>(page, size), userId);
         Page<BookSourceVO> result = new Page<>(rawPage.getCurrent(), rawPage.getSize(), rawPage.getTotal());
-        result.setRecords(rawPage.getRecords().stream().map(this::toVO).toList());
+        java.util.Set<Long> disabledIds = disabledSourceIds(userId);
+        result.setRecords(rawPage.getRecords().stream().map(source -> {
+            BookSourceVO vo = toVO(source);
+            vo.setEnabled(Boolean.TRUE.equals(source.getEnabled()) && !disabledIds.contains(source.getId()));
+            return vo;
+        }).toList());
         return result;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void toggleEnabled(Long id) {
+    public void toggleEnabled(long userId, Long id) {
         BookSource bs = getById(id);
         if (bs == null) throw new BusinessException(ResultCode.NOT_FOUND, "书源不存在");
-        bs.setEnabled(!Boolean.TRUE.equals(bs.getEnabled()));
-        updateById(bs);
-        invalidateChapterCache(id);
-        AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
+        UserBookSourcePreference preference = preferenceMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserBookSourcePreference>()
+                        .eq(UserBookSourcePreference::getUserId, userId)
+                        .eq(UserBookSourcePreference::getSourceId, id));
+        if (preference == null) {
+            preference = new UserBookSourcePreference();
+            preference.setUserId(userId);
+            preference.setSourceId(id);
+            preference.setDisabled(true);
+            preferenceMapper.insert(preference);
+        } else {
+            preferenceMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserBookSourcePreference>()
+                    .eq(UserBookSourcePreference::getUserId, userId)
+                    .eq(UserBookSourcePreference::getSourceId, id));
+        }
     }
 
     @Override
@@ -341,6 +358,21 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
             throw new BusinessException(ResultCode.PARAM_ERROR, "获取目录失败：" + e.getMessage());
         }
 
+        // Some Legado sources expose a compact book page and put the real
+        // chapter list behind ruleBookInfo.tocUrl. Follow that link before
+        // applying ruleToc so those sources remain compatible.
+        BookSourceModel.BookInfoRule infoRule = model.getRuleBookInfo();
+        if (infoRule != null && StringUtils.hasText(infoRule.getTocUrl())) {
+            String tocUrl = resolveUrl(extractField(infoRule.getTocUrl(), body), model.getBookSourceUrl());
+            if (StringUtils.hasText(tocUrl) && !tocUrl.equals(bookUrl)) {
+                try {
+                    body = HttpFetcher.fetch(tocUrl, model.getHeader(), model.getBookSourceUrl(), model.getBookSourceCharset());
+                } catch (Exception e) {
+                    log.debug("书源 {} 的独立目录页获取失败: {}", bs.getSourceName(), e.getMessage());
+                }
+            }
+        }
+
         List<String> items = LegadoRuleEngine.extractList(tocRule.getChapterList(), body);
         List<BookChapterVO> chapters = new ArrayList<>();
         for (int i = 0; i < items.size(); i++) {
@@ -455,8 +487,26 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         if (content == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "正文提取失败，可能该书源规则不被支持");
         }
+        content = applyContentReplaceRegex(content, contentRule.getReplaceRegex());
         // 清理多余空行
         return content.replaceAll("(\r?\n){3,}", "\n\n").trim();
+    }
+
+    private String applyContentReplaceRegex(String content, String replaceRule) {
+        if (!StringUtils.hasText(content) || !StringUtils.hasText(replaceRule)) return content;
+        String rule = replaceRule.trim();
+        if (!rule.startsWith("##")) return content;
+        String expression = rule.substring(2);
+        int delimiter = expression.indexOf("##");
+        String pattern = delimiter >= 0 ? expression.substring(0, delimiter) : expression;
+        String replacement = delimiter >= 0 ? expression.substring(delimiter + 2) : "";
+        if (!StringUtils.hasText(pattern)) return content;
+        try {
+            return content.replaceAll(pattern, replacement);
+        } catch (Exception e) {
+            log.debug("书源正文清理规则不兼容: {}", replaceRule);
+            return content;
+        }
     }
 
     // ─── 调试 ─────────────────────────────────────────────────
@@ -645,8 +695,8 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     }
 
     @Override
-    public List<SearchBookVO> aggregateSearch(String keyword, int page) {
-        return deduplicateAggregateResults(aggregateSourceResults(keyword, page)).stream()
+    public List<SearchBookVO> aggregateSearch(long userId, String keyword, int page) {
+        return deduplicateAggregateResults(filterDisabledSources(aggregateSourceResults(keyword, page), userId)).stream()
                 .sorted(Comparator.<SearchBookVO>comparingInt(book -> searchRelevance(keyword, book.getName(), book.getAuthor()))
                         .thenComparing(Comparator.comparingInt(this::resultQuality).reversed())
                         .thenComparing(SearchBookVO::getName, Comparator.nullsLast(String::compareTo)))
@@ -654,8 +704,8 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     }
 
     @Override
-    public List<AggregatedBookVO> aggregateCanonicalSearch(String keyword, int page) {
-        List<SearchBookVO> sourceResults = aggregateSourceResults(keyword, page);
+    public List<AggregatedBookVO> aggregateCanonicalSearch(long userId, String keyword, int page) {
+        List<SearchBookVO> sourceResults = filterDisabledSources(aggregateSourceResults(keyword, page), userId);
         Map<String, List<SearchBookVO>> grouped = sourceResults.stream()
                 .filter(book -> book.getCanonicalBookId() != null)
                 .collect(java.util.stream.Collectors.groupingBy(this::canonicalSearchIdentity,
@@ -668,7 +718,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
     }
 
     @Override
-    public List<AggregatedBookVO> canonicalBookSources(Long canonicalBookId) {
+    public List<AggregatedBookVO> canonicalBookSources(long userId, Long canonicalBookId) {
         if (canonicalBookId == null) return List.of();
         List<Long> equivalentIds = canonicalBookService.equivalentCanonicalBookIds(canonicalBookId);
         if (equivalentIds.isEmpty()) return List.of();
@@ -677,7 +727,11 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         if (mappings.isEmpty()) return List.of();
         Map<Long, BookSource> sources = listByIds(mappings.stream().map(BookSourceMapping::getSourceId).distinct().toList())
                 .stream().collect(java.util.stream.Collectors.toMap(BookSource::getId, source -> source));
-        List<SearchBookVO> books = mappings.stream().map(mapping -> {
+        java.util.Set<Long> disabledIds = disabledSourceIds(userId);
+        List<SearchBookVO> books = mappings.stream().filter(mapping -> {
+            BookSource source = sources.get(mapping.getSourceId());
+            return source != null && Boolean.TRUE.equals(source.getEnabled()) && !disabledIds.contains(mapping.getSourceId());
+        }).map(mapping -> {
             SearchBookVO book = new SearchBookVO();
             book.setCanonicalBookId(canonicalBookId);
             book.setSourceId(mapping.getSourceId());
@@ -688,7 +742,22 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
             book.setSourceName(source == null ? "已移除书源" : source.getSourceName());
             return book;
         }).toList();
+        if (books.isEmpty()) return List.of();
         return List.of(aggregateBook(canonicalBookId, books));
+    }
+
+    private List<SearchBookVO> filterDisabledSources(List<SearchBookVO> books, long userId) {
+        java.util.Set<Long> disabledIds = disabledSourceIds(userId);
+        if (disabledIds.isEmpty()) return books;
+        return books.stream().filter(book -> book.getSourceId() == null || !disabledIds.contains(book.getSourceId())).toList();
+    }
+
+    private java.util.Set<Long> disabledSourceIds(long userId) {
+        if (userId <= 0) return java.util.Set.of();
+        return preferenceMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserBookSourcePreference>()
+                        .eq(UserBookSourcePreference::getUserId, userId)
+                        .eq(UserBookSourcePreference::getDisabled, true))
+                .stream().map(UserBookSourcePreference::getSourceId).collect(java.util.stream.Collectors.toSet());
     }
 
     private AggregatedBookVO aggregateBook(Long canonicalBookId, List<SearchBookVO> books) {

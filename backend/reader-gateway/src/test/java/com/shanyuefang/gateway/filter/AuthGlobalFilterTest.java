@@ -125,6 +125,25 @@ class AuthGlobalFilterTest {
         }
     }
 
+    @Test
+    @DisplayName("书源列表 - GET 请求也需要鉴权以注入个人偏好身份")
+    void bookSources_getPath_requiresAuth() {
+        var exchange = exchangeFor("GET", "/api/book-sources");
+
+        try (MockedStatic<SaReactorSyncHolder> holderMock = mockStatic(SaReactorSyncHolder.class);
+             MockedStatic<StpUtil> stpMock = mockStatic(StpUtil.class)) {
+
+            holderMock.when(() -> SaReactorSyncHolder.setContext(any())).thenAnswer(inv -> null);
+            holderMock.when(SaReactorSyncHolder::clearContext).thenAnswer(inv -> null);
+            stpMock.when(StpUtil::checkLogin).thenThrow(new RuntimeException("未登录"));
+
+            StepVerifier.create(filter.filter(exchange, ex -> Mono.empty()))
+                    .verifyComplete();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+    }
+
     // ── Token 校验失败 → 401 ────────────────────────────────────
 
     @Test

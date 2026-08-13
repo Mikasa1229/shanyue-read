@@ -64,16 +64,16 @@ public class BookSourceController {
 
     @Operation(summary = "分页查询书源列表")
     @GetMapping
-    public R<Page<BookSourceVO>> list(
+    public R<Page<BookSourceVO>> list(@RequestHeader("X-User-Id") Long userId,
             @RequestParam(name = "page", defaultValue = "1") int page,
             @RequestParam(name = "size", defaultValue = "20") int size) {
-        return R.ok(bookSourceService.listSources(page, size));
+        return R.ok(bookSourceService.listSources(userId, page, size));
     }
 
-    @Operation(summary = "启用 / 禁用书源")
+    @Operation(summary = "启用 / 禁用个人书源偏好")
     @PutMapping("/{id}/status")
-    public R<Void> toggle(@PathVariable("id") Long id) {
-        bookSourceService.toggleEnabled(id);
+    public R<Void> toggle(@RequestHeader("X-User-Id") Long userId, @PathVariable("id") Long id) {
+        bookSourceService.toggleEnabled(userId, id);
         return R.ok();
     }
 
@@ -89,23 +89,25 @@ public class BookSourceController {
     @Operation(summary = "聚合搜索：并发调用所有启用书源，合并结果")
     @GetMapping("/search")
     public R<List<SearchBookVO>> aggregateSearch(
+            @RequestHeader("X-User-Id") Long userId,
             @RequestParam(name = "keyword") String keyword,
             @RequestParam(name = "page", defaultValue = "1") int page) {
-        return R.ok(bookSourceService.aggregateSearch(keyword, page));
+        return R.ok(bookSourceService.aggregateSearch(userId, keyword, page));
     }
 
     @Operation(summary = "规范作品聚合搜索：一部作品保留所有可切换书源")
     @GetMapping("/aggregate-search")
     public R<List<AggregatedBookVO>> aggregateCanonicalSearch(
+            @RequestHeader("X-User-Id") Long userId,
             @RequestParam(name = "keyword") String keyword,
             @RequestParam(name = "page", defaultValue = "1") int page) {
-        return R.ok(bookSourceService.aggregateCanonicalSearch(keyword, page));
+        return R.ok(bookSourceService.aggregateCanonicalSearch(userId, keyword, page));
     }
 
     @Operation(summary = "查看规范作品的全部书源")
     @GetMapping("/canonical/{canonicalBookId}/sources")
-    public R<AggregatedBookVO> canonicalSources(@PathVariable Long canonicalBookId) {
-        return R.ok(bookSourceService.canonicalBookSources(canonicalBookId).stream().findFirst().orElse(null));
+    public R<AggregatedBookVO> canonicalSources(@RequestHeader("X-User-Id") Long userId, @PathVariable Long canonicalBookId) {
+        return R.ok(bookSourceService.canonicalBookSources(userId, canonicalBookId).stream().findFirst().orElse(null));
     }
 
     @Operation(summary = "使用指定书源搜索书籍")

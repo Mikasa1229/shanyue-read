@@ -191,8 +191,13 @@
       <div v-if="sourceSwitchOpen" class="toc-overlay" @click.self="sourceSwitchOpen = false">
         <div class="toc-panel source-switch-panel">
           <div class="toc-header"><span>切换书源</span><button class="toc-close" @click="sourceSwitchOpen = false">✕</button></div>
-          <p class="source-switch-tip">将按当前章节标题定位；无法确认时不会自动跳转。</p>
-          <button v-for="source in readableSources" :key="`${source.sourceId}-${source.bookUrl}`" class="source-reader-option" :class="{ active: String(source.sourceId) === String(sourceId) && source.bookUrl === bookUrl }" :disabled="sourceSwitching" @click="switchSource(source)"><b>{{ source.sourceName || '未命名书源' }}</b><small>{{ source.lastChapter || '可用来源' }}</small></button>
+          <p class="source-switch-tip">优先按当前章节标题定位；未找到同名章节时将从第一章开始。</p>
+          <div class="source-switch-list">
+            <div v-for="source in readableSources" :key="`${source.sourceId}-${source.bookUrl}`" class="source-reader-row" :class="{ active: String(source.sourceId) === String(sourceId) && source.bookUrl === bookUrl }">
+              <button class="source-reader-option" :disabled="sourceSwitching || disablingSourceId === String(source.sourceId)" @click="switchSource(source)"><b>{{ source.sourceName || '未命名书源' }}</b><small>{{ source.lastChapter || '可用来源' }}</small></button>
+              <button class="source-disable-btn" :disabled="sourceSwitching || disablingSourceId === String(source.sourceId)" :title="`不再向我展示${source.sourceName || '此书源'}`" @click="disableSource(source)">{{ disablingSourceId === String(source.sourceId) ? '处理中…' : '禁用' }}</button>
+            </div>
+          </div>
           <p v-if="sourceSwitchMessage" class="source-switch-tip">{{ sourceSwitchMessage }}</p>
         </div>
       </div>
@@ -204,7 +209,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { apiGetCanonicalSources, apiGetChapters, apiGetContent } from '@/api/bookSource'
+import { apiGetCanonicalSources, apiGetChapters, apiGetContent, apiToggleSource } from '@/api/bookSource'
 import { apiUpdateReadingProgress } from '@/api/bookshelf'
 import { apiReadingHeartbeat, apiStartReadingSession } from '@/api/reading'
 import { apiAddFavorite, apiCheckFavorited } from '@/api/favorite'
@@ -308,6 +313,7 @@ const sourceSwitchOpen = ref(false)
 const sourceSwitching = ref(false)
 const sourceSwitchMessage = ref('')
 const readableSources = ref([])
+const disablingSourceId = ref('')
 
 // ─── 书签 ─────────────────────────────────────────────────────
 const bookmarkKey = computed(() => canonicalBookId.value ? `reader_bookmarks_${canonicalBookId.value}` : (bookUrl.value ? `reader_bookmarks_${bookUrl.value}` : null))
@@ -381,29 +387,45 @@ async function switchSource(source) {
   sourceSwitchMessage.value = ''
   try {
     const candidateChapters = await apiGetChapters(source.sourceId, source.bookUrl)
-    const exactIndex = candidateChapters.findIndex(chapter => normalizedChapterTitle(chapter.chapterName) === normalizedChapterTitle(current.chapterName))
-    if (exactIndex < 0) {
-      const nearby = candidateChapters.findIndex(chapter => Math.abs(Number(chapter.index) - currentIndex.value) <= 3
-        && normalizedChapterTitle(chapter.chapterName).includes(normalizedChapterTitle(current.chapterName)))
-      sourceSwitchMessage.value = nearby >= 0
-        ? `找到相近章节“${candidateChapters[nearby].chapterName}”，为避免跳错章节，请先在目录中确认。`
-        : '新书源无法确认当前章节位置，未切换。'
+    if (!candidateChapters.length) {
+      sourceSwitchMessage.value = '新书源暂无可读章节，未切换。'
       return
     }
-    const target = candidateChapters[exactIndex]
-    await router.replace({ query: { ...route.query, sourceId: String(source.sourceId), sourceName: source.sourceName || '', bookUrl: source.bookUrl, chapterUrl: target.chapterUrl, chapterIndex: String(exactIndex) } })
+    const exactIndex = candidateChapters.findIndex(chapter => normalizedChapterTitle(chapter.chapterName) === normalizedChapterTitle(current.chapterName))
+    const targetIndex = exactIndex >= 0 ? exactIndex : 0
+    const target = candidateChapters[targetIndex]
+    await router.replace({ query: { ...route.query, sourceId: String(source.sourceId), sourceName: source.sourceName || '', bookUrl: source.bookUrl, chapterUrl: target.chapterUrl, chapterIndex: String(targetIndex) } })
     chapters.value = candidateChapters
     loadedChunks.value = []
     noMoreChapters.value = false
-    currentIndex.value = exactIndex
+    currentIndex.value = targetIndex
     lastReportedChapter = -1
-    await loadChapterContent(exactIndex)
+    await loadChapterContent(targetIndex)
     sourceSwitchOpen.value = false
-    show(`已切换至${source.sourceName || '新书源'}并定位到当前章节`)
+    show(exactIndex >= 0
+      ? `已切换至${source.sourceName || '新书源'}并定位到当前章节`
+      : `新书源没有同名章节，已切换至${source.sourceName || '新书源'}的第一章`)
   } catch (error) {
     sourceSwitchMessage.value = error.message || '切换书源失败，请稍后重试。'
   } finally {
     sourceSwitching.value = false
+  }
+}
+
+async function disableSource(source) {
+  if (!source?.sourceId || disablingSourceId.value) return
+  const disablesCurrentSource = String(source.sourceId) === String(sourceId.value)
+  disablingSourceId.value = String(source.sourceId)
+  try {
+    await apiToggleSource(source.sourceId)
+    readableSources.value = readableSources.value.filter(item => String(item.sourceId) !== String(source.sourceId))
+    sourceSwitchMessage.value = disablesCurrentSource
+      ? `已为你禁用${source.sourceName || '该书源'}；当前已打开的正文不会中断，之后不会再作为候选展示。`
+      : `已为你禁用${source.sourceName || '该书源'}，不会影响其他用户。`
+  } catch (error) {
+    sourceSwitchMessage.value = error.message || '禁用书源失败，请稍后重试。'
+  } finally {
+    disablingSourceId.value = ''
   }
 }
 
@@ -745,7 +767,7 @@ onUnmounted(() => {
 .bg-rice  { --reader-bg: #f5f0e8; --reader-ink: #3a3228; background: var(--reader-bg); color: var(--reader-ink); }
 .bg-green { --reader-bg: #e8f0e8; --reader-ink: #2a3a2a; background: var(--reader-bg); color: var(--reader-ink); }
 .bg-dark  { --reader-bg: #1a1a1a; --reader-ink: #f5f5f5; background: var(--reader-bg); color: var(--reader-ink); }
-.source-switch-panel { max-width:420px; }.source-switch-tip { margin:12px 16px; color:var(--ink-3); font-size:.8rem; line-height:1.5; }.source-reader-option { display:grid; width:calc(100% - 24px); gap:4px; margin:0 12px 8px; border:1px solid var(--paper-3); border-radius:10px; padding:10px 12px; color:var(--ink-2); background:var(--paper-1); text-align:left; cursor:pointer; font:inherit; }.source-reader-option.active { border-color:#739665; background:#e8f0dd; }.source-reader-option:disabled { cursor:wait; opacity:.65; }.source-reader-option b { font-size:.86rem; }.source-reader-option small { overflow:hidden; color:var(--ink-4); font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }
+.source-switch-panel { max-width:420px; }.source-switch-tip { margin:12px 16px; color:var(--ink-3); font-size:.8rem; line-height:1.5; }.source-switch-list { flex:1; min-height:0; overflow-y:auto; padding:0 12px 12px; }.source-reader-row { display:flex; flex:none; width:100%; margin:0 0 8px; border:1px solid var(--paper-3); border-radius:10px; overflow:hidden; background:var(--paper-1); }.source-reader-row.active { border-color:#739665; background:#e8f0dd; }.source-reader-option { display:grid; flex:1; min-width:0; gap:4px; border:0; padding:10px 12px; color:var(--ink-2); background:transparent; text-align:left; cursor:pointer; font:inherit; }.source-reader-option:disabled,.source-disable-btn:disabled { cursor:wait; opacity:.65; }.source-reader-option b { font-size:.86rem; }.source-reader-option small { overflow:hidden; color:var(--ink-4); font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }.source-disable-btn { flex:0 0 auto; border:0; border-left:1px solid var(--paper-3); padding:0 11px; color:#9a4d42; background:rgba(255,255,255,.42); cursor:pointer; font:inherit; font-size:.72rem; font-weight:700; }.source-disable-btn:hover:not(:disabled) { background:#fff0ec; }
 
 /* ── 顶部栏 ── */
 .reader-topbar {

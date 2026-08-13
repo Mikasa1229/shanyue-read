@@ -19,11 +19,11 @@ public interface BookSourceService extends IService<BookSource> {
     /** 从 JSON 文本直接导入书源（支持单个对象或数组），返回导入数量 */
     int importFromJson(String json);
 
-    /** 分页查询书源列表 */
-    Page<BookSourceVO> listSources(int page, int size);
+    /** 分页查询书源列表，附带当前用户的个人启用偏好。 */
+    Page<BookSourceVO> listSources(long userId, int page, int size);
 
-    /** 启用/禁用书源 */
-    void toggleEnabled(Long id);
+    /** 切换当前用户的书源可见性，不影响共享书源目录。 */
+    void toggleEnabled(long userId, Long id);
 
     /** 删除书源 */
     void deleteSource(Long id);
@@ -35,13 +35,13 @@ public interface BookSourceService extends IService<BookSource> {
     SearchBookVO getBookDetail(Long sourceId, String bookUrl);
 
     /** 聚合搜索：并发调用所有启用书源，合并结果 */
-    List<SearchBookVO> aggregateSearch(String keyword, int page);
+    List<SearchBookVO> aggregateSearch(long userId, String keyword, int page);
 
     /** One canonical work per result, retaining every discovered readable source mirror. */
-    List<AggregatedBookVO> aggregateCanonicalSearch(String keyword, int page);
+    List<AggregatedBookVO> aggregateCanonicalSearch(long userId, String keyword, int page);
 
     /** All known source mirrors for a canonical work, ordered by current preference. */
-    List<AggregatedBookVO> canonicalBookSources(Long canonicalBookId);
+    List<AggregatedBookVO> canonicalBookSources(long userId, Long canonicalBookId);
 
     /** 获取书籍目录（章节列表） */
     List<BookChapterVO> getChapters(Long sourceId, String bookUrl);

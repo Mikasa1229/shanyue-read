@@ -153,5 +153,7 @@ public class BookSourceModel {
     public static class ContentRule {
         @JsonProperty("content")        private String content;
         @JsonProperty("nextContentUrl") private String nextContentUrl;
+        /** Legado content cleanup expression, typically ##regex or ##regex##replacement. */
+        @JsonProperty("replaceRegex")   private String replaceRegex;
     }
 }
