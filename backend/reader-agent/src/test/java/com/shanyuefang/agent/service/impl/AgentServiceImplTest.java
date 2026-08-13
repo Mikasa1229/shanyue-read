@@ -93,14 +93,13 @@ class AgentServiceImplTest {
     }
 
     @Test
-    void preservesVerifiedReferencesWhenModelDoesNotRepeatExactTitle() {
+    void dropsToolCandidatesWhenModelDoesNotUseThem() {
         List<BookReferenceVO> candidates = List.of(
                 new BookReferenceVO(1L, "诡秘之主", "爱潜水的乌贼", "", 2L, "book-url", ""));
 
         List<BookReferenceVO> references = AgentServiceImpl.referencedBooks("这一本可以直接打开阅读。", candidates);
 
-        assertEquals(1, references.size());
-        assertEquals("诡秘之主", references.get(0).getTitle());
+        assertTrue(references.isEmpty());
     }
 
     @Test
@@ -131,6 +130,15 @@ class AgentServiceImplTest {
         assertTrue(!AgentServiceImpl.shouldPrefetchBookSearch("这些是核验的，那你一开始想推荐什么小说给我看呢"));
         assertTrue(!AgentServiceImpl.shouldPrefetchBookSearch("我的意思是你最开始推荐的是什么"));
         assertTrue(AgentServiceImpl.shouldPrefetchBookSearch("给我推荐几本悬疑小说"));
+    }
+
+    @Test
+    void distinguishesGenericWordingFromConcreteSearchCriteria() {
+        assertTrue(!AgentServiceImpl.hasSearchableBookCriteria("推荐一本适合今晚读的书"));
+        assertTrue(!AgentServiceImpl.shouldPrefetchBookSearch("推荐一本适合今晚读的书"));
+        assertTrue(!AgentServiceImpl.hasSearchableBookCriteria("随便推荐一本书"));
+        assertTrue(AgentServiceImpl.hasSearchableBookCriteria("推荐几本悬疑小说"));
+        assertTrue(AgentServiceImpl.hasSearchableBookCriteria("找一下作者烽火戏诸侯的书"));
     }
 
     @Test

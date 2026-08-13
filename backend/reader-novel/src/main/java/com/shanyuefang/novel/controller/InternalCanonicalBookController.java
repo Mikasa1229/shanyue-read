@@ -166,8 +166,7 @@ public class InternalCanonicalBookController {
             if (author.contains(term)) score += 8;
             if (summary.contains(term)) score += 3;
         }
-        // A generic recommendation still needs real readable candidates instead of an empty tool result.
-        return score == 0 && terms.isEmpty() ? 1 : score;
+        return score;
     }
 
     @GetMapping("/merge-reviews")

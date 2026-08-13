@@ -87,6 +87,8 @@ public class InternalMcpController {
         specs.put("bookshelf.list", new ToolSpec("Read the requesting user's bookshelf", Map.of(), List.of()));
         specs.put("book.search", new ToolSpec("Search canonical books. Use query for one target or queries for up to three independent targets.",
                 Map.of("query", "string", "queries", "string-array"), List.of()));
+        specs.put("book.availability", new ToolSpec("Verify exact platform availability for one to three already selected book titles.",
+                Map.of("titles", "string-array"), List.of("titles")));
         specs.put("book.detail", new ToolSpec("Read canonical book metadata", Map.of("canonicalBookId", "integer"), List.of("canonicalBookId")));
         specs.put("reading.state", new ToolSpec("Read spoiler-bounded timeline", Map.of("canonicalBookId", "integer", "currentChapter", "integer"), List.of("canonicalBookId", "currentChapter")));
         specs.put("knowledge_graph.query", new ToolSpec("Read spoiler-bounded graph", Map.of("canonicalBookId", "integer", "currentChapter", "integer"), List.of("canonicalBookId", "currentChapter")));

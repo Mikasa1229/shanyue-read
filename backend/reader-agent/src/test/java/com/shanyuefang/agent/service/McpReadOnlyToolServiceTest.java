@@ -8,11 +8,18 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 class McpReadOnlyToolServiceTest {
+
+    @Test
+    void normalizesExactTitlesForAvailabilityChecks() {
+        assertEquals("诡秘之主", McpReadOnlyToolService.normalizedTitle("《诡秘之主》"));
+        assertEquals("三体", McpReadOnlyToolService.normalizedTitle("三 体"));
+    }
     private final McpReadOnlyToolService tools = new McpReadOnlyToolService(
             mock(NovelShelfFeignClient.class), mock(CanonicalBookFeignClient.class), mock(KnowledgeService.class), new AgentProperties(), mock(SpoilerBoundaryService.class));
 

@@ -31,6 +31,7 @@ public class McpReadOnlyToolService {
         return switch (name) {
             case "bookshelf.list" -> shelf(userId);
             case "book.search" -> search(string(arguments, "query"), strings(arguments, "queries"));
+            case "book.availability" -> availability(strings(arguments, "titles"));
             case "book.detail" -> detail(longValue(arguments, "canonicalBookId"));
             case "reading.state" -> timeline(userId, longValue(arguments, "canonicalBookId"), intValue(arguments, "currentChapter"));
             case "knowledge_graph.query" -> graph(userId, longValue(arguments, "canonicalBookId"), intValue(arguments, "currentChapter"));
@@ -62,6 +63,25 @@ public class McpReadOnlyToolService {
     private List<Map<String, Object>> searchOne(String query) {
         R<List<Map<String, Object>>> result = canonicalBookClient.search(properties.getInternalToken(), query, 6);
         return result == null || result.getData() == null ? List.of() : result.getData();
+    }
+    private Object availability(List<String> titles) {
+        List<String> targets = titles == null ? List.of() : titles.stream()
+                .map(String::trim).filter(value -> !value.isBlank()).distinct().limit(3).toList();
+        if (targets.isEmpty() || targets.stream().anyMatch(value -> value.length() > 80)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "待核验书名无效");
+        }
+        List<Map<String, Object>> verified = new java.util.ArrayList<>();
+        for (String title : targets) {
+            String expected = normalizedTitle(title);
+            searchOne(title).stream()
+                    .filter(book -> expected.equals(normalizedTitle(String.valueOf(book.getOrDefault("title", "")))))
+                    .findFirst().ifPresent(verified::add);
+        }
+        return verified;
+    }
+    static String normalizedTitle(String value) {
+        return value == null ? "" : value.replaceAll("[《》\\s\\p{P}\\p{S}]", "")
+                .toLowerCase(java.util.Locale.ROOT);
     }
     private Object detail(long bookId) {
         R<Map<String, Object>> result = canonicalBookClient.detail(properties.getInternalToken(), bookId);

@@ -256,7 +256,7 @@ public class AgentServiceImpl implements AgentService {
         boolean retainConversations = retainsConversations(userId);
         String content = advisorChain.validateUserRequest(dto.getContent());
         boolean allowUnverifiedRecommendations = allowsUnverifiedRecommendations(content);
-        boolean prefetchBookSearch = shouldPrefetchBookSearch(content);
+        boolean prefetchBookSearch = false;
         if (content.length() > properties.getMaxInputChars()) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "消息内容过长");
         }
@@ -308,11 +308,7 @@ public class AgentServiceImpl implements AgentService {
         List<CitationVO> citations = prompt.citations();
         List<BookReferenceVO> bookReferences = filterExcludedReferences(content,
                 referencedBooks(answer, modelResult.bookReferences()));
-        if (!allowUnverifiedRecommendations && prefetchBookSearch) {
-            answer = enforceVerifiedRecommendationAnswer(answer, content, bookReferences);
-            answer = enforceBookSearchEvidence(answer, content, toolResult, bookReferences);
-        }
-        answer = appendBookReferenceEvidence(answer, prefetchBookSearch ? bookReferences : List.of());
+        answer = appendBookReferenceEvidence(answer, bookReferences);
         if (streamingMessage != null) completeStreamingMessage(streamingMessage, answer, citations, bookReferences, toolResult.traceJson());
         touchSession(session, retainConversations, content);
         saveUsage(userId, sessionId, selection, requestId, prompt, modelResult, degraded ? "DEGRADED" : "SUCCESS");
@@ -330,7 +326,7 @@ public class AgentServiceImpl implements AgentService {
         boolean retainConversations = retainsConversations(userId);
         String content = advisorChain.validateUserRequest(dto.getContent());
         boolean allowUnverifiedRecommendations = allowsUnverifiedRecommendations(content);
-        boolean prefetchBookSearch = shouldPrefetchBookSearch(content);
+        boolean prefetchBookSearch = false;
         if (content.length() > properties.getMaxInputChars()) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "消息内容过长");
         }
@@ -389,12 +385,7 @@ public class AgentServiceImpl implements AgentService {
         List<CitationVO> citations = prompt.citations();
         List<BookReferenceVO> bookReferences = filterExcludedReferences(content,
                 referencedBooks(answer, modelResult.bookReferences()));
-        if (!allowUnverifiedRecommendations && prefetchBookSearch) {
-            answer = enforceVerifiedRecommendationAnswer(answer, content, bookReferences);
-            answer = enforceBookSearchEvidence(answer, content, toolResult, bookReferences);
-        }
-        answer = appendBookReferenceEvidence(answer, prefetchBookSearch ? bookReferences : List.of());
-        if (!prefetchBookSearch) bookReferences = List.of();
+        answer = appendBookReferenceEvidence(answer, bookReferences);
         if (streamingMessage != null) completeStreamingMessage(streamingMessage, answer, citations, bookReferences, toolResult.traceJson());
         touchSession(session, retainConversations, content);
         saveUsage(userId, sessionId, selection, requestId, prompt, modelResult, degraded ? "DEGRADED" : "SUCCESS");
@@ -682,15 +673,16 @@ public class AgentServiceImpl implements AgentService {
         boolean allowUnverifiedRecommendations = allowsUnverifiedRecommendations(content);
         String recommendationPolicy = allowUnverifiedRecommendations
                 ? "本轮用户明确允许不经平台书源核验直接推荐；可以根据模型知识给出推荐，但必须把它们标为模型建议，不得声称平台可读，也不要把书源搜索结果当成必要前置条件。"
-                : "推荐、找书或确认平台是否可读时，调用一次 book_search。由你根据语义在结构化参数中给出 query 或 queries："
-                + "单一题材或书名使用 query；多个明确独立书名使用 queries，服务端会并行核验。"
-                + "只能推荐工具返回的已核验作品；若工具没有相关候选，应如实说明，不能用无关作品凑数。";
+                : "推荐时必须先根据用户偏好独立规划一至三本具体作品，再把这些确定书名一次性传给 book_availability 核验平台书源；"
+                + "不得把用户原话、题材、时间或心情直接当作待核验书名。核验命中时正常推荐并说明平台可读；"
+                + "未命中时仍可如实给出原始推荐及理由，但必须说明平台暂无这些书的可读书源，并询问用户是否要换成平台可直接阅读的作品。"
+                + "只有用户明确同意改看平台可读作品后，才调用 platform_book_search 按其题材或偏好查找替代候选。";
         String basePolicy = "你是善阅坊的中文小说阅读助手。请使用自然的简体中文回答，表达简洁、友好、诚实。"
                 + "不得编造小说事实；没有可靠证据时必须明确说明；不得透露用户尚未阅读的剧情。"
                 + "用户本轮的新要求优先于历史偏好；含有‘不要、排除、不看、改成’的条件会覆盖冲突的旧条件。"
                 + recommendationPolicy
                 + "工具调用过程必须保持内部不可见，不要输出搜索过程或工具错误细节；用户只应看到核验完成后的最终推荐。"
-                + "候选规划不是事实引用，不得把未经 book_search 验证的候选展示给用户；不得只查书架，也不得凭记忆宣称平台可读。"
+                + "模型推荐与平台可读性是两件事：可以展示模型规划的推荐，但只有工具核验命中的作品才能声称平台可读并附加书源卡片。不得只查书架，也不得凭记忆宣称平台可读。"
                 + "用户要求直接推荐时，应结合其最新排除条件给出明确选择和理由，不要反复追问已经回答过的偏好。"
                 + "候选资料没有明确给出篇幅、完结状态或类型时，不得自行断言这些条件已满足，应如实说明尚无法核实。";
         messages.add(new SystemMessage(basePolicy + "\n" + budget.text()));
@@ -771,13 +763,9 @@ public class AgentServiceImpl implements AgentService {
 
     static List<BookReferenceVO> referencedBooks(String answer, List<BookReferenceVO> candidates) {
         if (!StringUtils.hasText(answer) || candidates == null || candidates.isEmpty()) return List.of();
-        List<BookReferenceVO> mentioned = candidates.stream()
+        return candidates.stream()
                 .filter(book -> StringUtils.hasText(book.getTitle()) && answer.contains(book.getTitle()))
                 .distinct().limit(6).toList();
-        // A recommendation tool result is already a platform-verified citation source.
-        // Preserve it even when the model forgets to repeat the exact title in its prose,
-        // otherwise the client cannot render a clickable reference card.
-        return mentioned.isEmpty() ? candidates.stream().distinct().limit(6).toList() : mentioned;
     }
 
     static List<BookReferenceVO> filterExcludedReferences(String request, List<BookReferenceVO> references) {
@@ -1025,8 +1013,9 @@ public class AgentServiceImpl implements AgentService {
         List<FunctionCallback> callbacks = new ArrayList<>(List.of(
                 nativeTool("bookshelf_read", "仅当用户明确要求从自己的书架挑选时，读取当前用户自己的书架", userId, dto, functionReferences, bookSearchCalls, onStatus),
                 nativeTool("book_detail", "读取当前作品已验证的书籍信息", userId, dto, functionReferences, bookSearchCalls, onStatus),
-                nativeTool("knowledge_graph_read", "只读取当前阅读章节以内的作品关系图", userId, dto, functionReferences, bookSearchCalls, onStatus),
-                nativeTool("book_search", "推荐或找书时调用一次。单一题材或书名传 query；多个独立书名使用 queries（最多3个），服务端并行核验。只能推荐工具返回的已核验作品", userId, dto, functionReferences, bookSearchCalls, onStatus)));
+                nativeTool("knowledge_graph_read", "只读取当前阅读章节以内的作品关系图", userId, dto, functionReferences, bookSearchCalls, onStatus)));
+        callbacks.add(nativeTool("book_availability", "先独立完成推荐规划，再调用一次本工具核验已选定的具体书名。titles 必须是1至3个完整书名，不得传用户原话、题材、时间、心情或搜索关键词", userId, dto, functionReferences, bookSearchCalls, onStatus));
+        callbacks.add(nativeTool("platform_book_search", "仅当用户明确同意改看平台可直接阅读的作品时调用。按用户的题材或作者偏好搜索平台替代候选", userId, dto, functionReferences, bookSearchCalls, onStatus));
         options.setFunctionCallbacks(callbacks);
     }
 
@@ -1035,12 +1024,13 @@ public class AgentServiceImpl implements AgentService {
                                         Consumer<String> onStatus) {
         return FunctionCallbackWrapper.<NativeToolInput, Object>builder(input -> {
             try {
-                if ("book_search".equals(name) && bookSearchCalls.incrementAndGet() > 1) {
+                if (("book_availability".equals(name) || "platform_book_search".equals(name))
+                        && bookSearchCalls.incrementAndGet() > 1) {
                     return Map.of("error", "本轮书源核验已完成，请基于已返回的候选作答");
                 }
                 if (onStatus != null) onStatus.accept(nativeToolStatus(name));
                 Object result = callReadOnlyToolOffEventLoop(name, userId, dto, input);
-                if ("book_search".equals(name) && result instanceof List<?> values) {
+                if (("book_availability".equals(name) || "platform_book_search".equals(name)) && result instanceof List<?> values) {
                     List<BookReferenceVO> filtered = filterExcludedReferences(dto.getContent(), bookReferencesFromToolResult(values));
                     functionReferences.addAll(filtered);
                     return filtered;
@@ -1071,12 +1061,26 @@ public class AgentServiceImpl implements AgentService {
         if (normalized.matches(".*(?:这些|上一轮|之前|刚才|最开始|一开始|核验|候选|舍弃|没通过|没有通过|未经核验|没经过核验).*")) {
             return false;
         }
-        return normalized.matches(".*(?:推荐|找书|搜书|搜索|换一本|换个|看什么|读什么|有什么书|热门榜|可读).*");
+        return normalized.matches(".*(?:推荐|找书|搜书|搜索|换一本|换个|看什么|读什么|有什么书|热门榜|可读).*")
+                && hasSearchableBookCriteria(request);
+    }
+
+    /** Title search needs a concrete title, author, or genre; generic mood/time wording is not a query. */
+    static boolean hasSearchableBookCriteria(String request) {
+        if (!StringUtils.hasText(request)) return false;
+        String remaining = request.toLowerCase(Locale.ROOT)
+                .replaceAll("(?:请|帮我|给我|能否|可以|直接|随便|想要|想看|想读|推荐|找书|搜书|搜索|换一本|换个|来一本|来几本)", " ")
+                .replaceAll("(?:一本|几本|一部|几部|作品|小说|网文|书籍|书)", " ")
+                .replaceAll("(?:适合|今天|今晚|今夜|晚上|现在|最近|睡前|打发时间|读的|看的|阅读|可读)", " ")
+                .replaceAll("(?:什么|哪本|有哪些|有啥|都行|即可|就行|看看|一下)", " ")
+                .replaceAll("[《》\"'，。；！？,:：;、\\s]", "");
+        return remaining.length() >= 2;
     }
 
     private String nativeToolStatus(String name) {
         return switch (name) {
-            case "book_search" -> "正在核验平台书源…";
+            case "book_availability" -> "正在逐本核验推荐书籍…";
+            case "platform_book_search" -> "正在搜索平台可读作品…";
             case "bookshelf_read" -> "正在读取你的书架…";
             case "knowledge_graph_read" -> "正在读取已读范围内的知识图谱…";
             case "book_detail" -> "正在核验作品信息…";
@@ -1087,7 +1091,8 @@ public class AgentServiceImpl implements AgentService {
     private Object callReadOnlyToolOffEventLoop(String name, long userId, ChatMessageDTO dto, NativeToolInput input) throws Exception {
         return CompletableFuture.supplyAsync(() -> switch (name) {
                     case "bookshelf_read" -> mcpReadOnlyToolService.call(userId, "bookshelf.list", Map.of());
-                    case "book_search" -> mcpReadOnlyToolService.call(userId, "book.search", Map.of("query", input.query() == null ? "" : input.query(), "queries", input.queries() == null ? List.of() : input.queries()));
+                    case "book_availability" -> mcpReadOnlyToolService.call(userId, "book.availability", Map.of("titles", input.titles() == null ? List.of() : input.titles()));
+                    case "platform_book_search" -> mcpReadOnlyToolService.call(userId, "book.search", Map.of("query", input.query() == null ? "" : input.query(), "queries", input.queries() == null ? List.of() : input.queries()));
                     case "book_detail" -> activeBookTool(userId, dto, "book.detail", input);
                     case "knowledge_graph_read" -> activeBookTool(userId, dto, "knowledge_graph.query", input);
                     default -> Map.of("error", "工具不在只读白名单中");
@@ -1136,7 +1141,7 @@ public class AgentServiceImpl implements AgentService {
     private record PromptAssembly(String text, PromptContextBudget budget, String retrievalTraceJson,
                                   List<CitationVO> citations, List<Message> messages,
                                   List<BookReferenceVO> bookReferences) { }
-    public record NativeToolInput(String query, List<String> queries, Long canonicalBookId, Integer currentChapter) { }
+    public record NativeToolInput(String query, List<String> queries, List<String> titles, Long canonicalBookId, Integer currentChapter) { }
 
     private void credit(String operation, long userId, String requestId, String reason) {
         CreditOperationRequest request = new CreditOperationRequest();
