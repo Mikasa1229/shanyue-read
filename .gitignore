@@ -40,7 +40,10 @@ package-lock.json
 !frontend/package-lock.json
 
 # 书源测试临时目录（含 legado 子仓库，不提交）
-book_source/
+book_source/*
+!book_source/validated_sources.json
+!book_source/validated_biquge7.json
+!book_source/validated_biquge7_mirror.json
 
 #上传的文件
 backend/uploads/

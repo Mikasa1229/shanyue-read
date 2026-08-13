@@ -120,6 +120,29 @@ class AgentServiceImplTest {
     }
 
     @Test
+    void recognizesCurrentTurnOptOutOfBookSourceVerification() {
+        assertTrue(AgentServiceImpl.allowsUnverifiedRecommendations("不需要核验，直接推荐几本小说"));
+        assertTrue(AgentServiceImpl.allowsUnverifiedRecommendations("直接输出给我书就行"));
+        assertTrue(!AgentServiceImpl.allowsUnverifiedRecommendations("推荐几本可直接阅读的小说"));
+    }
+
+    @Test
+    void doesNotPrefetchBooksForRetrospectiveOrClarifyingQuestions() {
+        assertTrue(!AgentServiceImpl.shouldPrefetchBookSearch("这些是核验的，那你一开始想推荐什么小说给我看呢"));
+        assertTrue(!AgentServiceImpl.shouldPrefetchBookSearch("我的意思是你最开始推荐的是什么"));
+        assertTrue(AgentServiceImpl.shouldPrefetchBookSearch("给我推荐几本悬疑小说"));
+    }
+
+    @Test
+    void keepsThirdPartyClaimsSeparateFromInterviewedCharactersKnowledge() {
+        String policy = AgentServiceImpl.roleInterviewEpistemicBoundary();
+
+        assertTrue(policy.contains("说话者归因"));
+        assertTrue(policy.contains("不得改写成被访角色已确认的第一人称事实"));
+        assertTrue(policy.contains("疑惑、沉默、思索、未知、否认或尚未确认"));
+    }
+
+    @Test
     void mergesFunctionCallReferencesWithServerSideFallbackReferences() {
         BookReferenceVO first = new BookReferenceVO(1L, "剑来", "烽火戏诸侯", "", 2L, "book-url", "");
         BookReferenceVO second = new BookReferenceVO(3L, "诡秘之主", "爱潜水的乌贼", "", 4L, "other-url", "");

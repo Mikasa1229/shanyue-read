@@ -86,7 +86,7 @@
                 <template v-else>
                   <template v-if="message.role === 'ASSISTANT'">
                     <div v-if="message.content" class="message-markdown" v-html="renderMarkdown(message.content)" />
-                    <div v-else-if="isMessageGenerating(message)" class="message-generating" role="status"><i aria-hidden="true" />正在生成回答，请耐心等待…</div>
+                    <div v-else-if="isMessageGenerating(message)" class="message-generating" role="status"><i aria-hidden="true" />{{ message.generationStatusText || '正在建立流式连接…' }}</div>
                   </template>
                   <span v-else>{{ message.content }}</span>
                   <button v-if="message.role === 'USER' && !String(message.id).startsWith('local-')" class="message-edit-button" type="button" title="编辑这条提问并重新生成后续回答" @click="startMessageEdit(message)"><span>✎</span> 编辑并重新生成</button>
@@ -114,7 +114,7 @@
                 <div class="plugin-divider" />
                 <button type="button" class="plugin-action" @click="useStarterPrompt('分析这本书最近的剧情和人物关系')">人物关系</button>
                 <button type="button" class="plugin-action" @click="useStarterPrompt('帮我找出这本书目前已读范围内的伏笔')">伏笔雷达</button>
-                <button type="button" class="plugin-action" @click="useStarterPrompt('请以当前角色的第一人称接受一次访谈')">角色访谈</button>
+                <button type="button" class="plugin-action" @click="startInterviewSelection">选择角色访谈</button>
                 <button type="button" class="plugin-action" @click="useStarterPrompt('推荐几本和这本书气质相近的作品')">相似作品</button>
                 <button type="button" class="plugin-action" @click="useStarterPrompt('请读取我的书架，按照作品题材和相似度给出子目录整理方案；先展示调整建议，不要删除任何书籍')">整理书架</button>
               </div>
@@ -244,7 +244,7 @@
                 <div class="globe-hud globe-hud-bottom"><span><i class="legend-dot character"></i>人物</span><span><i class="legend-dot location"></i>地点/组织</span><span><i class="legend-dot event"></i>事件/线索</span></div>
               </div>
               <div class="graph-inspector">
-                <div v-if="selectedGraphEvidence" class="graph-evidence"><span>当前选中</span><b>{{ selectedGraphEvidence.label }}</b><small>第 {{ selectedGraphEvidence.chapter + 1 }} 章 · 可信度 {{ Math.round((selectedGraphEvidence.confidence || 0) * 100) }}%</small><p>{{ selectedGraphEvidence.evidence || '暂时没有可展示的原文依据。' }}</p><button class="evidence-jump" @click="showEvidenceSource(selectedGraphEvidence)">查看原文依据</button></div>
+                <div v-if="selectedGraphEvidence" class="graph-evidence"><span>当前选中</span><b>{{ selectedGraphEvidence.label }}</b><small>第 {{ selectedGraphEvidence.chapter + 1 }} 章 · 可信度 {{ Math.round((selectedGraphEvidence.confidence || 0) * 100) }}%</small><p>{{ selectedGraphEvidence.evidence || '暂时没有可展示的原文依据。' }}</p><button class="evidence-jump" @click="showEvidenceSource(selectedGraphEvidence)">查看原文依据</button><button v-if="selectedGraphEvidence.entityType === 'CHARACTER'" class="character-interview" type="button" @click="startCharacterInterview(selectedGraphEvidence)">开始访谈此角色</button></div>
                 <div v-else class="graph-evidence graph-evidence-empty"><span>图谱阅读提示</span><b>先旋转，再进入一个节点</b><p>点击人物、地点、组织、事件、线索或连接线，可聚焦一跳邻域并查看原文依据。</p></div>
                 <div class="graph-node-list" aria-label="当前展示的核心节点"><button v-for="node in visibleGraphNodes.slice(0, 5)" :key="node.id" type="button" @click="selectGraphEvidence(node, 'NODE')"><i :class="node.type"></i><span>{{ node.name }}</span><small>{{ graphTypeLabel(node.type) }}</small></button></div>
               </div>
@@ -1160,6 +1160,19 @@ async function useStarterPrompt(prompt) {
   await send()
 }
 
+function startInterviewSelection() {
+  if (!chatReferenceBook.value) {
+    showChatPlugins.value = true
+    showActionNotice('info', '请先引用一本书，再从知识图谱中选择要访谈的人物。')
+    return
+  }
+  selectChatBook()
+  showChatPlugins.value = false
+  insightMode.value = 'graph'
+  selectTab('insights')
+  showActionNotice('info', `请在《${chatReferenceBook.value.bookName}》的知识图谱中选择人物，再开始访谈。`)
+}
+
 function clearReadingContext() {
   insightBookId.value = ''
   insightChapter.value = 1
@@ -1577,9 +1590,16 @@ async function send(requestContext = {}, contentOverride = '') {
   if (!contentOverride) draft.value = ''
   const sessionId = activeSession.value.id
   const localMessageId = Date.now()
-  const localAssistant = { id: `local-assistant-${localMessageId}`, role: 'ASSISTANT', content: '', generationStatus: 'GENERATING' }
+  const localAssistant = { id: `local-assistant-${localMessageId}`, role: 'ASSISTANT', content: '', generationStatus: 'GENERATING', generationStatusText: '正在建立流式连接…' }
   if (!requestContext.reuseExistingUserMessage) messages.value.push({ id: `local-user-${localMessageId}`, role: 'USER', content })
   messages.value.push(localAssistant)
+  // Vue proxies objects when they enter a reactive array. Update that proxy below so
+  // incoming SSE deltas trigger a render instead of only appearing after the final refresh.
+  const updateStreamedAssistant = (patch) => {
+    const index = messages.value.findIndex(message => String(message.id) === String(localAssistant.id))
+    if (index < 0) return
+    messages.value[index] = { ...messages.value[index], ...patch }
+  }
   sending.value = true
   // The list is normally refreshed only after completion. Keep the selected session in
   // the URL now, so a reload during retrieval can restore this exact conversation.
@@ -1589,24 +1609,28 @@ async function send(requestContext = {}, contentOverride = '') {
   let answer = ''
   try {
     const modelRequest = selectedModelConfigId.value
-      ? { mode: 'BYOK', modelConfigId: Number(selectedModelConfigId.value) }
+      // Snowflake IDs must stay strings in the browser; converting them to Number loses precision.
+      ? { mode: 'BYOK', modelConfigId: String(selectedModelConfigId.value) }
       : { mode: 'PLATFORM' }
     const readingContext = insightBookId.value && insightChapter.value >= 1
       ? { canonicalBookId: String(insightBookId.value), currentChapter: Number(insightChapter.value) - 1, currentBookTitle: selectedInsightBook.value?.bookName || chatReferenceBook.value?.bookName }
       : {}
     await streamAgentMessage(sessionId, { content, ...modelRequest, ...readingContext, ...requestContext }, {
-      onDelta: (delta) => { answer += delta; localAssistant.content = answer },
+      onDelta: (delta) => { answer += delta; updateStreamedAssistant({ content: answer }) },
+      onStatus: (data) => { updateStreamedAssistant({ generationStatusText: data?.message || '正在组织回答…' }) },
       onRecommendations: (data) => { if (Array.isArray(data)) shelfRecommendations.value = data },
       onDone: (reply) => {
-        if (reply?.content) localAssistant.content = reply.content
-        localAssistant.citations = reply?.citations || []
-        localAssistant.bookReferences = reply?.bookReferences || []
-        localAssistant.generationStatus = 'COMPLETED'
+        updateStreamedAssistant({
+          ...(reply?.content ? { content: reply.content } : {}),
+          citations: reply?.citations || [],
+          bookReferences: reply?.bookReferences || [],
+          generationStatus: 'COMPLETED'
+        })
       },
       onError: (data) => { throw new Error(data?.message || '本次回答生成失败，请稍后重试。') }
     })
     credits.value = await apiGetAgentCredits()
-  } catch (error) { localAssistant.content = error.message; localAssistant.generationStatus = 'COMPLETED' }
+  } catch (error) { updateStreamedAssistant({ content: error.message, generationStatus: 'COMPLETED' }) }
   finally {
     sending.value = false
     // Refresh only the session that produced this reply.  If the user has switched away,
@@ -1741,6 +1765,8 @@ function selectGraphEvidence (item, kind) {
   selectedGraphEvidence.value = {
     label: kind === 'NODE' ? `${item.name} / ${graphTypeLabel(item.type)}` : graphRelationLabel(item.relation),
     relation: kind === 'EDGE' ? item.relation : null,
+    entityType: kind === 'NODE' ? item.type : null,
+    name: kind === 'NODE' ? item.name : null,
     chapter: item.firstChapter || 0,
     confidence: item.confidence,
     evidence: item.evidence
@@ -1757,7 +1783,7 @@ function mapConnectorLabel (sourceId, targetId) {
   return direct?.relation || '故事推进'
 }
 async function startCharacterInterview(node) {
-  if (!insightBookId.value || insightChapter.value < 1) return
+  if (!node?.name || !insightBookId.value || insightChapter.value < 1) return
   if (!activeSession.value) await newSession()
   selectTab('chats')
   draft.value = `我想采访${node.name}。`
@@ -2196,11 +2222,11 @@ onBeforeUnmount(() => {
 .model-page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; }
 .model-page-head > div:first-child { max-width:690px; }.model-page-head h2 { margin:6px 0 7px; color:var(--agent-ink); font-family:var(--font-serif); font-size:clamp(2rem,3.2vw,3.45rem); line-height:.94; letter-spacing:-.065em; }.model-page-head p { margin:0; color:var(--agent-ink-soft); line-height:1.6; }
 .model-credit-chip { display:grid; grid-template-columns:auto auto; column-gap:14px; align-items:center; min-width:160px; padding:10px 13px; border:1px solid rgba(16,44,50,.12); border-radius:12px; background:#fffdf7; }.model-credit-chip span,.model-credit-chip small { color:var(--agent-ink-soft); font-size:.64rem; font-weight:700; }.model-credit-chip b { color:var(--agent-ink); font-family:var(--font-serif); font-size:1.7rem; line-height:1; }.model-credit-chip small { grid-column:1 / -1; margin-top:3px; }
-.model-settings-grid { display:grid; grid-template-columns:minmax(230px,.75fr) minmax(310px,1fr); gap:14px; min-height:0; }
+.model-settings-grid { display:grid; grid-template-columns:minmax(230px,.75fr) minmax(310px,1fr); gap:14px; min-height:0; align-items:start; }
 .model-platform-card,.model-form,.saved-models { box-sizing:border-box; border:1px solid rgba(16,44,50,.12); border-radius:16px; }
 .model-platform-card { display:flex; flex-direction:column; justify-content:space-between; min-height:278px; padding:22px; color:#fffaf0; background:linear-gradient(145deg,#173e42,#102c32); }.model-card-kicker { display:block; color:var(--agent-coral); font-size:.63rem; font-weight:900; letter-spacing:.13em; }.model-platform-card h3,.model-form h3,.saved-models h3 { margin:8px 0 8px; font-family:var(--font-serif); font-size:1.45rem; line-height:1; letter-spacing:-.045em; }.model-platform-card p { margin:0; color:rgba(255,250,240,.72); line-height:1.65; font-size:.8rem; }.model-platform-card ul { display:grid; gap:7px; margin:22px 0 0; padding:0; list-style:none; }.model-platform-card li { padding:8px 9px; border-radius:7px; color:rgba(255,250,240,.84); background:rgba(255,253,247,.09); font-size:.72rem; }.model-platform-card li::before { content:'✓'; margin-right:7px; color:var(--agent-lime); }
 .model-form { display:grid; grid-template-columns:1fr 1fr; gap:11px; padding:21px; background:linear-gradient(140deg,#fffdf7,#f5efdf); }.model-form-head { display:flex; grid-column:1 / -1; align-items:flex-start; justify-content:space-between; }.model-form-head > span { margin-top:2px; border:1px solid rgba(16,44,50,.13); border-radius:99px; padding:5px 7px; color:var(--agent-ink-soft); font-size:.61rem; font-weight:800; }.model-form label:last-of-type { grid-column:1 / -1; }.model-form label { gap:5px; color:var(--agent-ink-soft); font-size:.68rem; font-weight:800; }.model-form input { width:100%; box-sizing:border-box; border:1px solid rgba(16,44,50,.16); border-radius:9px; padding:10px; color:var(--agent-ink); background:#fffefa; font:inherit; font-size:.8rem; outline:none; }.model-form input:focus { border-color:var(--agent-coral); box-shadow:0 0 0 3px rgba(212,97,69,.1); }.model-field-help { grid-column:1 / -1; margin:-5px 0 0; color:var(--agent-ink-soft); font-size:.68rem; line-height:1.45; }.model-field-help code { padding:1px 4px; border-radius:4px; color:var(--agent-ink); background:rgba(16,44,50,.08); font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }.model-save-button { display:flex; grid-column:1 / -1; align-items:center; justify-content:space-between; border:0; border-radius:9px; padding:10px 12px; color:#fffaf0; background:var(--agent-ink); cursor:pointer; font:inherit; font-size:.75rem; font-weight:800; }.model-save-button b { color:var(--agent-lime); font-size:1rem; }
-.saved-models { grid-column:1 / -1; min-height:0; padding:18px 21px; background:#fffdf7; }.saved-models-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }.saved-models-head h3 { margin-bottom:0; }.saved-models-head > small { color:var(--agent-ink-soft); font-size:.65rem; }.model-empty { margin:20px 0 5px; color:var(--agent-ink-soft); font-size:.78rem; }.saved-model { padding:13px 0; }.saved-model-name { position:relative; padding-left:16px; }.saved-model-name > i { position:absolute; left:0; top:6px; width:7px; height:7px; border-radius:50%; background:var(--agent-lime); }.saved-model-name > i.disabled { background:#b4aaa0; }.saved-model small { overflow:hidden; max-width:420px; text-overflow:ellipsis; white-space:nowrap; }.model-actions button { border:1px solid rgba(16,44,50,.16); border-radius:7px; padding:5px 7px; color:var(--agent-ink-soft); background:transparent; cursor:pointer; font:inherit; font-size:.66rem; }.model-actions button:hover { color:var(--agent-ink); border-color:var(--agent-ink); }.model-actions button.danger:hover { color:var(--agent-coral); border-color:var(--agent-coral); }
+.saved-models { grid-column:2; grid-row:2; min-height:0; max-height:290px; overflow:auto; padding:18px 21px; background:#fffdf7; }.saved-models-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }.saved-models-head h3 { margin-bottom:0; }.saved-models-head > small { color:var(--agent-ink-soft); font-size:.65rem; }.model-empty { margin:20px 0 5px; color:var(--agent-ink-soft); font-size:.78rem; }.saved-model { padding:13px 0; }.saved-model-name { position:relative; padding-left:16px; }.saved-model-name > i { position:absolute; left:0; top:6px; width:7px; height:7px; border-radius:50%; background:var(--agent-lime); }.saved-model-name > i.disabled { background:#b4aaa0; }.saved-model small { overflow:hidden; max-width:420px; text-overflow:ellipsis; white-space:nowrap; }.model-actions button { border:1px solid rgba(16,44,50,.16); border-radius:7px; padding:5px 7px; color:var(--agent-ink-soft); background:transparent; cursor:pointer; font:inherit; font-size:.66rem; }.model-actions button:hover { color:var(--agent-ink); border-color:var(--agent-ink); }.model-actions button.danger:hover { color:var(--agent-coral); border-color:var(--agent-coral); }
 .credit-task-card { border:1px solid rgba(16,44,50,.12); border-radius:16px; padding:18px; background:linear-gradient(145deg,#edf4dc,#fffdf7); }.credit-task-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }.credit-task-head h3 { margin:7px 0 0; color:var(--agent-ink); font-family:var(--font-serif); font-size:1.32rem; line-height:1; letter-spacing:-.04em; }.credit-task-head > small { border:1px solid rgba(16,44,50,.1); border-radius:999px; padding:5px 7px; color:var(--agent-ink-soft); background:#fffdf7; font-size:.61rem; font-weight:800; white-space:nowrap; }.credit-task-list { display:grid; gap:7px; margin-top:15px; }.credit-task-list > div { display:grid; grid-template-columns:1fr auto; gap:2px 9px; padding:8px 9px; border-radius:8px; color:var(--agent-ink); background:rgba(255,253,247,.76); font-size:.72rem; }.credit-task-list b { color:#54796d; font-family:var(--font-serif); font-size:.95rem; }.credit-task-list small { grid-column:1 / -1; color:var(--agent-ink-soft); font-size:.64rem; }.credit-task-list > div.done { opacity:.62; }.credit-task-card > p { margin:16px 0 0; color:var(--agent-ink-soft); font-size:.72rem; line-height:1.65; }
 
 @media (min-width:1080px) {
@@ -2213,7 +2239,7 @@ onBeforeUnmount(() => {
   .agent-workbench { grid-template-columns:250px minmax(0,1fr)!important; }
   .agent-dashboard { align-content:start; }.dashboard-head { padding-top:2px; }.dashboard-metrics > article { min-height:184px; }.dashboard-shortcuts button { min-height:112px; }
 }
-@media (max-width:900px) { .model-page-head { align-items:flex-start; flex-direction:column; }.model-settings-grid { grid-template-columns:1fr; }.saved-models { grid-column:auto; }.model-platform-card { min-height:0; }.model-credit-chip { width:100%; box-sizing:border-box; }.model-form { grid-template-columns:1fr; }.model-form label:last-of-type { grid-column:auto; }.model-save-button { grid-column:auto; } }
+@media (max-width:900px) { .model-page-head { align-items:flex-start; flex-direction:column; }.model-settings-grid { grid-template-columns:1fr; }.saved-models { grid-column:auto; grid-row:auto; max-height:none; }.model-platform-card { min-height:0; }.model-credit-chip { width:100%; box-sizing:border-box; }.model-form { grid-template-columns:1fr; }.model-form label:last-of-type { grid-column:auto; }.model-save-button { grid-column:auto; } }
 @media (max-width:700px) { .conversation-title-input { width:55vw; }.model-page-head h2 { font-size:2.25rem; }.chat-model-select { flex:1 1 100%!important; }.saved-model { align-items:flex-start; flex-direction:column; }.model-actions { justify-content:flex-start; } }
 
 /* Compact controls prevent native number spinners from competing with the reading workspace. */
@@ -2324,7 +2350,7 @@ onBeforeUnmount(() => {
 .task-row-progress .task-progress-track i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#d46145,#ee8d5a); box-shadow:inset 0 0 0 1px rgba(255,255,255,.25); transition:width .45s ease; }
 .task-row-progress .task-progress-track.completed i { background:linear-gradient(90deg,#5e9166,#9bc46c); }
 .task-row-progress .task-progress-track.failed { border-color:rgba(163,69,53,.35); background:repeating-linear-gradient(135deg,rgba(163,69,53,.12) 0 8px,rgba(163,69,53,.04) 8px 16px); }
-.agent-action-notice { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; font-size: .8rem; font-weight: 700; } .agent-action-notice.is-success { color: #235c35; border: 1px solid #8fca9c; background: #e7f6e9; } .agent-action-notice.is-error { color: #8b2f24; border: 1px solid #e5a197; background: #fff0ed; } .spoiler-dialog-actions .btn-ghost { border: 2px solid #fffaf0 !important; color: #fffaf0 !important; background: #2b5b60 !important; box-shadow: 0 2px 0 rgba(0,0,0,.2); } .spoiler-dialog-actions .btn-ghost:hover { background: #3b7378 !important; }
+.agent-action-notice { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; font-size: .8rem; font-weight: 700; } .agent-action-notice.is-success { color: #235c35; border: 1px solid #8fca9c; background: #e7f6e9; } .agent-action-notice.is-error { color: #8b2f24; border: 1px solid #e5a197; background: #fff0ed; } .agent-action-notice.is-info { color: #174f66; border: 1px solid #83bdcd; background: #e8f7fa; } .spoiler-dialog-actions .btn-ghost { border: 2px solid #fffaf0 !important; color: #fffaf0 !important; background: #2b5b60 !important; box-shadow: 0 2px 0 rgba(0,0,0,.2); } .spoiler-dialog-actions .btn-ghost:hover { background: #3b7378 !important; }
 .agent-action-notice { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; font-size: .8rem; font-weight: 700; } .agent-action-notice.is-success { color: #235c35; border: 1px solid #8fca9c; background: #e7f6e9; } .agent-action-notice.is-error { color: #8b2f24; border: 1px solid #e5a197; background: #fff0ed; } .spoiler-dialog-actions .btn-ghost { border: 2px solid #fffaf0 !important; color: #fffaf0 !important; background: #2b5b60 !important; box-shadow: 0 2px 0 rgba(0,0,0,.2); } .spoiler-dialog-actions .btn-ghost:hover { background: #3b7378 !important; }
 
 /* The graph is deliberately the primary reading surface: an interactive, depth-sorted relation globe. */

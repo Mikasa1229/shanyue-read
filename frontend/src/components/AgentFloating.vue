@@ -311,7 +311,7 @@ async function send() {
         answer += delta
         messages.value[messages.value.length - 1].content = answer
       },
-      onStatus(data) { status.value = data?.status === 'thinking' ? '正在思考…' : '正在检索…' },
+      onStatus(data) { status.value = data?.message || (data?.status === 'thinking' ? '正在思考…' : '正在检索…') },
       onRecommendations(data) { recommendations.value = Array.isArray(data) ? data.slice(0, 3) : recommendations.value },
       onGraph(data) { graphPreview.value = data || graphPreview.value },
       onDone(reply) {

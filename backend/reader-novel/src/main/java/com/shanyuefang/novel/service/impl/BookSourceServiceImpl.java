@@ -137,6 +137,9 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
                 } else {
                     save(bs);
                 }
+                // Rules can change independently of a book URL. Do not serve a directory parsed
+                // with an older rule set while the updated source is already searchable.
+                invalidateChapterCache(bs.getId());
                 saved++;
             } catch (Exception e) {
                 log.warn("书源导入跳过（解析失败）: {}", e.getMessage());
@@ -145,6 +148,12 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
         log.info("书源导入完成，共保存 {} 条", saved);
         return saved;
+    }
+
+    private void invalidateChapterCache(Long sourceId) {
+        if (sourceId == null) return;
+        String prefix = sourceId + "|";
+        CHAPTER_CACHE.keySet().removeIf(key -> key.startsWith(prefix));
     }
 
     // ─── 管理 ─────────────────────────────────────────────────
@@ -166,6 +175,7 @@ public class BookSourceServiceImpl extends ServiceImpl<BookSourceMapper, BookSou
         if (bs == null) throw new BusinessException(ResultCode.NOT_FOUND, "书源不存在");
         bs.setEnabled(!Boolean.TRUE.equals(bs.getEnabled()));
         updateById(bs);
+        invalidateChapterCache(id);
         AGGREGATE_SOURCE_RESULTS_CACHE.invalidateAll();
     }
 

@@ -1,0 +1,27 @@
+[
+  {
+    "bookSourceName": "笔趣阁③（校验可用）",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https://www.biquge99.cc/",
+    "bookSourceGroup": "校验可用",
+    "enabled": true,
+    "searchUrl": "https://www.biquge99.cc/s.php?ie=gbk&q={{key}}",
+    "ruleSearch": {
+      "bookList": "class.bookbox",
+      "name": "class.bookname@tag.a@text##\\（.*|\\(.*|免费阅读|全文.*阅读|最新章节|笔趣阁|小说",
+      "author": "class.author@text##作者：|<",
+      "bookUrl": "class.bookname@tag.a@href",
+      "intro": "class.bookinfo@p@text",
+      "kind": "class.cat@text##分类：",
+      "lastChapter": "class.update@tag.a@text##免费章节 |正文卷 |正文 |VIP章节 |百度搜索.*"
+    },
+    "ruleToc": {
+      "chapterList": "class.listmain@tag.dd@tag.a",
+      "chapterName": "text",
+      "chapterUrl": "href"
+    },
+    "ruleContent": {
+      "content": "id.content@textNodes##请记住本书.*cc"
+    }
+  }
+]

@@ -134,11 +134,12 @@ public class AgentController {
             }
             AtomicBoolean clientConnected = new AtomicBoolean(true);
             try {
+                log.info("Agent SSE started: sessionId={}, mode={}", sessionId, dto.getMode());
                 sendIfConnected(emitter, clientConnected, "meta", Map.of("sessionId", sessionId));
-                sendIfConnected(emitter, clientConnected, "tool_status", Map.of("status", "thinking"));
+                sendIfConnected(emitter, clientConnected, "tool_status", Map.of("status", "preparing", "message", "正在建立流式连接…"));
                 AgentReplyVO reply = agentService.streamChat(userId, sessionId, dto, delta -> {
                     sendIfConnected(emitter, clientConnected, "delta", delta);
-                });
+                }, status -> sendIfConnected(emitter, clientConnected, "tool_status", Map.of("status", "working", "message", status)));
                 // Structured UI data stays outside model prose; optional previews cannot fail an answered chat.
                 if (clientConnected.get()) try {
                     String request = dto.getContent() == null ? "" : dto.getContent();
@@ -155,9 +156,14 @@ public class AgentController {
                 }
                 sendIfConnected(emitter, clientConnected, "done", reply);
                 if (clientConnected.get()) emitter.complete();
+                log.info("Agent SSE completed: sessionId={}", sessionId);
             } catch (Exception e) {
+                log.warn("Agent SSE failed: sessionId={}, type={}, message={}", sessionId,
+                        e.getClass().getSimpleName(), e.getMessage());
                 try {
-                    emitter.send(SseEmitter.event().name("error").data(Map.of("message", "Agent 请求失败，请稍后重试")));
+                    String message = e instanceof com.shanyuefang.common.exception.BusinessException businessException
+                            ? businessException.getMessage() : "Agent 请求失败，请稍后重试";
+                    emitter.send(SseEmitter.event().name("error").data(Map.of("message", message == null ? "Agent 请求失败，请稍后重试" : message)));
                 } catch (IOException ignored) {
                     // The browser has already closed the stream.
                 }
@@ -173,6 +179,7 @@ public class AgentController {
         if (!clientConnected.get()) return;
         try {
             emitter.send(SseEmitter.event().name(event).data(data));
+            if ("delta".equals(event)) log.debug("Agent SSE delta delivered");
         } catch (IOException exception) {
             // A page refresh closes only this response stream; the persisted generation must continue.
             clientConnected.set(false);

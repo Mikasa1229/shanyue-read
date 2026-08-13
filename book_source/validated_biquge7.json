@@ -1,0 +1,26 @@
+[
+  {
+    "bookSourceName": "笔趣阁77（校验可用）",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https://www.biquge7.top/",
+    "bookSourceGroup": "校验可用",
+    "enabled": true,
+    "searchUrl": "https://www.biquge7.top/search?keyword={{key}}",
+    "ruleSearch": {
+      "bookList": "class.tui_1_item",
+      "name": "img@alt",
+      "author": "class.author@text",
+      "coverUrl": "img@src",
+      "bookUrl": "a@href",
+      "intro": "class.des@text||[property=\"og:description\"]@content||[name=\"description\"]@content"
+    },
+    "ruleToc": {
+      "chapterList": "class.list@li@tag.a",
+      "chapterName": "text",
+      "chapterUrl": "href"
+    },
+    "ruleContent": {
+      "content": "class.text@text"
+    }
+  }
+]

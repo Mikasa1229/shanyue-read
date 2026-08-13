@@ -69,41 +69,57 @@ export const apiGetBookKnowledgeStatus = (bookId) => http.get(`/agent/books/${bo
 
 export async function streamAgentMessage(sessionId, dto, handlers = {}) {
   const token = localStorage.getItem('token')
-  const response = await fetch(`/api/agent/sessions/${sessionId}/messages:stream`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}`, satoken: token } : {})
-    },
-    body: JSON.stringify(dto)
-  })
-  if (!response.ok || !response.body) {
-    if (response.status === 404) throw new Error('Agent 服务未通过网关连接，请确认后端网关与 Agent 使用同一份配置')
-    if (response.status === 401) throw new Error('请先登录后再使用 Agent')
-    throw new Error(`Agent 请求失败（${response.status}）`)
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const events = buffer.split('\n\n')
-    buffer = events.pop() || ''
-    events.forEach((event) => {
-      const eventName = event.match(/^event:\s*(.+)$/m)?.[1]
-      const rawData = event.match(/^data:\s*(.+)$/m)?.[1]
-      if (!eventName || rawData == null) return
-      let data = rawData
-      try { data = JSON.parse(rawData) } catch (_) {}
-      if (eventName === 'delta') handlers.onDelta?.(typeof data === 'string' ? data : String(data))
-      if (eventName === 'tool_status') handlers.onStatus?.(data)
-      if (eventName === 'recommendations') handlers.onRecommendations?.(data)
-      if (eventName === 'graph') handlers.onGraph?.(data)
-      if (eventName === 'done') handlers.onDone?.(data)
-      if (eventName === 'error') handlers.onError?.(data)
+  const controller = new AbortController()
+  // A stalled provider must not leave the conversation in GENERATING forever.
+  const timeoutId = window.setTimeout(() => controller.abort(), 120_000)
+  try {
+    const response = await fetch(`/api/agent/sessions/${sessionId}/messages:stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}`, satoken: token } : {})
+      },
+      body: JSON.stringify(dto),
+      signal: controller.signal
     })
+    if (!response.ok || !response.body) {
+      if (response.status === 404) throw new Error('Agent 服务未通过网关连接，请确认后端网关与 Agent 使用同一份配置')
+      if (response.status === 401) throw new Error('登录状态已失效，请重新登录后继续对话')
+      throw new Error(`Agent 请求失败（${response.status}）`)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let completed = false
+    let streamError = null
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // Gateways and servlet containers can choose either LF or CRLF SSE framing.
+      const events = buffer.split(/\r?\n\r?\n/)
+      buffer = events.pop() || ''
+      events.forEach((event) => {
+        const eventName = event.match(/^event:\s*(.+)$/m)?.[1]?.trim()
+        const rawData = event.match(/^data:\s*([\s\S]*)$/m)?.[1]?.trim()
+        if (!eventName || rawData == null) return
+        let data = rawData
+        try { data = JSON.parse(rawData) } catch (_) {}
+        if (eventName === 'delta') handlers.onDelta?.(typeof data === 'string' ? data : String(data))
+        if (eventName === 'tool_status') handlers.onStatus?.(data)
+        if (eventName === 'recommendations') handlers.onRecommendations?.(data)
+        if (eventName === 'graph') handlers.onGraph?.(data)
+        if (eventName === 'done') { completed = true; handlers.onDone?.(data) }
+        if (eventName === 'error') streamError = new Error(data?.message || '本次回答生成失败，请稍后重试。')
+      })
+      if (streamError) throw streamError
+    }
+    if (!completed) throw new Error('流式连接意外结束，回答尚未完成。请重新登录后重试。')
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('模型响应超过 120 秒，已停止等待；请检查模型接口或稍后重试。')
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
   }
 }
