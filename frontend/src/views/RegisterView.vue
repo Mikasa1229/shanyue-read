@@ -78,9 +78,11 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useWelcomeAnnouncement } from '@/composables/useWelcomeAnnouncement'
 
 const router = useRouter()
 const userStore = useUserStore()
+const { show: showWelcomeAnnouncement } = useWelcomeAnnouncement()
 
 const form = reactive({ username: '', nickname: '', password: '' })
 const confirmPassword = ref('')
@@ -98,6 +100,7 @@ async function handleRegister() {
     await userStore.register(form)
     // Auto login after register
     await userStore.login({ username: form.username, password: form.password })
+    showWelcomeAnnouncement()
     router.push('/')
   } catch (e) {
     error.value = e.message

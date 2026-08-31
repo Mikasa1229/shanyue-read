@@ -19,6 +19,10 @@ export default defineConfig({
       '/uploads': {
         target: 'http://localhost:8081',
         changeOrigin: true
+      },
+      '/reader-assets': {
+        target: 'http://localhost:9000',
+        changeOrigin: true
       }
     }
   }

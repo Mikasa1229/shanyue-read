@@ -1,5 +1,21 @@
 import axios from 'axios'
 
+// Stored media URLs from local deployments may contain localhost. Resolve them
+// through the current frontend host so local Vite and remote Nginx use the same path.
+export function normalizeAssetUrl(value) {
+  if (typeof value !== 'string') return value
+  return value.replace(/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::9000)?(\/reader-assets\/)/i, '$1')
+}
+
+function normalizeAssetUrls(value) {
+  if (typeof value === 'string') return normalizeAssetUrl(value)
+  if (Array.isArray(value)) return value.map(normalizeAssetUrls)
+  if (value && typeof value === 'object') {
+    Object.keys(value).forEach((key) => { value[key] = normalizeAssetUrls(value[key]) })
+  }
+  return value
+}
+
 // 将 JSON 中大整数 ID 字段转为字符串，防止 JS Number 精度丢失
 function safeParseBigIds(text) {
   // Graph edge endpoints are Snowflake IDs too. Preserve them before JSON parsing.
@@ -12,9 +28,9 @@ const http = axios.create({
   transformResponse: [
     (data) => {
       if (typeof data === 'string') {
-        try { return JSON.parse(safeParseBigIds(data)) } catch { return data }
+        try { return normalizeAssetUrls(JSON.parse(safeParseBigIds(data))) } catch { return data }
       }
-      return data
+      return normalizeAssetUrls(data)
     }
   ]
 })

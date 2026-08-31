@@ -8,6 +8,7 @@
     </router-view>
     <ToastManager />
     <ConfirmDialog />
+    <WelcomeAnnouncement />
     <AgentFloating />
   </div>
 </template>
@@ -16,6 +17,7 @@
 import AppNav from '@/components/AppNav.vue'
 import ToastManager from '@/components/ToastManager.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import WelcomeAnnouncement from '@/components/WelcomeAnnouncement.vue'
 import AgentFloating from '@/components/AgentFloating.vue'
 </script>
 

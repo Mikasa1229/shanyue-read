@@ -67,7 +67,7 @@ app:
     platform-api-key: ${DEEPSEEK_API_KEY:}
     platform-base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
     byok-allowed-hosts: ${AGENT_BYOK_ALLOWED_HOSTS:}
-    starter-credits: ${AGENT_STARTER_CREDITS:3}
+    starter-credits: ${AGENT_STARTER_CREDITS:100}
     max-input-chars: ${AGENT_MAX_INPUT_CHARS:4000}
     max-output-tokens: ${AGENT_MAX_OUTPUT_TOKENS:1200}
     max-context-tokens: ${AGENT_MAX_CONTEXT_TOKENS:3600}

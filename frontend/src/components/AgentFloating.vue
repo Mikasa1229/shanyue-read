@@ -82,11 +82,14 @@
     </transition>
     <button class="agent-trigger" type="button" :aria-expanded="open" aria-label="打开阅读助手" @pointerdown="startDrag" @click="handleTriggerClick">
       <svg class="agent-trigger-icon" viewBox="0 0 48 48" aria-hidden="true">
-        <path class="agent-trigger-book" d="M10 12.5c5.5-2.5 10.5-2.2 14 1.2v23.8c-3.5-3.4-8.5-3.7-14-1.2z" />
-        <path class="agent-trigger-book" d="M38 12.5c-5.5-2.5-10.5-2.2-14 1.2v23.8c3.5-3.4 8.5-3.7 14-1.2z" />
-        <path class="agent-trigger-spark" d="M24 7v8M20 11h8M31.5 22l2.5 2.5M34 22l-2.5 2.5" />
+        <path class="agent-trigger-antenna" d="M24 8v5M21 8h6" />
+        <rect class="agent-trigger-robot" x="10" y="13" width="28" height="24" rx="8" />
+        <path class="agent-trigger-ear" d="M10 23H7v7h3M38 23h3v7h-3" />
+        <circle class="agent-trigger-eye" cx="19" cy="24" r="2" />
+        <circle class="agent-trigger-eye" cx="29" cy="24" r="2" />
+        <path class="agent-trigger-mouth" d="M19 30c2.5 2 7.5 2 10 0" />
       </svg>
-      <small>阅见</small>
+      <small>助手</small>
     </button>
   </div>
 </template>
@@ -368,8 +371,9 @@ async function openCitation(citation) {
 .agent-trigger::before { content: ''; position: absolute; inset: 5px; border: 1px solid rgba(255,255,255,.22); border-radius: 17px; pointer-events: none; }
 .agent-trigger:hover { transform: translateY(-4px) rotate(-2deg); box-shadow: 0 18px 40px rgba(26,24,20,.34), inset 0 1px 0 rgba(255,255,255,.38); }
 .agent-trigger-icon { width: 34px; height: 34px; overflow: visible; }
-.agent-trigger-book { fill: none; stroke: var(--paper-0); stroke-width: 2.1; stroke-linejoin: round; }
-.agent-trigger-spark { fill: none; stroke: var(--gold-2); stroke-width: 2; stroke-linecap: round; }
+.agent-trigger-robot { fill: rgba(255,255,255,.08); stroke: var(--paper-0); stroke-width: 2.1; stroke-linejoin: round; }
+.agent-trigger-antenna,.agent-trigger-ear,.agent-trigger-mouth { fill: none; stroke: var(--gold-2); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.agent-trigger-eye { fill: var(--gold-2); }
 .agent-trigger small { position: relative; font-size: .62rem; letter-spacing: .12em; color: var(--gold-2); }
 .agent-popover { position: absolute; right: 0; bottom: 74px; width: min(400px, calc(100vw - 32px)); height: min(620px, calc(100vh - 110px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--paper-3); border-radius: var(--radius-xl); background: rgba(255,254,249,.98); box-shadow: var(--shadow-lg); }
 .agent-mobile-handle { display: none; }

@@ -195,6 +195,7 @@ pwsh -NoProfile -File scripts/evaluate-jianlai-rag-quality.ps1 `
 
 | 主题 | 文档 |
 | --- | --- |
+| 整体技术方案 | [项目整体技术方案](docs/项目整体技术方案.md) |
 | 整体设计 | [项目设计](docs/project-design.md) |
 | Agent 架构计划 | [小说智能体架构计划](docs/novel-agent-architecture-plan.md) |
 | Agent 实现与验收 | [小说智能体工作内容详解](docs/小说智能体工作内容详解.md) / [全量验收报告](docs/小说智能体计划全量验收报告.md) |

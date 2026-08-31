@@ -20,7 +20,7 @@ import java.time.LocalDateTime;
 @Service
 @RequiredArgsConstructor
 public class CreditServiceImpl implements CreditService {
-    public static final int STARTER_CREDITS = 3;
+    public static final int STARTER_CREDITS = 100;
     private final UserCreditAccountMapper accountMapper;
     private final UserCreditLedgerMapper ledgerMapper;
 

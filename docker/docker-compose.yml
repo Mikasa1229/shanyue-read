@@ -1,6 +1,9 @@
 # 善阅坊本地开发中间件一键启动
 # 使用方式：docker compose up -d
 
+# Compose project name shown in Docker Desktop.
+name: shanyuefang-reader
+
 services:
 
   # ───────────────── PostgreSQL ─────────────────
@@ -235,14 +238,37 @@ services:
       - ./otel-collector.yml:/etc/otelcol-contrib/config.yaml:ro
 
 volumes:
+  # Keep the existing data volumes when the Compose project is renamed.
   postgres_data:
+    name: docker_postgres_data
+    external: true
   redis_data:
+    name: docker_redis_data
+    external: true
   rabbitmq_data:
+    name: docker_rabbitmq_data
+    external: true
   nacos_mysql_data:
+    name: docker_nacos_mysql_data
+    external: true
   nacos_data:
+    name: docker_nacos_data
+    external: true
   es_data:
+    name: docker_es_data
+    external: true
   minio_data:
+    name: docker_minio_data
+    external: true
   milvus_etcd_data:
+    name: docker_milvus_etcd_data
+    external: true
   milvus_data:
+    name: docker_milvus_data
+    external: true
   neo4j_data:
+    name: docker_neo4j_data
+    external: true
   prometheus_data:
+    name: docker_prometheus_data
+    external: true

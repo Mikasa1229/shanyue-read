@@ -20,7 +20,7 @@ public class AgentProperties {
     private String platformBaseUrl = "https://api.deepseek.com";
     /** Comma-separated HTTPS hosts allowed for user-managed OpenAI-compatible endpoints. */
     private String byokAllowedHosts = "";
-    private int starterCredits = 3;
+    private int starterCredits = 100;
     private int maxInputChars = 4000;
     private int maxOutputTokens = 1200;
     /** Maximum estimated input tokens assembled from history, LightRAG, tools, and citations. */
