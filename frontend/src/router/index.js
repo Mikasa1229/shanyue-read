@@ -87,6 +87,10 @@ const router = createRouter({
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) return savedPosition
+    // Reader progress is persisted by replacing only the query string. Do not
+    // reset the window to the first rendered chapter for those same-page
+    // updates; a real route change should still start at the top.
+    if (to.path === from.path) return false
     return { top: 0, behavior: 'smooth' }
   }
 })

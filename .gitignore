@@ -59,3 +59,4 @@ __pycache__/
 
 # Personal resume and interview preparation materials.
 docs/resume/
+artifacts/legado-scan-checkpoint.jsonl

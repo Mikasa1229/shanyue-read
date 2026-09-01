@@ -13,7 +13,7 @@
           {{ isFavorited ? '♥' : '♡' }}
         </button>
         <button class="topbar-btn" title="写书评" @click="shareOpen = true">书评</button>
-        <button v-if="canonicalBookId" class="topbar-btn" title="换源" @click="openSourceSwitch">换源</button>
+        <button v-if="canSwitchSource" class="topbar-btn" title="换源" @click="openSourceSwitch">换源</button>
         <button class="topbar-btn" :class="{ 'topbar-bookmarked': isCurrentBookmarked }" title="书签" @click="toggleBookmark">🔖</button>
         <button class="topbar-btn" title="目录" @click="tocOpen = true">☰</button>
         <button class="topbar-btn" title="设置" @click="settingsOpen = true">⚙</button>
@@ -29,10 +29,20 @@
       <template v-else>
         <div ref="topTrigger" class="top-trigger"></div>
         <div v-if="loadingPrev" class="chunk-loading">正在加载上一章…</div>
-          <div v-for="chunk in loadedChunks" :key="chunk.chapterUrl" class="chapter-chunk" :ref="el => setChapterChunkRef(el, chunk.chapterUrl)">
+          <div v-for="chunk in loadedChunks" :key="chunk.chapterUrl" class="chapter-chunk" :data-chapter-index="chunk.chapterIndex" :ref="el => setChapterChunkRef(el, chunk.chapterUrl)">
           <div class="chapter-divider">{{ chunk.chapterName }}</div>
           <div v-if="chunk.loading" class="chunk-loading">加载中…</div>
-          <div v-else-if="chunk.error" class="chunk-error">{{ chunk.error }}</div>
+          <div v-else-if="chunk.error" class="chunk-error" role="alert">
+            <strong>本章暂时加载失败</strong>
+            <p>{{ friendlyChapterError(chunk.error) }}</p>
+            <small>正文没有丢失，可能是当前书源响应太慢或暂时拒绝了请求。</small>
+            <div class="chunk-error-actions">
+              <button type="button" class="chunk-retry-btn" :disabled="chunk.loading" @click.stop="retryChapterContent(chunk)">
+                {{ chunk.loading ? '重新加载中…' : '重新加载本章' }}
+              </button>
+              <button v-if="canSwitchSource" type="button" class="chunk-source-btn" @click.stop="openSourceSwitch">切换书源</button>
+            </div>
+          </div>
           <div v-else class="chapter-text" v-html="chunk.html"></div>
         </div>
         <!-- 底部触发器 -->
@@ -192,7 +202,9 @@
         <div class="toc-panel source-switch-panel">
           <div class="toc-header"><span>切换书源</span><button class="toc-close" @click="sourceSwitchOpen = false">✕</button></div>
           <p class="source-switch-tip">优先按当前章节标题定位；未找到同名章节时将从第一章开始。</p>
-          <div class="source-switch-list">
+          <div v-if="sourceSwitchLoading" class="source-switch-empty">正在读取可用书源…</div>
+          <div v-else-if="!readableSources.length && !sourceSwitchMessage" class="source-switch-empty">暂时没有可切换的书源。</div>
+          <div v-else class="source-switch-list">
             <div v-for="source in readableSources" :key="`${source.sourceId}-${source.bookUrl}`" class="source-reader-row" :class="{ active: String(source.sourceId) === String(sourceId) && source.bookUrl === bookUrl }">
               <button class="source-reader-option" :disabled="sourceSwitching || disablingSourceId === String(source.sourceId)" @click="switchSource(source)"><b>{{ source.sourceName || '未命名书源' }}</b><small>{{ source.lastChapter || '可用来源' }}</small></button>
               <button class="source-disable-btn" :disabled="sourceSwitching || disablingSourceId === String(source.sourceId)" :title="`不再向我展示${source.sourceName || '此书源'}`" @click="disableSource(source)">{{ disablingSourceId === String(source.sourceId) ? '处理中…' : '禁用' }}</button>
@@ -209,7 +221,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { apiGetCanonicalSources, apiGetChapters, apiGetContent, apiToggleSource } from '@/api/bookSource'
+import { apiGetBookDetail, apiGetCanonicalSources, apiGetChapters, apiGetContent, apiToggleSource } from '@/api/bookSource'
 import { apiUpdateReadingProgress } from '@/api/bookshelf'
 import { apiReadingHeartbeat, apiStartReadingSession } from '@/api/reading'
 import { apiAddFavorite, apiCheckFavorited } from '@/api/favorite'
@@ -232,6 +244,7 @@ const bookIntro   = computed(() => route.query.intro || '')
 const initChapterUrl   = computed(() => route.query.chapterUrl)
 const initChapterIndex = computed(() => parseInt(route.query.chapterIndex) || 0)
 const canonicalBookId = computed(() => route.query.canonicalBookId || '')
+const canSwitchSource = computed(() => Boolean(sourceId.value && bookUrl.value))
 
 // ─── 章节数据 ─────────────────────────────────────────────────
 const chapters     = ref([])
@@ -306,10 +319,12 @@ function setBg(v)         { bgKey.value = v;      localStorage.setItem('reader_b
 // ─── UI 显示控制 ──────────────────────────────────────────────
 const uiVisible = ref(true)
 const atTop     = ref(true)
+const userHasScrolled = ref(false)
 const settingsOpen = ref(false)
 const tocOpen      = ref(false)
 const bookmarkOpen = ref(false)
 const sourceSwitchOpen = ref(false)
+const sourceSwitchLoading = ref(false)
 const sourceSwitching = ref(false)
 const sourceSwitchMessage = ref('')
 const readableSources = ref([])
@@ -370,19 +385,36 @@ function normalizedChapterTitle(value) {
 
 async function openSourceSwitch() {
   sourceSwitchMessage.value = ''
+  readableSources.value = []
   sourceSwitchOpen.value = true
+  sourceSwitchLoading.value = true
   try {
-    const aggregate = await apiGetCanonicalSources(canonicalBookId.value)
+    // Older reader links may not carry the canonical id. Recover it from the
+    // current source detail before requesting the aggregated source list.
+    let aggregateId = canonicalBookId.value
+    if (!aggregateId && sourceId.value && bookUrl.value) {
+      const detail = await apiGetBookDetail(sourceId.value, bookUrl.value)
+      aggregateId = detail?.canonicalBookId || ''
+      if (aggregateId) {
+        await router.replace({ query: { ...route.query, canonicalBookId: String(aggregateId) } })
+      }
+    }
+    if (!aggregateId) {
+      sourceSwitchMessage.value = '当前阅读链接缺少作品聚合信息，无法加载可切换书源。请从聚合搜索或书架重新打开。'
+      return
+    }
+    const aggregate = await apiGetCanonicalSources(aggregateId)
     readableSources.value = (aggregate?.sources ?? []).filter(source => source.sourceId && source.bookUrl)
   } catch (error) {
     sourceSwitchMessage.value = error.message || '暂时无法读取可用书源。'
+  } finally {
+    sourceSwitchLoading.value = false
   }
 }
 
 async function switchSource(source) {
   if (!source?.sourceId || !source.bookUrl || sourceSwitching.value) return
   const current = chapters.value[currentIndex.value]
-  if (!current) return
   sourceSwitching.value = true
   sourceSwitchMessage.value = ''
   try {
@@ -391,7 +423,10 @@ async function switchSource(source) {
       sourceSwitchMessage.value = '新书源暂无可读章节，未切换。'
       return
     }
-    const exactIndex = candidateChapters.findIndex(chapter => normalizedChapterTitle(chapter.chapterName) === normalizedChapterTitle(current.chapterName))
+    const currentTitle = current?.chapterName || ''
+    const exactIndex = currentTitle
+      ? candidateChapters.findIndex(chapter => normalizedChapterTitle(chapter.chapterName) === normalizedChapterTitle(currentTitle))
+      : -1
     const targetIndex = exactIndex >= 0 ? exactIndex : 0
     const target = candidateChapters[targetIndex]
     await router.replace({ query: { ...route.query, sourceId: String(source.sourceId), sourceName: source.sourceName || '', bookUrl: source.bookUrl, chapterUrl: target.chapterUrl, chapterIndex: String(targetIndex) } })
@@ -401,6 +436,10 @@ async function switchSource(source) {
     currentIndex.value = targetIndex
     lastReportedChapter = -1
     await loadChapterContent(targetIndex)
+    await nextTick()
+    // Query-only navigation no longer resets scroll globally, so explicitly
+    // position the newly loaded source at its selected chapter.
+    window.scrollTo({ top: 0, behavior: 'auto' })
     sourceSwitchOpen.value = false
     show(exactIndex >= 0
       ? `已切换至${source.sourceName || '新书源'}并定位到当前章节`
@@ -430,6 +469,7 @@ async function disableSource(source) {
 }
 
 // ─── DOM refs ─────────────────────────────────────────────────
+const contentEl      = ref(null)
 const bottomTrigger = ref(null)
 const topTrigger    = ref(null)
 const tocListEl     = ref(null)
@@ -437,6 +477,7 @@ let observer    = null
 let topObserver = null
 const chapterChunkRefs = new Map()
 let chapterSyncRaf = 0
+let pendingJumpIndex = null
 
 function setChapterChunkRef(el, chapterUrl) {
   if (!chapterUrl) return
@@ -526,14 +567,20 @@ function formatContent(raw) {
 
 // ─── 加载章节内容 ─────────────────────────────────────────────
 // isPreload=true 时不再触发下一级预加载，防止级联
-async function loadChapterContent(idx, isPreload = false) {
+async function loadChapterContent(idx, isPreload = false, force = false, allowPreload = true, prepend = false) {
   if (idx < 0 || idx >= chapters.value.length) return
   const ch = chapters.value[idx]
   const existing = loadedChunks.value.find(c => c.chapterUrl === ch.chapterUrl)
-  if (existing) return
+  if (existing && !force) return
 
-  const chunk = { chapterIndex: idx, chapterName: ch.chapterName, chapterUrl: ch.chapterUrl, html: '', loading: true, error: '' }
-  loadedChunks.value.push(chunk)
+  const chunk = existing || { chapterIndex: idx, chapterName: ch.chapterName, chapterUrl: ch.chapterUrl, html: '', loading: true, error: '' }
+  chunk.loading = true
+  chunk.error = ''
+  chunk.html = ''
+  if (!existing) {
+    if (prepend) loadedChunks.value.unshift(chunk)
+    else loadedChunks.value.push(chunk)
+  }
 
   try {
     const res = await apiGetContent(sourceId.value, ch.chapterUrl, bookUrl.value, idx, canonicalBookId.value || undefined)
@@ -545,13 +592,31 @@ async function loadChapterContent(idx, isPreload = false) {
       // 上报阅读进度（仅主动加载才上报）
       reportChapterProgress(idx)
     }
-    if (!isPreload) {
+    if (!isPreload && allowPreload) {
       ensurePreloadWindow(idx)
     }
   } catch (e) {
     chunk.loading = false
     chunk.error = e.message
   }
+}
+
+function friendlyChapterError(error) {
+  const message = String(error || '')
+  if (/reset|timed out|timeout|超时|连接重置/i.test(message)) {
+    return '当前书源连接被中断或响应超时，请稍后再试。'
+  }
+  if (/HTTP\s*4\d\d|HTTP\s*5\d\d|请求失败/i.test(message)) {
+    return '当前书源暂时返回异常，重新加载或切换其他书源通常可以恢复。'
+  }
+  return '书源暂时没有返回可读取的正文，请重新加载本章。'
+}
+
+async function retryChapterContent(chunk) {
+  if (!chunk || chunk.loading) return
+  const idx = chapters.value.findIndex(chapter => chapter.chapterUrl === chunk.chapterUrl)
+  if (idx < 0) return
+  await loadChapterContent(idx, false, true)
 }
 
 function reportChapterProgress(idx) {
@@ -580,6 +645,17 @@ function ensurePreloadWindow(centerIdx) {
   for (let idx = centerIdx + 1; idx <= limit; idx++) {
     loadChapterContent(idx, true)
   }
+}
+
+// Prime the small backwards context window without changing the active
+// chapter. These chunks are context/cache only; the reader remains anchored
+// to the chapter selected by the user.
+async function ensurePreviousCache(centerIdx) {
+  const first = Math.max(0, centerIdx - 3)
+  const indexes = []
+  for (let idx = centerIdx - 1; idx >= first; idx--) indexes.push(idx)
+  await Promise.all(indexes.map(idx => loadChapterContent(idx, true, false, false, true)))
+  loadedChunks.value.sort((a, b) => a.chapterIndex - b.chapterIndex)
 }
 
 // ─── 加载上一章 ───────────────────────────────────────────────
@@ -617,9 +693,13 @@ function setupTopObserver() {
   if (!topTrigger.value) return
   topObserver = new IntersectionObserver(async (entries) => {
     if (!entries[0].isIntersecting) return
+    // The trigger is visible immediately when opening a deep-linked chapter.
+    // Wait for an actual user scroll so initialization or a failed chapter
+    // cannot cascade backwards to chapter one.
+    if (!userHasScrolled.value || window.scrollY > 80) return
     if (loadingPrev.value) return
     const firstChunk = loadedChunks.value[0]
-    if (!firstChunk) return
+    if (!firstChunk || firstChunk.loading || firstChunk.error) return
     const firstIdx = chapters.value.findIndex(c => c.chapterUrl === firstChunk.chapterUrl)
     if (firstIdx <= 0) return
     await loadPrevChapter()
@@ -647,17 +727,59 @@ function setupBottomObserver() {
 // ─── 跳转到指定章节 ───────────────────────────────────────────
 async function jumpToChapter(idx) {
   if (idx < 0 || idx >= chapters.value.length) return
-  loadedChunks.value = []
-  noMoreChapters.value = false
+  const targetChapter = chapters.value[idx]
+  if (!targetChapter?.chapterUrl) return
+  pendingJumpIndex = idx
+
+  // A chapter-list jump can span a large distance. Keep the selected chapter,
+  // its three predecessors, and only the configured forward preload window.
+  const firstKeptIndex = Math.max(0, idx - 3)
+  const lastKeptIndex = Math.min(chapters.value.length - 1, idx + preloadCount.value)
+  loadedChunks.value = loadedChunks.value
+    .filter(chunk => chunk.chapterIndex >= firstKeptIndex && chunk.chapterIndex <= lastKeptIndex)
+    .sort((a, b) => a.chapterIndex - b.chapterIndex)
+  const existing = loadedChunks.value.find(chunk => chunk.chapterUrl === targetChapter.chapterUrl)
   currentIndex.value = idx
-  await loadChapterContent(idx)
+  // Keep the chapter cache when navigating. Only fetch a chapter that has not
+  // been loaded yet, or retry one that previously failed.
+  if (!existing || existing.error) {
+    await loadChapterContent(idx, false, Boolean(existing?.error), false)
+  }
+  await ensurePreviousCache(idx)
+  const targetChunk = loadedChunks.value.find(chunk => chunk.chapterUrl === targetChapter.chapterUrl)
+  if (targetChunk && !targetChunk.error) ensurePreloadWindow(idx)
+  noMoreChapters.value = idx >= chapters.value.length - 1
   await nextTick()
-  syncCurrentChapterFromView(true)
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  // Prepending the context window can require another render pass before the
+  // target ref is available. Wait once more so a jump never lands on the first
+  // cached predecessor by accident.
+  await nextTick()
+  reportChapterProgress(idx)
+  const targetElement = chapterChunkRefs.get(targetChapter.chapterUrl)
+    || contentEl.value?.querySelector(`[data-chapter-index="${idx}"]`)
+  if (targetElement) {
+    positionChapterElement(targetElement)
+  }
+  // Do not let the scroll synchronizer reinterpret the preceding cache as the
+  // active chapter during the frame in which the jump is applied.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const element = chapterChunkRefs.get(targetChapter.chapterUrl)
+      || contentEl.value?.querySelector(`[data-chapter-index="${idx}"]`)
+    if (element) positionChapterElement(element)
+    if (pendingJumpIndex === idx) pendingJumpIndex = null
+  }))
+}
+
+function positionChapterElement(element) {
+  // Use the document coordinate rather than scrollIntoView's nearest-container
+  // heuristics; the reader scrolls on the window and has a fixed top bar.
+  const targetTop = element.getBoundingClientRect().top + window.scrollY - 60
+  window.scrollTo({ top: Math.max(0, targetTop), behavior: 'auto' })
 }
 
 function syncCurrentChapterFromView(force = false) {
   if (initialLoading.value || !loadedChunks.value.length) return
+  if (pendingJumpIndex !== null) return
   const anchor = 96
   let activeIdx = currentIndex.value
   for (const chunk of loadedChunks.value) {
@@ -688,6 +810,7 @@ function scheduleChapterSync() {
 // ─── 滚动监听 ─────────────────────────────────────────────────
 function onScroll() {
   atTop.value = window.scrollY < 60
+  if (window.scrollY > 80) userHasScrolled.value = true
   scheduleChapterSync()
 }
 
@@ -728,11 +851,18 @@ onMounted(async () => {
   }
   startIdx = Math.max(0, Math.min(startIdx, chapters.value.length - 1))
   currentIndex.value = startIdx
+  // Build the initial context window while the loading view is still shown,
+  // so inserting earlier chapters cannot move the reader away from startIdx.
+  await loadChapterContent(startIdx, false, false, false)
+  await ensurePreviousCache(startIdx)
+  const initialChunk = loadedChunks.value.find(chunk => chunk.chapterUrl === chapters.value[startIdx]?.chapterUrl)
+  if (initialChunk && !initialChunk.error) ensurePreloadWindow(startIdx)
   initialLoading.value = false
-
-  await loadChapterContent(startIdx)
   await nextTick()
-  syncCurrentChapterFromView(true)
+  reportChapterProgress(startIdx)
+  const initialTarget = chapterChunkRefs.get(chapters.value[startIdx]?.chapterUrl)
+    || contentEl.value?.querySelector(`[data-chapter-index="${startIdx}"]`)
+  if (initialTarget) positionChapterElement(initialTarget)
   setupBottomObserver()
   setupTopObserver()
 
@@ -767,7 +897,7 @@ onUnmounted(() => {
 .bg-rice  { --reader-bg: #f5f0e8; --reader-ink: #3a3228; background: var(--reader-bg); color: var(--reader-ink); }
 .bg-green { --reader-bg: #e8f0e8; --reader-ink: #2a3a2a; background: var(--reader-bg); color: var(--reader-ink); }
 .bg-dark  { --reader-bg: #1a1a1a; --reader-ink: #f5f5f5; background: var(--reader-bg); color: var(--reader-ink); }
-.source-switch-panel { max-width:420px; }.source-switch-tip { margin:12px 16px; color:var(--ink-3); font-size:.8rem; line-height:1.5; }.source-switch-list { flex:1; min-height:0; overflow-y:auto; padding:0 12px 12px; }.source-reader-row { display:flex; flex:none; width:100%; margin:0 0 8px; border:1px solid var(--paper-3); border-radius:10px; overflow:hidden; background:var(--paper-1); }.source-reader-row.active { border-color:#739665; background:#e8f0dd; }.source-reader-option { display:grid; flex:1; min-width:0; gap:4px; border:0; padding:10px 12px; color:var(--ink-2); background:transparent; text-align:left; cursor:pointer; font:inherit; }.source-reader-option:disabled,.source-disable-btn:disabled { cursor:wait; opacity:.65; }.source-reader-option b { font-size:.86rem; }.source-reader-option small { overflow:hidden; color:var(--ink-4); font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }.source-disable-btn { flex:0 0 auto; border:0; border-left:1px solid var(--paper-3); padding:0 11px; color:#9a4d42; background:rgba(255,255,255,.42); cursor:pointer; font:inherit; font-size:.72rem; font-weight:700; }.source-disable-btn:hover:not(:disabled) { background:#fff0ec; }
+.source-switch-panel { max-width:420px; }.source-switch-tip { margin:12px 16px; color:var(--ink-3); font-size:.8rem; line-height:1.5; }.source-switch-empty { margin:8px 16px 16px; padding:24px 12px; border:1px dashed var(--paper-3); border-radius:10px; color:var(--ink-3); font-size:.82rem; text-align:center; }.source-switch-list { flex:1; min-height:0; overflow-y:auto; padding:0 12px 12px; }.source-reader-row { display:flex; flex:none; width:100%; margin:0 0 8px; border:1px solid var(--paper-3); border-radius:10px; overflow:hidden; background:var(--paper-1); }.source-reader-row.active { border-color:#739665; background:#e8f0dd; }.source-reader-option { display:grid; flex:1; min-width:0; gap:4px; border:0; padding:10px 12px; color:var(--ink-2); background:transparent; text-align:left; cursor:pointer; font:inherit; }.source-reader-option:disabled,.source-disable-btn:disabled { cursor:wait; opacity:.65; }.source-reader-option b { font-size:.86rem; }.source-reader-option small { overflow:hidden; color:var(--ink-4); font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }.source-disable-btn { flex:0 0 auto; border:0; border-left:1px solid var(--paper-3); padding:0 11px; color:#9a4d42; background:rgba(255,255,255,.42); cursor:pointer; font:inherit; font-size:.72rem; font-weight:700; }.source-disable-btn:hover:not(:disabled) { background:#fff0ec; }
 
 /* ── 顶部栏 ── */
 .reader-topbar {
@@ -842,7 +972,16 @@ onUnmounted(() => {
 .chunk-loading, .chunk-error {
   text-align: center; padding: 20px; font-size: 0.875rem; opacity: 0.6;
 }
-.chunk-error { color: #ef4444; }
+.chunk-error { display:flex; flex-direction:column; align-items:center; gap:7px; max-width:520px; margin:28px auto; padding:22px 24px; border:1px solid rgba(180,63,45,.28); border-radius:14px; color:#8f3c31; background:rgba(255,241,236,.72); text-align:center; }
+.chunk-error strong { color:#7d3026; font-size:.95rem; }
+.chunk-error p { margin:0; color:#9a4a3f; font-size:.83rem; line-height:1.6; }
+.chunk-error small { color:#aa6b62; font-size:.72rem; line-height:1.5; }
+.chunk-error-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:6px; }
+.chunk-retry-btn,.chunk-source-btn { border:1px solid #b85b4b; border-radius:9px; padding:8px 13px; color:#fffaf7; background:#ae5544; cursor:pointer; font:inherit; font-size:.78rem; font-weight:700; }
+.chunk-source-btn { color:#8f3c31; background:transparent; }
+.chunk-retry-btn:hover:not(:disabled) { background:#984333; }
+.chunk-source-btn:hover { background:rgba(174,85,68,.1); }
+.chunk-retry-btn:disabled { cursor:wait; opacity:.65; }
 .bottom-trigger { height: 1px; }
 .no-more {
   text-align: center; padding: 32px; font-size: 0.875rem;
